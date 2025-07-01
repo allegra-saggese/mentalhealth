@@ -14,8 +14,13 @@ import pandas as pd
 
 # set directories
 db_base = os.path.expanduser("~/Dropbox/Mental")
-db_data = os.path.join(db_base, "/Data")
+db_data = os.path.join(db_base, "Data")
+db_me = os.path.join(db_base, "allegra-dropbox-copy")
 
 
 # import data
-file_path = os.path.join(db_base, "raw_data.csv")
+agg_file_path = os.path.join(db_me, "25-07-01-dta-copy.dta")
+df = pd.read_stata(agg_file_path, convert_categoricals=False)
+
+# review data 
+print(df.columns.tolist())
