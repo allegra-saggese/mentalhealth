@@ -24,3 +24,12 @@ df = pd.read_stata(agg_file_path, convert_categoricals=False)
 
 # review data 
 print(df.columns.tolist())
+
+# save colnames for excel
+col_types_df = pd.DataFrame({
+    'colname': df.columns,
+    'type'   : df.dtypes.astype(str).values
+})
+
+# write to CSV (with header row)
+col_types_df.to_csv("column_types.csv", index=False)
