@@ -16,6 +16,7 @@ import pandas as pd
 db_base = os.path.expanduser("~/Dropbox/Mental")
 db_data = os.path.join(db_base, "Data")
 db_me = os.path.join(db_base, "allegra-dropbox-copy")
+interim = os.path.join(db_me, "interim-data") # file for interim datasets or lists used across scripts 
 
 
 # import data
@@ -32,4 +33,23 @@ col_types_df = pd.DataFrame({
 })
 
 # write to CSV (with header row)
-col_types_df.to_csv("column_types.csv", index=False)
+path = os.path.join(interim, "column_types.csv")
+col_types_df.to_csv(path, index=False)
+
+
+# check percentage of data availabiltiy 
+miss_pct_df = pd.DataFrame({
+    "col": df.columns,
+    "miss_pct": ((df.isna() | (df == "")).mean() * 100).round(2)
+})
+
+miss_pct_df = miss_pct_df.sort_values(by="miss_pct", ascending=False)
+print(miss_pct_df)
+
+# check for vars that contain no data 
+cols_all_missing = miss_pct_df.loc[miss_pct_df["miss_pct"] == 100, "col"].tolist()
+print(cols_all_missing)
+len(cols_all_missing)
+
+colpath = os.path.join(interim, "cols_all_missing.csv")
+pd.Series(cols_all_missing, name="col").to_csv(colpath, index=False)
