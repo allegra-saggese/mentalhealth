@@ -53,3 +53,11 @@ len(cols_all_missing)
 
 colpath = os.path.join(interim, "cols_all_missing.csv")
 pd.Series(cols_all_missing, name="col").to_csv(colpath, index=False)
+
+
+# FOR CODEBOOK - checking ranges 
+df["fips"].max()
+df["fips"].min()
+
+df["SURVEY_YEAR"].max()
+df["SURVEY_YEAR"].min()
