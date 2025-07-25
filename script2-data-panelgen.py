@@ -42,13 +42,16 @@ test_df_for_iteration.to_csv(save_path, index=False)
 
 print("File exists:", os.path.exists(save_path)) # check it worked 
 
+
+
 ## ITERATION
 
 # start by dropping sub-group rows
-df_totals = df_sorted[df_sorted["aggregation_type"] == "TOTALS"].copy()
+df_totals = df[df["aggregation_type"] != "DEMOGRAPHICS"].copy()
+
 
 # create new years
-new_years = [2003, 2004, 2005, 2006, 2013, 2014, 2015, 2016]
+new_years = [2003, 2004, 2005, 2006, 2008, 2009, 2010, 2011, 2013, 2014, 2015, 2016]
 fips_list = df_totals["FIPS"].dropna().unique()
 
 new_rows = pd.DataFrame(
@@ -77,7 +80,9 @@ print(new_rows.dtypes["FIPS"])
 
 # Subset for base years
 base_2002 = df_totals[df_totals["year"] == 2002][["FIPS"] + cols_to_copy].copy()
+base_2007 = df_totals[df_totals["year"] == 2007][["FIPS"] + cols_to_copy].copy()
 base_2012 = df_totals[df_totals["year"] == 2012][["FIPS"] + cols_to_copy].copy()
+
 
 # Filter new rows
 new_rows_03_06 = new_rows[new_rows["year"].isin([2003, 2004, 2005, 2006])].copy()
@@ -95,8 +100,47 @@ filled_03_06 = new_rows_03_06.merge(
     base_2002, on="FIPS", how="left", indicator=True
 )
 
-# MERGE FAIL CHECK HERE 
+filled_13_16 = new_rows_13_16.merge(
+    base_2012, on="FIPS", how="left", indicator=True
+)
+
+# checking that the merge went through 
 print(filled_03_06["_merge"].value_counts())
+print(filled_13_16["_merge"].value_counts())
+print(filled_13_16.head(50))
+
+
+# checking if the whole merge failed bc head is yielding NaNs
+def percent_missing_vs_filled(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a DataFrame with, for each column in `df`:
+      - missing_pct:    percentage of NA values
+      - filled_pct:     percentage of non-NA (numeric) values
+    """
+    # total rows
+    total = len(df)
+
+    # count missing per column
+    missing_count = df.isna().sum()
+
+    # compute percentages
+    missing_pct = missing_count / total * 100
+    filled_pct = 100 - missing_pct
+
+    # assemble summary
+    summary = pd.DataFrame({
+        'missing_pct': missing_pct,
+        'filled_pct':  filled_pct
+    })
+
+    return summary
+
+# about a 50% match - seems OK - no other way to match (only FIPS)
+percent_missing_vs_filled(filled_03_06)
+percent_missing_vs_filled(filled_13_16)
+
+
+
 
 
 

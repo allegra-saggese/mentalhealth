@@ -61,3 +61,11 @@ df["fips"].min()
 
 df["SURVEY_YEAR"].max()
 df["SURVEY_YEAR"].min()
+
+
+# before merge - lets check completeness of CAIFO data 
+# across current panel structure - its very low (17.5%), lets check collapsed 
+
+
+
+
