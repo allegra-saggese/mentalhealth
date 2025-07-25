@@ -165,6 +165,17 @@ df_cty_yr_r_s.drop(columns=full_na_2, inplace=True)
 # define groups of vars 
 print(df_cty_yr.columns.tolist())
 
+cols1 = set(df_cty_yr.columns)
+cols2 = set(df_cty_yr_r_s.columns)
+
+# columns in df1 but not in df2
+only_in_df1 = cols1 - cols2
+print("In df1 not in df2:", only_in_df1)
+
+# columns in df2 but not in df1
+only_in_df2 = cols2 - cols1
+print("In df2 not in df1:", only_in_df2)
+
 CAIFO_vars = ['all_animal_OP', 'aqua_OP', 'cattle_HEAD_INV', 'cattle_OP_INV', 
          'cattle_OP_SALES', 'cattle_HEAD_SALES', 'broiler_chickens_HEAD_INV', 
          'broiler_chickens_OP_INV', 'broiler_chickens_OP_SALES', 
@@ -197,7 +208,78 @@ crime_vars = ['aggravated_assault', 'driving_under_the_influence',
          'rape', 'sexual_assault_with_an_object', 'simple_assault', 
          'human_trafficking']
 
-health_agg_vars = ['adult_obesity_denom', 'adult_obesity_numer', 
+
+# use without denominator to cut run time 
+health_agg_vars = ['adult_obesity_numer', 'adult_obesity_raw', 
+                   'adult_smoking_numer', 'adult_smoking_raw', 
+                   'air_pollution_raw',
+                   'excessive_drinking_numer', 'excessive_drinking_raw', 
+                   'frequent_mental_distress_raw', 'frequent_phys_distress_raw', 
+                   'injury_deaths_aian_', 
+                   'injury_deaths_asipacisl', 'injury_deaths_black_','injury_deaths_hispanic_', 
+                   'injury_deaths_numer', 'injury_deaths_raw', 
+                   'injury_deaths_white_', 'med_house_inc_aian_',
+                   'poor_mental_health_days_raw',
+                   'poor_or_fair_health_numer', 'poor_or_fair_health_raw', 
+                   'poor_phys_health_days_raw', 'prem_ageadj_aian_', 
+                   'prem_ageadj_asipacisl', 'prem_ageadj_black_', 
+                   'prem_ageadj_denom', 'prem_ageadj_hispanic_', 
+                   'prem_ageadj_numer', 'prem_ageadj_raw',
+                   'prem_ageadj_white_', 'prem_death_aian_',
+                   'prem_death_asipacisl', 'prem_death_black_','prem_death_hispanic_', 
+                   'prem_death_numer', 'prem_death_raw', 'prem_death_white_', 
+                    'suicides_aian_',
+                   'suicides_asipacisl', 'suicides_black_','suicides_hispanic_', 'suicides_numer', 
+                   'suicides_raw', 'suicides_white_','violent_crime_numer', 
+                   'violent_crime_raw',
+                   'alc_driving_deaths_numer', 'alc_driving_deaths_raw']
+
+
+
+# not present in race/sex cross-section
+droplist = ['injury_deaths_aian_', 'injury_deaths_asipacisl', 'injury_deaths_black_', 
+ 'injury_deaths_hispanic_', 'injury_deaths_white_', 'med_house_inc_aian_', 
+ 'med_house_inc_asian_', 'prem_ageadj_aian_', 'prem_ageadj_asipacisl', 
+ 'prem_death_aian_', 'prem_death_asipacisl', 'suicides_aian_', 
+ 'suicides_asipacisl', 'suicides_black_', 'suicides_denom', 
+ 'suicides_hispanic_', 'suicides_numer', 'suicides_raw', 'suicides_white_', 
+ '_merge', 'prem_ageadj_asipacisl', 'suicides_white_', 'prem_death_asipacisl',
+ 'injury_deaths_hispanic_', 'injury_deaths_black_', 'med_house_inc_asian_', 
+ 'suicides_denom', 'prem_ageadj_aian_', 'suicides_numer', 
+ 'injury_deaths_asipacisl', 'med_house_inc_aian_', '_merge', 
+ 'suicides_asipacisl', 'suicides_hispanic_', 'suicides_raw', 
+ 'injury_deaths_aian_', 'injury_deaths_white_', 'suicides_aian_', 
+ 'prem_death_aian_', 'suicides_black_']
+
+health_sub_vars = [x for x in health_agg_vars if x not in droplist]
+
+
+socioecon_vars = ['high_school_graduation_numer', 
+                  'high_school_graduation_raw', 'inc_inequality_numer', 
+                  'inc_inequality_raw','unemployment_numer', 'unemployment_raw', 
+                  'severe_housing_cost_numer', 
+                  'severe_housing_cost_raw', 
+                  'severe_housing_problems_numer', 
+                  'severe_housing_problems_raw','some_college_numer', 
+                  'some_college_raw', 'air_pollution_days_raw', 
+                  'air_pollution_ozone_days_raw', 'child_in_pov_black_', 
+                  'child_in_pov_hispanic_', 'child_in_pov_numer', 
+                  'child_in_pov_raw', 'child_in_pov_white_', 
+                  'drinking_water_violations_raw',
+                  'med_house_inc_asian_', 'med_house_inc_black_', 
+                  'med_house_inc_hispanic_', 'med_house_inc_raw', 
+                  'med_house_inc_white_',
+                  'mental_health_providers_numer', 
+                  'mental_health_providers_raw',
+                  'perc_high_housing_costs']
+
+soc_sub_vars = [x for x in socioecon_vars if x not in droplist]
+
+
+
+
+#### WITH DENOM --- IGNORE --- NOT USEFUL FOR PLOTS
+health_agg_vars_w_denom = ['adult_obesity_denom', 'adult_obesity_numer', 
                    'adult_obesity_raw', 'adult_smoking_denom', 
                    'adult_smoking_numer', 'adult_smoking_raw', 
                    'air_pollution_raw',
@@ -229,20 +311,8 @@ health_agg_vars = ['adult_obesity_denom', 'adult_obesity_numer',
                    'violent_crime_raw', 'alc_driving_deaths_denom', 
                    'alc_driving_deaths_numer', 'alc_driving_deaths_raw']
 
-# not present in race/sex cross-section
-droplist = ['injury_deaths_aian_', 'injury_deaths_asipacisl', 'injury_deaths_black_', 
- 'injury_deaths_hispanic_', 'injury_deaths_white_', 'med_house_inc_aian_', 
- 'med_house_inc_asian_', 'prem_ageadj_aian_', 'prem_ageadj_asipacisl', 
- 'prem_death_aian_', 'prem_death_asipacisl', 'suicides_aian_', 
- 'suicides_asipacisl', 'suicides_black_', 'suicides_denom', 
- 'suicides_hispanic_', 'suicides_numer', 'suicides_raw', 'suicides_white_', 
- '_merge']
 
-health_sub_vars = [x for x in health_agg_vars if x not in droplist]
-
-
-
-socioecon_vars = ['high_school_graduation_denom', 'high_school_graduation_numer', 
+socioecon_vars_w_denom = ['high_school_graduation_denom', 'high_school_graduation_numer', 
                   'high_school_graduation_raw', 
                   'inc_inequality_denom', 'inc_inequality_numer', 
                   'inc_inequality_raw', 'unemployment_denom', 
@@ -263,6 +333,7 @@ socioecon_vars = ['high_school_graduation_denom', 'high_school_graduation_numer'
                   'mental_health_providers_numer', 
                   'mental_health_providers_raw',
                   'perc_high_housing_costs']
+
 
 
 # create the plots for agg data 
@@ -287,7 +358,8 @@ point_colors  = df_cty_yr['year'].map(year_to_color)
 
 
 # clear out manually unused stuff
-del new_rows_03_06, new_rows_08_11, new_rows_13_16, new_rows, filled_03_06, filled_08_11, filled_13_16,
+#del new_rows_03_06, new_rows_08_11, new_rows_13_16, new_rows, filled_03_06, filled_08_11, 
+#filled_13_16,
 
 
 # define loop and store output 
@@ -330,18 +402,27 @@ for x_vars, y_vars, combo_name in combos:
     
     
 # define loop for the dissagregated cross section (race / sex)
-
 combo_name_small = [
-    (socioecon_vars,   health_agg_vars, 'Socioeconomic v Health'),
-    (socioecon_vars,   crime_vars,      'Socioeconomic v Crime' ),
-    (socioecon_vars,   CAIFO_vars,      'Socioeconomic v CAIFO'),
+    (soc_sub_vars,     health_sub_vars, 'Socioeconomic v Health'),
+    (soc_sub_vars,     crime_vars,      'Socioeconomic v Crime' ),
+    (soc_sub_vars,     CAIFO_vars,      'Socioeconomic v CAIFO'),
     (health_sub_vars,  crime_vars,      'Health v Crime'),
     (health_sub_vars,  CAIFO_vars,      'Health v CAIFO'),
     (crime_vars,       CAIFO_vars,      'Crime v CAIFO')
 ]
 
+
+# change color before to avoid loop weight
+years = np.sort(df_cty_yr_r_s['year'].unique())
+cmap = cm.get_cmap('tab10', len(years))
+year_to_color = dict(zip(years, cmap.colors))
+point_colors  = df_cty_yr_r_s['year'].map(year_to_color)
+
+year_to_color # check the color for the interpretation
+
+# run loop over the demo vars 
 for x_vars, y_vars, combo_name in combo_name_small:
-    pdf_filename2 = f"{today}_{combo_name_}_2x2_r_s.pdf"
+    pdf_filename2 = f"{today}_{combo_name}_2x2_r_s.pdf"
     pdf_path2     = os.path.join(db_scatter, pdf_filename2)
 
     # build all (x,y) pairs and number of pages
@@ -358,7 +439,7 @@ for x_vars, y_vars, combo_name in combo_name_small:
 
             for ax, (x, y) in zip(axes_flat, chunk):
                 ax.scatter(
-                    df[x], df[y],
+                    df_cty_yr_r_s[x],  df_cty_yr_r_s[y],
                     c=point_colors,    # fast, precomputed
                     s=10,              # small points
                     rasterized=True    # speeds up PDF output
@@ -374,3 +455,4 @@ for x_vars, y_vars, combo_name in combo_name_small:
             plt.close(fig)
 
     print(f"Saved {len(pairs)} plots ({n_pages} pages) → {pdf_path}")
+    
