@@ -11,6 +11,12 @@ Created on Mon Jun 30 18:55:21 2025
 # load packages
 import os
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+# load functions
+from functions import * 
 
 # set directories
 db_base = os.path.expanduser("~/Dropbox/Mental")
@@ -65,6 +71,16 @@ df["SURVEY_YEAR"].min()
 
 # before merge - lets check completeness of CAIFO data 
 # across current panel structure - its very low (17.5%), lets check collapsed 
+
+df_totals = df[
+    (df["aggregation_type"] != "DEMOGRAPHICS") &
+    (df["year"]               != 1999)
+].copy()
+
+bob = percent_missing_vs_filled(df_totals) # now missing is about 21% 
+# check for only relevant years -- 2007, 2012
+
+
 
 
 
