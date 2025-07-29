@@ -153,12 +153,17 @@ for a in alphas:
 residual_df = pd.DataFrame(residuals)
 residual_df.index = y_test.index
 
-plt.figure(figsize=(10, 6))
-sns.heatmap(residual_df.T, cmap='coolwarm', center=0)
-plt.title('Prediction Residuals Across Alphas')
-plt.xlabel('Sample Index')
-plt.ylabel('Alpha')
+residual_df_melted = residual_df.stack().reset_index()
+residual_df_melted.columns = ['index', 'alpha', 'residual']
+
+sns.boxplot(data=residual_df_melted, x='alpha', y='residual')
+plt.title('Residual Distribution by Alpha')
+plt.xlabel('Alpha')
+plt.ylabel('Residual')
+plt.axhline(0, color='black', linestyle='--')
 plt.show()
+
+
 
 # NEXT:  create loop over sets of y to just automate the ridge run 
 
