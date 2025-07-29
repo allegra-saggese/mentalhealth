@@ -11,8 +11,7 @@ Created on Fri Jul 25 11:19:14 2025
 # load packages
 import os
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
+
 
 
 # data cleaning - checking missing percentages 
