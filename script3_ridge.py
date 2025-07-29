@@ -17,11 +17,9 @@ import sklearn
 print(sklearn.__version__)
 
 from sklearn.preprocessing import scale 
-from sklearn.linear_model import LassoCV, LinearRegression
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LassoCV, LinearRegression, Ridge, RidgeCV
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import RidgeCV
-
 
 # load data
 db_base = os.path.expanduser("~/Dropbox/Mental") # base for later
@@ -50,12 +48,42 @@ y = df_sub['simple_assault']
 
 # create race/sex interaction, and dummies for county and time fixed effects 
 X_interact = pd.get_dummies(df_sub['racesex'], drop_first=True) 
-fips_dummies = pd.get_dummies(df['fips'], drop_first=True)
-year_dummies = pd.get_dummies(df['year'], drop_first=True)
+fips_dummies = pd.get_dummies(df_sub['fips'], drop_first=True)
+year_dummies = pd.get_dummies(df_sub['year'], drop_first=True)
 
+
+### QA STOP ### note there is a lot of missing data - lets check 
+n_total = len(X)
+
+# Count missing per column
+missing_counts = X.isna().sum().sort_values(ascending=False)
+
+# Top 5 columns with most missing
+top5_missing = missing_counts.head(5)
+
+# Size after dropping missing rows
+X_dropped = X.dropna()
+n_dropped = len(X_dropped)
+
+print(f"Original rows: {n_total}")
+print(f"Rows after dropna: {n_dropped}")
+print("Top 5 columns losing the most rows:")
+print(top5_missing) # note these are missing all columns 
+
+# create threshold for imputation of missing data 
+row_thresh = int(0.1 * X.shape[1])  # must have at least 10% non-missing
+X_filtered = X[X.notna().sum(axis=1) >= row_thresh]
+
+col_mask = X_filtered.isna().mean() <= 0.9
+X_impute_subset = X_filtered.loc[:, col_mask]
+
+imp = SimpleImputer(strategy='mean')
+X_imputed = pd.DataFrame(imp.fit_transform(X_impute_subset),
+                         columns=X_impute_subset.columns,
+                         index=X_impute_subset.index)
 
 # split the data for training
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y.loc[X_imputed.index], test_size=0.2, random_state=42)
 
 # verify size 
 print(X_train.shape, X_test.shape)
