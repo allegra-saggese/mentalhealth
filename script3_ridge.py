@@ -37,16 +37,24 @@ df = pd.read_csv(rdfile)
 # drop to look at only the race/sex cross section 
 df_sub = df[df['aggregation_type'] == 'DEMOGRAPHICS'].copy()
 
-# running test on simple assault
+
+# drop non-numeric and non-encoded vars 
+uncoded_cols = ['racen', 'sexn', 'fipsracesex', 'dup', 'SURVEY_YEAR', 'FIPS',
+                'STATE', 'COUNTY', 'aggregation_type', 'sex_of_arrestee', 
+                'race_of_arrestee']
+df_sub = df_sub.drop(columns=uncoded_cols)
+
+# set test ridge on y = simple assault
 X = df_sub.drop(columns=['simple_assault'])
 y = df_sub['simple_assault']
 
+# create race/sex interaction, and dummies for county and time fixed effects 
 X_interact = pd.get_dummies(df_sub['racesex'], drop_first=True) 
 fips_dummies = pd.get_dummies(df['fips'], drop_first=True)
+year_dummies = pd.get_dummies(df['year'], drop_first=True)
 
-# drop non-numeric and non-encoded dummies 
 
-
+# split the data for training
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # verify size 
