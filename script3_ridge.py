@@ -11,6 +11,8 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 
 import sklearn
@@ -20,6 +22,8 @@ from sklearn.preprocessing import scale
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LassoCV, LinearRegression, Ridge, RidgeCV
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+
 
 # load data
 db_base = os.path.expanduser("~/Dropbox/Mental") # base for later
@@ -82,8 +86,13 @@ X_imputed = pd.DataFrame(imp.fit_transform(X_impute_subset),
                          columns=X_impute_subset.columns,
                          index=X_impute_subset.index)
 
+# drop missing
+valid_idx = y.loc[X_imputed.index].notna()
+X_final = X_imputed.loc[valid_idx]
+y_final = y.loc[X_imputed.index].loc[valid_idx]
+
 # split the data for training
-X_train, X_test, y_train, y_test = train_test_split(X_imputed, y.loc[X_imputed.index], test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X_final, y_final, test_size=0.2, random_state=42)
 
 # verify size 
 print(X_train.shape, X_test.shape)
@@ -92,35 +101,64 @@ print(X_train.shape, X_test.shape)
 ridge_model = Ridge()
 ridge_model.fit(X_train, y_train)
 
+# review outputs without alpha changes
+pd.Series(ridge_model.coef_, index=X_train.columns).sort_values(ascending=False)
+ridge_model.intercept_
+
+y_pred = ridge_model.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+print(f"MSE: {mse:.3f}, R²: {r2:.3f}")
+
+
 # 3: set shrinkage param and check against pre-programmed one
-
-alphas = [0.1, 1.0, 10.0, 100.0]
-ridge_cv_model = RidgeCV(alphas=alphas, store_cv_values=True)
-
-ridge_cv_model.fit(X_train, y_train)
+ridge_cv = RidgeCV(alphas=[0.1, 1, 10, 100])
+ridge_cv.fit(X_train, y_train)
 
 # compare / check best alpha 
 print(f"Optimal lambda: {ridge_cv_model.alpha_}")
 
-# 4: evaluate 
-
-y_pred = ridge_cv_model.predict(X_test) # test set 
+# 4: evaluate with set alphas
+y_pred2 = ridge_cv_model.predict(X_test) # test set 
 
 # Calculate MSE, RMSE, MAE, and R-squared
-mse = mean_squared_error(y_test, y_pred)
-rmse = mse ** 0.5
-mae = mean_absolute_error(y_test, y_pred)
-r2 = r2_score(y_test, y_pred)
+mse1 = mean_squared_error(y_test, y_pred2)
+rmse = mse1 ** 0.5
+mae = mean_absolute_error(y_test, y_pred2)
+r2 = r2_score(y_test, y_pred2)
 
 # Print eval metrics
-print(f"MSE: {mse}")
+print(f"MSE: {mse1}")
 print(f"RMSE: {rmse}")
 print(f"MAE: {mae}")
-print(f"R-squared: {r2}")
+print(f"R-squared: {r2}") 
 
+ridge_cv.predict(X_test)
+# takeaway - strong shrinkage = worse, keep alpha low, very different 
 
+# visualization of output 
+alphas = [0.01, 0.1, 1, 10, 100]
+models = {}
+residuals = {}
 
+for a in alphas:
+    model = Ridge(alpha=a)
+    model.fit(X_train, y_train)
+    y_pred_x = model.predict(X_test)
+    res = y_test - y_pred_x
+    models[a] = model
+    residuals[a] = res
+    
+# plot residuals 
+residual_df = pd.DataFrame(residuals)
+residual_df.index = y_test.index
 
+plt.figure(figsize=(10, 6))
+sns.heatmap(residual_df.T, cmap='coolwarm', center=0)
+plt.title('Prediction Residuals Across Alphas')
+plt.xlabel('Sample Index')
+plt.ylabel('Alpha')
+plt.show()
 
 # NEXT:  create loop over sets of y to just automate the ridge run 
 
