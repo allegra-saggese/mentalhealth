@@ -163,6 +163,25 @@ plt.ylabel('Residual')
 plt.axhline(0, color='black', linestyle='--')
 plt.show()
 
+# rank the coefficients
+coef_series = pd.Series(ridge_cv.coef_, index=X_train.columns)
+top50_vars = coef_series.abs().sort_values(ascending=False).head(10).index
+
+plot_df = X_train[top50_vars].copy()
+plot_df['simple_assault'] = y_train
+
+test_plot = sns.pairplot(plot_df, corner=True)
+test_plot.fig.set_size_inches(12, 12)  
+
+for ax in test_plot.axes.flatten():
+    if ax is not None:
+        ax.tick_params(axis='x', labelrotation=45, labelsize=6)
+        ax.tick_params(axis='y', labelrotation=0, labelsize=6)
+
+
+test_plot.savefig(os.path.join(db_base,"pairplot_top10.png"), dpi=300, bbox_inches='tight')
+plt.close()
+
 
 
 # NEXT:  create loop over sets of y to just automate the ridge run 
