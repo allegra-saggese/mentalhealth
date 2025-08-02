@@ -14,29 +14,15 @@ Created on Mon Jun 30 18:55:21 2025
 @author: allegrasaggese
 """
 
-# purpose - data review (primary, will not be used in modules)
-
-# load packages
-import os
-import pandas as pd
-from datetime import datetime
-import seaborn as sns
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-import time
-from matplotlib import cm
-from tqdm import tqdm
-import numpy as np
+# purpose (1) iterate the CAFO data to have annual figures instead of every 5 years
+# (2) create scatterplots for important pairwise matches
 
 
-# load functions
+# load packages, functions, databases 
+from packages import *
 from functions import * 
 
-# set directories
-db_base = os.path.expanduser("~/Dropbox/Mental")
-db_data = os.path.join(db_base, "Data")
-db_me = os.path.join(db_base, "allegra-dropbox-copy")
-interim = os.path.join(db_me, "interim-data") # file for interim datasets or lists used across scripts 
+# set additional directories
 db_scatter = os.path.join(db_me, "2025-scatterplots") # for saving scatterplots 
 
 

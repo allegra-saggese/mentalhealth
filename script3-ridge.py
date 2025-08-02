@@ -6,23 +6,12 @@ Created on Fri Jul 25 19:30:16 2025
 @author: allegrasaggese
 """
 
-# load relevant packages for ridge reg 
-import os
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+# purpose: perform ridge regression on 2023 aggregated data (note the data is 
+# out of date and will need to be updated), results from this should not be taken for interpretation! 
 
-
-
-import sklearn
-print(sklearn.__version__)
-
-from sklearn.preprocessing import scale 
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LassoCV, LinearRegression, Ridge, RidgeCV
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+# load packages, functions, databases 
+from packages import *
+from functions import * 
 
 
 # load data
@@ -31,9 +20,7 @@ rdfile = "~/Dropbox/Mental/Data/20250725_annual_CAIFO_df.csv"
 df = pd.read_csv(rdfile)
 
 
-
 # purpose: Ridge regression trial 1
-
 # 1: set cols for learning, split the data for one Y value 
 
 # drop to look at only the race/sex cross section 
