@@ -8,7 +8,7 @@ Created on Fri Jul 25 11:19:14 2025
 
 # purpose: useful functions across scripts 
 
-# load packages
+# load packages - think i can delete
 import os
 import pandas as pd
 

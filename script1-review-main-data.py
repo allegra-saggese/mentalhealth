@@ -8,21 +8,9 @@ Created on Mon Jun 30 18:55:21 2025
 
 # purpose - data review (primary, will not be used in modules)
 
-# load packages
-import os
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-
-# load functions
+# load packages, functions, databases 
+from packages import *
 from functions import * 
-
-# set directories
-db_base = os.path.expanduser("~/Dropbox/Mental")
-db_data = os.path.join(db_base, "Data")
-db_me = os.path.join(db_base, "allegra-dropbox-copy")
-interim = os.path.join(db_me, "interim-data") # file for interim datasets or lists used across scripts 
 
 
 # import data
