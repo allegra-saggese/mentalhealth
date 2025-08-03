@@ -10,6 +10,7 @@ Created on Sat Aug  2 13:14:43 2025
 import os
 import pandas as pd
 import numpy as np
+import glob
 
 # packages for timestamping files 
 import datetime as datetime
@@ -33,7 +34,7 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 
 
-# set directories for reuse 
+# set common directories 
 db_base = os.path.expanduser("~/Dropbox/Mental")
 db_data = os.path.join(db_base, "Data")
 db_me = os.path.join(db_base, "allegra-dropbox-copy")
