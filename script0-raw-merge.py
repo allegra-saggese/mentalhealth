@@ -79,7 +79,10 @@ col_presence = col_presence.sort_values(by="count", ascending=False)
 print(col_presence) # 2000-2020 data is in wide format, need to convert to long 
 
 # 1990s data - combine to make one census estimate
-
+df1990s = dfs[3]
+df1990s = df1990s.apply(pd.to_numeric, errors="coerce")
+cols_to_sum = [col for col in df1990s.columns if col.startswith("NH_") or col.startswith("H_")]
+df1990s["pop"] = df1990s[cols_to_sum].sum(axis=1)
 
 
 # 2000 data - wide to long with re
@@ -101,3 +104,5 @@ df2000_long["year"] = df2000_long["raw_year_col"].str.extract(r"(20\d{2})").asty
 
 # drop estimate for 2000 and 2010 (where we have base est, census data)
 df2000_long = df2000_long[~df2000_long["raw_year_col"].isin(["POPESTIMATE2000", "POPESTIMATE2010"])]
+
+# 2010 data
