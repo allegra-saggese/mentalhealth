@@ -9,6 +9,7 @@ Created on Wed Jul 30 10:03:00 2025
 # load packages and workspaces
 from packages import * 
 from collections import Counter
+import re
 
 
 # load alt functions
@@ -77,5 +78,26 @@ col_presence = col_presence.sort_values(by="count", ascending=False)
 
 print(col_presence) # 2000-2020 data is in wide format, need to convert to long 
 
+# 1990s data - combine to make one census estimate
 
 
+
+# 2000 data - wide to long with re
+df2000 = dfs[1]
+
+year_cols = [col for col in df2000.columns if re.search(r"20\d{2}$", col)]
+manual_cols = ["CENSUS2010POP"] # census pop not meeting the re.search method, manual add 
+year_cols = list(set(year_cols + manual_cols)) # combine and update
+
+df2000_long = pd.melt(
+    df2000,
+    id_vars=[col for col in df2000.columns if col not in year_cols],
+    value_vars=year_cols,
+    var_name="raw_year_col",
+    value_name="value"
+)
+
+df2000_long["year"] = df2000_long["raw_year_col"].str.extract(r"(20\d{2})").astype(int)
+
+# drop estimate for 2000 and 2010 (where we have base est, census data)
+df2000_long = df2000_long[~df2000_long["raw_year_col"].isin(["POPESTIMATE2000", "POPESTIMATE2010"])]
