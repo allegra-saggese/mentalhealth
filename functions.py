@@ -38,3 +38,27 @@ def percent_missing_vs_filled(df: pd.DataFrame) -> pd.DataFrame:
     })
 
     return summary
+
+
+# FIPS code generator from individual city - state cols 
+
+def generate_fips(df, state_col="state", city_col="city"):
+    # Pad state to 2 digits _ cities to 3 digits
+    df["state_padded"] = df[state_col].astype(str).str.zfill(2)
+    df["city_padded"] = df[city_col].astype(str).str.zfill(3)
+
+    # combine cols
+    df["FIPS_generated"] = df["state_padded"] + df["city_padded"]
+
+    # QA - Check all are 5 digits
+    invalid_fips = df[~df["FIPS_generated"].str.match(r"^\d{5}$")]
+    if not invalid_fips.empty:
+        print("Warning: Some FIPS codes are not 5 digits.")
+        print(invalid_fips[["FIPS_generated", state_col, city_col]])
+    else:
+        print("All FIPS_generated values are 5 digits.")
+
+    # drop temp columns
+    df.drop(columns=["state_padded", "city_padded"], inplace=True)
+
+    return df

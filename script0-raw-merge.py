@@ -78,14 +78,21 @@ col_presence = col_presence.sort_values(by="count", ascending=False)
 
 print(col_presence) # 2000-2020 data is in wide format, need to convert to long 
 
-# 1990s data - combine to make one census estimate
+### 1990s data - combine to make one census estimate
 df1990s = dfs[3]
 df1990s = df1990s.apply(pd.to_numeric, errors="coerce")
 cols_to_sum = [col for col in df1990s.columns if col.startswith("NH_") or col.startswith("H_")]
 df1990s["pop"] = df1990s[cols_to_sum].sum(axis=1)
 
+# drop demographic data
+demo_cols = [col for col in df1990s.columns if col.startswith("NH_") or col.startswith("H_")]
+df1990s.drop(columns=demo_cols, inplace=True)
 
-# 2000 data - wide to long with re
+# FIPS / YR / POPULATION -- need to merge with county/state names (from  FIPS data)
+
+
+
+### 2000 data - wide to long with re
 df2000 = dfs[1]
 
 year_cols = [col for col in df2000.columns if re.search(r"20\d{2}$", col)]
@@ -105,4 +112,36 @@ df2000_long["year"] = df2000_long["raw_year_col"].str.extract(r"(20\d{2})").asty
 # drop estimate for 2000 and 2010 (where we have base est, census data)
 df2000_long = df2000_long[~df2000_long["raw_year_col"].isin(["POPESTIMATE2000", "POPESTIMATE2010"])]
 
+# rename pop column, drop unneccessary cols, create FIPS code
+df2000_long = df2000_long.rename(columns={
+    "value": "population",
+})
+df2000_long = df2000_long.drop(columns=["raw_year_col", "SUMLEV"])
+generate_fips(df2000_long, state_col="STATE", city_col="COUNTY")
+
+df2000s = df2000_long
+
 # 2010 data
+df2010 = dfs[2] 
+
+id_cols = ["STATE", "COUNTY", "DIVISION", "REGION", "STNAME", "CTYNAME"]  # add any others you need
+cols_to_keep = id_cols + [col for col in df2010.columns if col.startswith("POPESTIMATE")]
+df2010 = df2010[cols_to_keep]
+
+years_c = [col for col in df2010.columns if re.search(r"20\d{2}$", col)]
+
+df2010_long = pd.melt(
+    df2010,
+    id_vars=[col for col in df2010.columns if col not in years_c],
+    value_vars=years_c,
+    var_name="raw_year_col",
+    value_name="value"
+)
+
+df2010_long["year"] = df2010_long["raw_year_col"].str.extract(r"(20\d{2})").astype(int)
+
+
+
+
+
+
