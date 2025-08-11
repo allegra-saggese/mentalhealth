@@ -109,11 +109,11 @@ fips_00_expanded = fips_00.merge(year_df, how="cross")
 fips_00_expanded = fips_00_expanded.reset_index(drop=True)
 
 # manual creation of the 1990 codes given the states similarities 
- fips_90 = fips_00
+fips_90 = fips_00
 # manual changes, REASON: see source data for differences from 1990 to 2000 census
- fips_90["fips"] = fips_90["fips"].replace(12025, 12086)
- fips_90["county_code"] = fips_90["county_code"].replace(025, 086)
- fips_90["county"] = fips_90["county"].replace("Miami-Dade County", "Dade County")
+fips_90["fips"] = fips_90["fips"].replace(12025, 12086)
+fips_90["county_code"] = fips_90["county_code"].replace(25, 86)
+fips_90["county"] = fips_90["county"].replace("Miami-Dade County", "Dade County")
 # add in counties that were merged/lost for the 2000 census 
 new_row1 = {
     "FIPS": 30113,
@@ -168,10 +168,39 @@ yrs3df = pd.DataFrame({"year": yrs3})
 fips_20_expanded = fips_20.merge(yrs3df, how="cross")
 fips_20_expanded = fips_20_expanded.reset_index(drop=True)
 
+# change county, state code colnames to ensure merge works 
+fips_90_expanded.columns.tolist()
+fips_90_expanded.drop(columns=["FIPS"], inplace=True) # empty col to drop
+
+fips_00_expanded.columns.tolist()
+fips_10_expanded.columns.tolist()
+fips_20_expanded.columns.tolist()
+
+# make lower case
+fips_10_expanded.columns = fips_10_expanded.columns.str.lower()
+fips_20_expanded.columns = fips_20_expanded.columns.str.lower()
+
+fips_10_expanded = fips_10_expanded.rename(columns={
+    "statefp": "state_code",
+    "countyfp": "county_code",
+    "countyname": "county",
+    "fips_generated": "fips"
+})
+
+fips_20_expanded = fips_20_expanded.rename(columns={
+    "statefp": "state_code",
+    "countyfp": "county_code",
+    "countyname": "county",
+    "fips_generated": "fips"
+})
+
 # combine all FIPS data 
 fips_annual_full = pd.concat([fips_90_expanded, fips_00_expanded, 
                               fips_10_expanded, fips_20_expanded],
                              axis=0, join="outer", ignore_index=True)
+
+# backfill missing state data by taking the assignment in other rows 
+# then export the data to CLEAN folder! 
 
 
 ## INVESTIGATE COLS across dataframes for patterns 
@@ -210,9 +239,13 @@ col_presence = pd.DataFrame.from_dict(col_counts, orient="index", columns=["coun
 col_presence = col_presence.reset_index().rename(columns={"index": "column"})
 col_presence = col_presence.sort_values(by="count", ascending=False)
 
-print(col_presence)
-# 2000-2020 data is in wide format, need to convert to long 
+print(col_presence) # 2000-2020 data is in wide format, need to convert to long 
 
+## CLEAN UP ENVIRO 
+del all_cols, all_columns, col_counts, col_lists, col_presence, comma_dfs, comma_files, common_cols, d, demo_cols, file_list, fips20, fips_00, fips_10    
+del fips_20, fips_90, fipsdfs, new_row1, new_row2, pipe_dfs, pipe_files, p, path
+del ws_dfs, ws_files
+del yrs0, yrs2, yrs0df, yrs2df, yrs3, yrs3df
 
 
 ## MAKE EACH DATA FRAME IN SAME FORMAT FOR THE MERGE
