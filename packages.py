@@ -15,7 +15,7 @@ import glob
 # packages for timestamping files 
 import datetime as datetime
 import time
-from datetime import datetime
+from datetime import date 
 
 # packages for visuals 
 import matplotlib.pyplot as plt

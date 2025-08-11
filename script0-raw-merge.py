@@ -199,8 +199,34 @@ fips_annual_full = pd.concat([fips_90_expanded, fips_00_expanded,
                               fips_10_expanded, fips_20_expanded],
                              axis=0, join="outer", ignore_index=True)
 
+
 # backfill missing state data by taking the assignment in other rows 
-# then export the data to CLEAN folder! 
+# convert to string
+fips_annual_full["state_code"] = fips_annual_full["state_code"].astype(str).str.zfill(2)
+
+# create mapping state_code -> state
+map_state = (
+    fips_annual_full.loc[fips_annual_full["state"].notna(), ["state_code", "state"]]
+      .groupby("state_code")["state"]
+      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else s.iloc[0])
+      .to_dict()
+)
+
+# map and check
+fips_annual_full["state"] = fips_annual_full["state"].fillna(fips_annual_full["state_code"].map(map_state))
+unmapped = sorted(fips_annual_full.loc[fips_annual_full["state"].isna(), "state_code"].unique())
+print("Unmapped state_code:", unmapped) # complete map
+
+# export clean data
+clean_dir = os.path.join(db_data, "clean")
+today_str = date.today().strftime("%Y-%m-%d")
+clean_fips_df = f"{today_str}_fips_full.csv"
+out_path = os.path.join(clean_dir, clean_fips_df)
+
+# export to csv in clean folder
+fips_annual_full.to_csv(out_path, index=False)
+
+
 
 
 ## INVESTIGATE COLS across dataframes for patterns 
@@ -261,8 +287,18 @@ df1990s["pop"] = df1990s[cols_to_sum].sum(axis=1)
 demo_cols = [col for col in df1990s.columns if col.startswith("NH_") or col.startswith("H_")]
 df1990s.drop(columns=demo_cols, inplace=True)
 
-# FIPS / YR / POPULATION -- need to merge with county/state names (from  FIPS data)
+# make all colnames lowercase 
+df1990s.columns = df1990s.columns.str.lower()
+# pad fips 
+df1990s["fips"] = df1990s["fips"].astype(str).str.zfill(5)
 
+# merge with fips county name data
+sub_cols = ["fips", "county", "state_code", "county_code", "year", "state"]
+fips_sub = fips_annual_full[sub_cols]
+df1990s_full = df1990s.merge(fips_sub, on=["fips", "year"], how="inner")  
+
+df1990s_full = df1990s_full.rename(columns={"pop": "population" })
+print(df1990s_full.shape)
 
 
 ##2000-2010 DATA:
@@ -294,6 +330,19 @@ df2000_long = df2000_long.drop(columns=["raw_year_col", "SUMLEV"])
 generate_fips(df2000_long, state_col="STATE", city_col="COUNTY")
 
 df2000s = df2000_long
+df2000s.columns = df2000s.columns.str.lower()
+
+df2000s_cleannames = df2000s.rename(columns={
+    "stname": "state",
+    "ctyname": "county",
+    "state": "state_code",
+    "county": "county_code",
+    "fips_generated": "fips"
+})
+
+# FINAL OUTPUT for 2000s POP DATA
+df2000s_full = df2000s_cleannames
+
 
 
 ##2010-2020 DATA:
@@ -313,10 +362,40 @@ df2010_long = pd.melt(
     value_name="value"
 )
 
+# standardize colnames
 df2010_long["year"] = df2010_long["raw_year_col"].str.extract(r"(20\d{2})").astype(int)
+generate_fips(df2010_long, state_col="state", city_col="county")
+df2010_long.columns = df2010_long.columns.str.lower()
 
 
+df2010_full = df2010_long.rename(columns={
+    "stname": "state",
+    "ctyname": "county",
+    "state": "state_code",
+    "county": "county_code",
+    "fips_generated": "fips",
+    "value": "population"
+})
+
+# FINAL OUTPUT for 2010s DATA 
+df2010_full = df2010_full.drop(columns=["raw_year_col"])
+
+# sort columns (alphabetical) for easier comparison
+df1990s_full = df1990s_full[sorted(df1990s_full.columns)]
+df2000s_full = df2000s_full[sorted(df2000s_full.columns)]
+df2010_full = df2010_full[sorted(df2010_full.columns)]
 
 
+# check all columns for the rowbind 
+df1990s_full.columns.tolist()
+df2000s_full.columns.tolist()
+df2010_full.columns.tolist()
+
+full_pop_df = pd.concat([df1990s_full, df2000s_full, df2010_full], ignore_index=True, sort=False)
+
+# export to CSV 
+clean_pop_df = f"{today_str}_population_full.csv"
+poppath = os.path.join(clean_dir, clean_pop_df)
+full_pop_df.to_csv(poppath, index=False)
 
 
