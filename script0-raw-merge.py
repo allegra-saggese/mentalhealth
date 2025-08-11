@@ -50,8 +50,129 @@ for file in file_list:
     dfs.append(df)
     
 ## UPLOAD ALL FIPS DATA - FOR MATCHING LATER
+rawfips = os.path.join(inf, "fips")
+fipsfiles = glob.glob(os.path.join(rawfips, "foruse_*.txt"))
 
+def sniff_delim(path):
+    with open(path, "r", errors="ignore") as f:
+        for line in f:
+            if line.strip():
+                s = line
+                break
+    # count signals for each delimiter
+    scores = {
+        "pipe": s.count("|"),
+        "comma": s.count(","),
+        "ws": len(s.split()) - 1  # whitespace tokens
+    }
+    return max(scores, key=scores.get)
+
+# identify which type of separator exists for each file 
+pipe_files, comma_files, ws_files = [], [], []
+for p in fipsfiles:
+    d = sniff_delim(p)
+    if d == "pipe":
+        pipe_files.append(p)
+    elif d == "comma":
+        comma_files.append(p)
+    else:
+        ws_files.append(p)
+
+# load each bucket (three separate lines/loops)
+
+# whitespace (or fixed-width) files (2000)
+ws_dfs = []
+for p in ws_files:
+    try:
+        df = pd.read_fwf(p)  # often best for space-aligned reports
+        if df.shape[1] <= 1:  # fallback if not fixed-width
+            df = pd.read_table(p, delim_whitespace=True, engine="python")
+    except Exception:
+        df = pd.read_table(p, delim_whitespace=True, engine="python")
+    df["source_file"] = os.path.basename(p)
+    ws_dfs.append(df)
+
+# need to break out one col with FIPS / county into two cols 
+fips_00 = ws_dfs[0]
+fips_00.columns.tolist()
+fips_00[["fips", "county"]] = fips_00["FIPS\t\t countyname"].str.strip().str.split(r"\s+", n=1, expand=True)
+
+# drop uneccessary columns + split fips cols for more ID 
+fips_00 = fips_00.drop(columns=["FIPS\t\t countyname", "Unnamed: 1", "source_file"])    
+fips_00["state_code"] = fips_00["fips"].astype(str).str[:2]
+fips_00["county_code"] = fips_00["fips"].astype(str).str[-3:]
+
+# create year col + dupe data for each year where its applicable 
+years = list(range(2000, 2010))
+year_df = pd.DataFrame({"year": years})
+fips_00_expanded = fips_00.merge(year_df, how="cross")
+fips_00_expanded = fips_00_expanded.reset_index(drop=True)
+
+# manual creation of the 1990 codes given the states similarities 
+ fips_90 = fips_00
+# manual changes, REASON: see source data for differences from 1990 to 2000 census
+ fips_90["fips"] = fips_90["fips"].replace(12025, 12086)
+ fips_90["county_code"] = fips_90["county_code"].replace(025, 086)
+ fips_90["county"] = fips_90["county"].replace("Miami-Dade County", "Dade County")
+# add in counties that were merged/lost for the 2000 census 
+new_row1 = {
+    "FIPS": 30113,
+    "state_code": 30,
+    "county_code": 113,
+    "county": "Yellowstone National Park County"
+}
+
+new_row2 = {
+    "FIPS": 51780,
+    "state_code": 51,
+    "county_code": 780,
+    "county": "South Boston"
+}
+
+fips_90 = pd.concat([fips_90, pd.DataFrame([new_row1, new_row2])], ignore_index=True)
+# add the years
+yrs0 = list(range(1990, 2000))
+yrs0df = pd.DataFrame({"year": yrs0})
+fips_90_expanded = fips_90.merge(yrs0df, how="cross")
+fips_90_expanded = fips_90_expanded.reset_index(drop=True)
+
+
+# comma file (2010) - doing it manual for ease    
+path = "/Users/allegrasaggese/Dropbox/Mental/Data/raw/fips/foruse_FIPScodes2010_w_names.txt"
+fips_10 = pd.read_table(path, sep=",", engine="python", encoding="latin1", on_bad_lines="warn")
+# create full FIPS
+generate_fips(fips_10, state_col="STATEFP", city_col="COUNTYFP")
+# add years
+yrs2 = list(range(2010, 2020))
+yrs2df = pd.DataFrame({"year": yrs2})
+fips_10_expanded = fips_10.merge(yrs2df, how="cross")
+fips_10_expanded = fips_10_expanded.reset_index(drop=True)
+ 
+
+# pipe-delimited files (2020)
+pipe_dfs = []
+for p in pipe_files:
+    try:
+        df = pd.read_csv(p, sep="|", engine="python", encoding="utf-8")
+    except UnicodeDecodeError:
+        df = pd.read_csv(p, sep="|", engine="python", encoding="latin1")
+    df["source_file"] = os.path.basename(p)
+    pipe_dfs.append(df)
     
+fips_20 = pipe_dfs[0]
+generate_fips(fips_20, state_col="STATEFP", city_col="COUNTYFP")
+fips_20 = fips_20.drop(columns=["source_file"])   
+# add years
+yrs3 = list(range(2020, 2025))
+yrs3df = pd.DataFrame({"year": yrs3})
+fips_20_expanded = fips_20.merge(yrs3df, how="cross")
+fips_20_expanded = fips_20_expanded.reset_index(drop=True)
+
+# combine all FIPS data 
+fips_annual_full = pd.concat([fips_90_expanded, fips_00_expanded, 
+                              fips_10_expanded, fips_20_expanded],
+                             axis=0, join="outer", ignore_index=True)
+
 
 ## INVESTIGATE COLS across dataframes for patterns 
 col_lists = [df.columns.tolist() for df in dfs]
