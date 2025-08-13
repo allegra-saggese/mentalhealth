@@ -62,3 +62,34 @@ def generate_fips(df, state_col="state", city_col="city"):
     df.drop(columns=["state_padded", "city_padded"], inplace=True)
 
     return df
+
+
+
+# Appending lists of column names for sorting
+
+def append_cols(existing_list, new_cols):
+    """Append new columns to existing list, avoiding duplicates."""
+    for col in new_cols:
+        if col not in existing_list:
+            existing_list.append(col)
+    return existing_list
+
+
+# Sorting lists of dataframes 
+
+def keep_only_cols(dfs, cols_to_keep):
+    """Return new list of DataFrames with only specified columns (keep order)."""
+    return [df[[col for col in cols_to_keep if col in df.columns]] for df in dfs]
+
+
+
+
+
+
+
+
+
+
+
+
+
