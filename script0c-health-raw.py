@@ -11,6 +11,7 @@ Created on Wed Aug 13 10:13:23 2025
 import sys, importlib.util
 from collections import Counter
 import re
+from functools import reduce
 import difflib
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
@@ -34,7 +35,7 @@ outf = os.path.join(db_data, "clean") #output
 
 
 # upload health files 
-## UPLOAD ALL CENSUS DATA - ALL YEARS, RAW 
+## UPLOAD ALL COUNTY HEALTH DATA - ALL YEARS, RAW 
 raw_mh = os.path.join(inf, "mental")
 mh_files = glob.glob(os.path.join(raw_mh, "*.csv"))
 
@@ -247,10 +248,111 @@ append_cols(majority_present_cols, low_missing_cols) # append to existing list
 
 dfs_shortlist = keep_only_cols(dfs_clean, majority_present_cols) # create short list 
 
+# add the years
+year_re = re.compile(r'(19|20)\d{2}(?=\.[A-Za-z0-9]+$)')
+
+# extract years from mh_files in order
+years = []
+for p in mh_files:
+    base = os.path.basename(p)
+    m = year_re.search(base)
+    if not m:
+        raise ValueError(f"Couldn't find a year at end of filename: {base}")
+    years.append(int(m.group(0)))
+
+# sanity check
+if len(years) != len(dfs):
+    raise ValueError(f"Lengths differ: {len(years)} files vs {len(dfs)} dataframes")
+
+# assign year to each df by index -- note the list of names is ordered from mh_files
+for i, y in enumerate(years):
+    dfs_shortlist[i]["year"] = y
 
 
+# merge all dfs together 
+for i, d in enumerate(dfs_shortlist, 1):
+    try:
+        _ = d["5-digit_fips_code"]
+        _ = d["year"]
+        pd.to_numeric(d["year"], errors="raise")  # will raise if not numeric
+        print(f"df #{i}: OK  (rows={len(d)})")
+    except Exception as e:
+        print(f"df #{i}: FAIL -> {type(e).__name__}: {e}")
+        
+def prep(df):
+    """Schange type of key before merging """
+    df["5-digit_fips_code"] = df["5-digit_fips_code"].astype(str).str.zfill(5)
+    df["year"] = df["year"].astype(int)
+    return df
+
+dfs_ready = [prep(d) for d in dfs_shortlist]  # dfs_shortlist already has year set per file
+
+for i, d in enumerate(dfs_ready, 1):
+    try:
+        _ = d["5-digit_fips_code"]
+        _ = d["year"]
+        pd.to_numeric(d["year"], errors="raise")  # will raise if not numeric
+        print(f"df #{i}: OK  (rows={len(d)})")
+    except Exception as e:
+        print(f"df #{i}: FAIL -> {type(e).__name__}: {e}")
+         
+ # still OK after the prep
+        
+# nothing missing - so try again with a different prep function
+def prep2(df: pd.DataFrame) -> pd.DataFrame:
+    if "5-digit_fips_code" not in df.columns:
+        raise KeyError("Missing column: 5-digit_fips_code")
+        print("ERROR fips")
+    if "year" not in df.columns:
+        raise KeyError("Missing column: year")
+
+    df = df.copy()
+    df["5-digit_fips_code"] = df["5-digit_fips_code"].astype(str).str.zfill(5)
+    # allow non-numeric/blank → NA; keep nullable integer dtype
+    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+    return df
+
+dfs_ready_v2 = [prep2(d) for d in dfs_ready]  # no issue 
+
+# failing concat bc of index 
+# checking for existing dupes -- in 2010 data 
+for i, d in enumerate(dfs_ready_v2 , 1):
+    print(
+        f"df #{i}: dup_cols={d.columns.duplicated().any()}  "
+        f"nonunique_index={not d.index.is_unique}  "
+        f"ncols={len(d.columns)}  nrows={len(d)}"
+    )
+    
+dfs_ready_v2[0] = dfs_ready_v2[0].loc[:, ~dfs_ready_v2[0].columns.duplicated()]
+
+# CONCAT - works! 
+combined = pd.concat(dfs_ready_v2, ignore_index=True, sort=False)
 
 
+# ensure one row per FIPS×year (only needed if duplicates exist)
+def first_notna(s):
+    idx = s.first_valid_index()
+    return s.loc[idx] if idx is not None else pd.NA
+
+if combined.duplicated(["5-digit_fips_code", "year"]).any():
+    combined = (combined
+        .groupby(["5-digit_fips_code", "year"], as_index=False)
+        .agg(first_notna))
+
+# tidy order
+keys = ["5-digit_fips_code", "year"]
+other = [c for c in combined.columns if c not in keys]
+combined = combined[keys + other].sort_values(keys).reset_index(drop=True)
+
+# export to CSV file
+today_str = date.today().strftime("%Y-%m-%d")
+ 
+clean_MH_data = f"{today_str}_mentalhealthrank_full.csv"
+mh_path = os.path.join(outf, clean_MH_data)
+combined.to_csv(mh_path, index=False)
+
+
+## NEXT STEPS ---  UPLOAD ALL CDC DATA - ALL YEARS, RAW FOR MORTALITY 
 
 
 

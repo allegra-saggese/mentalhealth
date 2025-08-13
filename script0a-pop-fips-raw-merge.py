@@ -7,9 +7,7 @@ Created on Wed Jul 30 10:03:00 2025
 """
 
 # load packages and workspaces
-import sys, importlib.util
 from collections import Counter
-import re
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
 repo = "/Users/allegrasaggese/Documents/GitHub/mentalhealth"
