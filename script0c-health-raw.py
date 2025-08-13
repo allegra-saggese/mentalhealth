@@ -168,14 +168,85 @@ summary_df.to_csv(out_path, index=False) # save for manual review
 # select the cols that are present in 11 (of 14) dataframes -- about 78% 
 majority_present_cols = get_common_cols(summary_df, 11)
 
-# white, black, hispanic demo disagg for 2018, 2019
+# so many unmatched cols b/c white, black, hispanic demo disagg for 2018, 2019
 # starting in 2020 they add AIAN, Asian Pacific for some of the health issues
 
+# QA -- check the data completeness and duplicates 
 
+def drop_dupes_keep_most_complete(df):
+    """drop any dupes - keep highest % of nonmissng values
+       prints duplicate info if found."""
+    cols_to_keep = {}
+    
+    for col in df.columns.unique():  # loop over unique col names
+        dupes = df.loc[:, df.columns == col]
+        
+        if dupes.shape[1] > 1:  # duplicate columns found
+            comp = dupes.notna().mean() * 100
+            best_idx = comp.idxmax()
+            print(f"Duplicate col '{col}': keeping '{best_idx}', completeness = {comp.max():.2f}%")
+            for other in dupes.columns:
+                if other != best_idx:
+                    print(f"    Dropped duplicate: '{other}', completeness = {comp[other]:.2f}%")
+        else:
+            best_idx = dupes.columns[0]
+        
+        cols_to_keep[col] = best_idx
 
+    return df.loc[:, cols_to_keep.values()]
 
-# append_cols(majority_present_cols, new_cols)
-# keep_only_cols(dfs, cols_to_keep)
+dfs_clean = []
+
+for i, df in enumerate(dfs, start=1):
+    print(f"\nProcessing DataFrame {i}/{len(dfs)}:")
+    cleaned_df = drop_dupes_keep_most_complete(df)
+    dfs_clean.append(cleaned_df)
+# only dupe was with renaming access to healthy food columns - dropped where no data was present 
+    
+# check completeness 
+summaries = []
+for i, df in enumerate(dfs_clean, 1):
+    summary = percent_missing_vs_filled(df)
+    summary = summary.reset_index()  # index -> column
+    summary = summary.rename(columns={"index": "column"})
+    summary.insert(0, "df_id", f"df_{i}")
+    summaries.append(summary)
+
+all_summaries = pd.concat(summaries, ignore_index=True)
+
+#group and average
+avg_completeness = (
+    all_summaries
+    .groupby("column", as_index=False)["filled_pct"]
+    .mean()
+    .rename(columns={"filled_pct": "avg_filled_pct"})
+)
+
+# average for threshold (i.e. present in at least 11 dfs)
+avg_completeness_thresh = (
+    all_summaries
+    .groupby("column")
+    .agg(
+        avg_filled_pct=("filled_pct", "mean"),
+        dfs_with_col=("df_id", "nunique")
+    )
+    .query("dfs_with_col >= 8") # THRESHOLD VALUE - less years (8 < 11) but higher standard for completeness 
+     .reset_index()
+)
+
+# now take those with above 80% fill rate with presence in 8 / 14 years
+low_missing_cols = (
+    avg_completeness_thresh
+    .loc[avg_completeness_thresh["avg_filled_pct"] >= 80, "column"]
+    .tolist()
+)
+
+len(low_missing_cols) # at least 190 cols meet this 
+
+append_cols(majority_present_cols, low_missing_cols) # append to existing list
+
+dfs_shortlist = keep_only_cols(dfs_clean, majority_present_cols) # create short list 
+
 
 
 

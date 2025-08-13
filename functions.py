@@ -40,6 +40,7 @@ def percent_missing_vs_filled(df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+
 # FIPS code generator from individual city - state cols 
 
 def generate_fips(df, state_col="state", city_col="city"):
