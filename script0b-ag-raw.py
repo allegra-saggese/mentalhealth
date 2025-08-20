@@ -146,14 +146,45 @@ print("Is it a full range? ",
       set(range(vals.min(), vals.max() + 1)) == set(vals))
 # FALSE - only contains 0,12
 
-# other levels are class, group, and commodity -- need to decide how to sor
-## or if I should summarize by the year <> fips -- as it should be counts / values from all farms within this 
-## don't think its possible to simply collapse
-
-# make ag raw df for export 
+# prep ag raw df for pivot, then export and saving  
 ag_raw_df = clean_cols(combined)
 
 # create total fips code 
 ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="county_code")
+ag_raw_df.columns
+
+# based on USDA source, should use GROUP_DESC as next group in the panel, make panel wide  
+candidates = [c for c in ag_raw_df.columns if c not in ["state_fips_code", "county_code", 
+                                                        "FIPS_generated", "year", "group_desc"]]
+print(candidates) # note all cols are candidate cols 
+
+keys = ["fips", "year", "group_desc"]
+cols = ["metric_a", "metric_b"]     # the two subgroup columns
+val  = "value"                      # the value to spread 
+
+wide = (
+    df.pivot_table(
+        index=keys,
+        columns=cols,               # <- multiple columns become a MultiIndex
+        values=val,
+        aggfunc="first"             # or "sum"/"mean" if duplicates exist per cell
+    )
+    .reset_index()
+)
+
+# optional: if you prefer single-level columns, flatten them:
+if isinstance(wide.columns, pd.MultiIndex):
+    wide.columns = [
+        "_".join([str(x) for x in tup if x != ""]) for tup in wide.columns
+    ]
+
+
+# export in this form -- create cafos after 
+today_str = date.today().strftime("%Y-%m-%d")
+
+clean_ag_census = f"{today_str}_ag_raw_full.csv"
+ag_path = os.path.join(outf, clean_ag_census)
+combined.to_csv(ag_path, index=False)
+
 
 
