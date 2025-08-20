@@ -83,7 +83,17 @@ def keep_only_cols(dfs, cols_to_keep):
     return [df[[col for col in cols_to_keep if col in df.columns]] for df in dfs]
 
 
+# simple / standard colname cleaning
 
+def clean_cols(df):
+    df.columns = (
+        df.columns
+        .str.lower()                      # lowercase
+        .str.replace("&", "and")          # replace & with and
+        .str.replace(r"[.,]", "", regex=True)  # remove . and ,
+        .str.strip()                      # trim spaces
+    )
+    return df
 
 
 

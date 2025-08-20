@@ -106,7 +106,6 @@ for i, missing, extra in problems:
         print(f"df_{i} EXTRA cols vs baseline (dropped by reindex): {extra}")
         
         
-
 # sense check the length of the dataframe against the FIPS data to see how many observations there are 
 fips_sense = os.path.join(outf, "2025-08-11_fips_full.csv") 
 fips_df = pd.read_csv(fips_sense) 
@@ -121,4 +120,40 @@ fdf_2007 = fips_df[fips_df["year"] == 2007]
 fdf_2012 = fips_df[fips_df["year"] == 2012]     
 fdf_2017 = fips_df[fips_df["year"] == 2017]     
 # length is significantly shorter of course - need to understand the repetition in the USDA data 
+
+# to see what the grouping level is - lets investigate unique values
+grouped = combined.groupby(["STATE_FIPS_CODE", "COUNTY_CODE", "YEAR"])
+
+# count unique values for each column within each group
+uniq_counts = grouped.nunique()
+
+# see which columns have more than 1 unique value per (fips, year)
+problem_cols = (uniq_counts > 1).any()
+problem_cols = problem_cols[problem_cols].index.tolist()
+print("Columns that vary within (fips, year):", problem_cols)
+
+# print unique values for each problem column
+for col in problem_cols: 
+    print(f"\n--- {col} ---")
+    print(df[col].unique())
+
+# check to see if we should use the code
+vals = combined["BEGIN_CODE"].dropna().unique()
+vals.sort()
+
+print("Unique values:", vals)
+print("Is it a full range? ", 
+      set(range(vals.min(), vals.max() + 1)) == set(vals))
+# FALSE - only contains 0,12
+
+# other levels are class, group, and commodity -- need to decide how to sor
+## or if I should summarize by the year <> fips -- as it should be counts / values from all farms within this 
+## don't think its possible to simply collapse
+
+# make ag raw df for export 
+ag_raw_df = clean_cols(combined)
+
+# create total fips code 
+ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="county_code")
+
 
