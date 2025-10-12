@@ -352,7 +352,100 @@ mh_path = os.path.join(outf, clean_MH_data)
 combined.to_csv(mh_path, index=False)
 
 
-## NEXT STEPS ---  UPLOAD ALL CDC DATA - ALL YEARS, RAW FOR MORTALITY 
+
+## UPLOAD CDC MORTALITY DATA 
+
+#upload from raw text files and create merged dataset with year indicators 
+cdc_data_folder = "/Users/allegrasaggese/Dropbox/Mental/Data/raw/cdc"
+paths = sorted(glob.glob(os.path.join(cdc_data_folder , "*.txt")))
+year_re = re.compile(r"(\d{4})(?=\.txt$)")
+
+dfs = []
+for p in paths:
+    # extract 4-digit year from end of filename
+    m = year_re.search(os.path.basename(p))
+    if not m:
+        raise ValueError(f"No YYYY at end of filename: {os.path.basename(p)}")
+    yr = int(m.group(1))
+
+    df = pd.read_csv(p, sep="\t", quotechar='"', engine="python")
+
+    # add year column
+    df["year"] = yr
+
+    # --- unreliables -> flags + clean numeric text ---
+    unreliable_count = 1
+    for col in df.columns:
+        if df[col].astype(str).str.contains(r"\(Unreliable\)", regex=True).any():
+            new_col = f"Unreliable_{unreliable_count}"
+            df[new_col] = df[col].astype(str).str.contains(r"\(Unreliable\)", regex=True).astype(int)
+            unreliable_count += 1
+
+            df[col] = (df[col].astype(str)
+                               .str.replace(r"\s*\(Unreliable\)$", "", regex=True)
+                               .pipe(pd.to_numeric, errors="coerce"))
+
+    dfs.append(df)
+
+#concat each YR dataframe together
+combined = pd.concat(dfs, ignore_index=True, sort=False)
+
+# lower case / clean col names 
+combined.columns = (combined.columns
+                .str.lower()
+                .str.strip()        # remove leading/trailing spaces
+                .str.replace(" ", "_")  # replace spaces with underscores
+                .str.replace(r"[^\w_]", "", regex=True))  # drop punctuation
+
+# drop the notes col (not needed)
+combined = combined.drop(columns=["notes"])
+
+# split the county / state out of the county col 
+combined["state"] = combined["county"].str[-3:].str.replace(",", "", regex=False).str.strip()
+combined["county"] = combined["county"].str[:-4].str.strip()
+
+# add padding to fips (4 digits ----> 5 digits)
+combined["county_code"] = (
+    combined["county_code"]
+    .apply(lambda x: str(int(x)) if pd.notna(x) and re.match(r"^\d+(\.0+)?$", str(x)) else str(x))
+    .str.strip()
+)
+
+#count the number of entries < 5 digits
+num_padded = (combined["county_code"].str.len() == 4).sum()
+
+#pad to 5 digits
+combined["county_code"] = combined["county_code"].str.zfill(5)
+print(f"Padded {num_padded} county_code entries to 5 digits.") # check number of padding
+
+# our FIPS key has different codes depending on the year (potential for change)
+## want to QA this data to see if it records FIP code changes or backfills 
+## IF THE FIPS CODES ARE THE SAME ----> WE SHOULD REPLACE WITH THE annual/fips code key
+code_counts = (
+    combined.groupby(["county", "state"])["county_code"]
+            .nunique()
+            .reset_index(name="n_unique_codes")
+)
+
+#flag groups where the code changes over time (n_unique_codes > 1)
+changing = code_counts[code_counts["n_unique_codes"] > 1]
+
+# 3) show which codes each (county, state) has (for the changing ones)
+codes_per_group = (
+    combined.groupby(["county", "state"])["county_code"]
+            .apply(lambda s: sorted(s.dropna().unique().tolist()))
+            .reset_index(name="codes")
+)
+changing_details = changing.merge(codes_per_group, on=["county","state"])
+
+print(changing_details.sort_values(["state","county"]))
+
+
+
+
+
+
+
 
 
 
