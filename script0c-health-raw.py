@@ -353,7 +353,7 @@ combined.to_csv(mh_path, index=False)
 
 
 
-## UPLOAD CDC MORTALITY DATA 
+### UPLOAD CDC MORTALITY DATA 
 
 #upload from raw text files and create merged dataset with year indicators 
 cdc_data_folder = "/Users/allegrasaggese/Dropbox/Mental/Data/raw/cdc"
@@ -414,7 +414,7 @@ combined_1["county_code"] = (
 #count the number of entries < 5 digits
 num_padded = (combined_1["county_code"].str.len() == 4).sum()
 
-#pad to 5 digits
+# pad to 5 digits
 combined_1["county_code"] = combined_1["county_code"].str.zfill(5)
 print(f"Padded {num_padded} county_code entries to 5 digits.") # check number of padding
 
@@ -425,7 +425,11 @@ code_counts = (
     combined_1.groupby(["county", "state"])["county_code"]
             .nunique()
             .reset_index(name="n_unique_codes")
-)
+) # only 448 observations of FIPS here - quite low for the data, only pulling five states (NC, IA, CA, TX, GA)
+print(f"Unique states in mortality data:      {combined_1['state'].nunique()}")
+unique_states = sorted(combined_1["state"].dropna().unique().tolist())
+print(unique_states)
+
 
 #flag groups where the code changes over time (n_unique_codes > 1)
 changing = code_counts[code_counts["n_unique_codes"] > 1]
@@ -489,6 +493,8 @@ clean_mortality_data = f"{today_str}_mortality_sex_race_disagg.csv"
 mpath = os.path.join(outf, clean_mortality_data)
 combined_1.to_csv(mpath, index=False)
 
+# check number of unique FIPS before the merge (only 400 observations relative to 3200 in total in the US)
+print(f"Unique FIPS in combined mortality data before collapse:      {combined_1['county_code'].nunique()}")
 
 ### merge with the mental health data 
 
@@ -541,16 +547,159 @@ print(filled_summary)
 
 
 # LOAD IN FIPS 
+fips_clean = os.path.join(outf, "2025-08-11_fips_full.csv")
+print("File exists:", os.path.exists(fips_clean))
+fips_key = pd.read_csv(fips_clean, low_memory=False)
+
+# upload MH data, review fips 
+mh_data = f"{today_str}_mentalhealthrank_full.csv"
+mh_path = os.path.join(outf, mh_data)
+mh_df = pd.read_csv(mh_path, low_memory=False)
+
+# create fips identifier in the mortality data (from a year-county-state match)
+cols_to_add = ["fips", "state_code", "county_code", "year", "county", "state"]
+fips_sub = fips_key[cols_to_add] # subset for ease 
+
+# check fips data first 
+print("fips_sub dup keys:", fips_sub.duplicated(["year","county","state"]).any()) # dupes present 
+
+keys = ["year","county","state"]
+
+# normalize join fields (trim/case)
+for d in (wide, fips_key):
+    d["county"] = d["county"].astype(str).str.strip()
+    d["state"]  = d["state"].astype(str).str.strip().str.upper()
+    
+# inspect conflicts - strange finding from bad fips merge 
+conflicts = (
+    fips_key.groupby(keys)
+    .agg(n_rows=("fips","size"),
+         n_fips=("fips","nunique"),
+         fips_set=("fips", lambda s: sorted(pd.Series(s).dropna().unique().tolist())))
+    .query("n_rows > 1")
+)
+print("dup groups:", len(conflicts), "with >1 FIPS:", (conflicts["n_fips"]>1).sum()) # there are duplicates in the FIPS data - will have to adjust later 
 
 
-# CHECK WHICH FIPS CHANGE over years 
+# quick fix fips key 
+# identify (year, county, state) groups with n_rows > 1 and n_fips == 1
+dup_keys = (
+    fips_sub.groupby(["year", "county", "state"])
+    .agg(n_rows=("fips", "size"), n_fips=("fips", "nunique"))
+    .query("n_rows > 1 and n_fips == 1")
+    .reset_index()[["year", "county", "state"]]
+)
 
-# UPDATE FIPS in the MH data 
+# drop those redundant rows from fips_sub
+before = len(fips_sub)
+fips_sub = fips_sub.merge(dup_keys, on=["year", "county", "state"], how="left", indicator=True)
+fips_sub = fips_sub[fips_sub["_merge"] == "left_only"].drop(columns="_merge")
 
-# UPDATE FIPS in the mortality data (YR-FIPS)
+after = len(fips_sub)
+print(f"Dropped {before - after} redundant duplicate rows (same FIPS).")
+
+# DC has duplicated FIPS for both years 
+fips_sub = fips_sub.drop_duplicates(["year", "county", "state"], keep="first")
+
+print("Deduplicated fips_sub — kept first instance for Washington DC (and any others).")
+print(f"Remaining rows: {len(fips_sub)}") # good only dropped the 20 obs that were duplicated 
+
 
 # merge all health data together
 
+# should not have to do this - there is something strange with the MH data, lets hope its a column header issue and not an imerge issue - I will look into it 
+mh_df = mh_df[mh_df["5-digit_fips_code"] != "fips_code"] #### TO ADDRESS THIS 
+
+
+# merge fips and mortality data 
+wide_fips = wide.merge(
+    fips_sub,
+    on=["year", "county", "state"],
+    how="left"     # keeps all rows from wide, adds matches from fips_sub
+)
+print("Shape after merge:", wide_fips.shape)
+
+# merge mental health with mortality data on the fips key now 
+for d in (wide_fips, mh_df):
+    d["fips"] = d["fips"].astype(str).str.zfill(5)
+    d["year"] = d["year"].astype(int)
+
+
+if "5-digit_fips_code" in mh_df.columns and "fips" not in mh_df.columns:
+    mh_df = mh_df.rename(columns={"5-digit_fips_code": "fips"})
+
+def normalize_fips(col: pd.Series):
+    s = (col.astype("string")                # unified string dtype
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)  # 6001.0 -> 6001
+            .str.replace(r"\D", "", regex=True))   # drop non-digits
+    num_padded = (s.str.len() == 4).sum()
+    s = s.str.zfill(5)
+    return s, int(num_padded)
+
+# 2) apply to both DFs
+wide_fips["fips"], padded_wide = normalize_fips(wide_fips["fips"])
+mh_df["fips"], padded_mh = normalize_fips(mh_df["fips"])
+
+print(f"Padded in wide_fips: {padded_wide}")
+print(f"Padded in mh_df:     {padded_mh}")
+
+# check year type 
+wide_fips["year"] = pd.to_numeric(wide_fips["year"], errors="coerce").astype("Int64")
+mh_df["year"]     = pd.to_numeric(mh_df["year"], errors="coerce").astype("Int64")
+
+# check the range for the years (theres only 6 years of overlap)
+print(mh_df["year"].min(), mh_df["year"].max())
+print(wide_fips["year"].min(), wide_fips["year"].max())
+
+
+# MERGE 
+mh_df["fips"] = mh_df["fips"].astype(str).str.zfill(5)
+wide_fips["fips"] = wide_fips["fips"].astype(str).str.zfill(5)
+mh_df["year"] = mh_df["year"].astype(int)
+wide_fips["year"] = wide_fips["year"].astype(int)
+
+# full merge
+wide_mh_full = pd.merge(
+    wide_fips,
+    mh_df,
+    on=["fips", "year"],
+    how="outer",
+    sort=True,
+    validate="m:m"
+)
+
+print("Merge complete.")
+print(f"Rows: {len(wide_mh_full)}  |  Columns: {len(wide_mh_full.columns)}")
+
+mh_full_df = wide_mh_full
+
+# Normalize both columns just to be safe
+mh_full_df["state"] = mh_full_df["state"].astype(str).str.strip().str.upper()
+mh_full_df["state_abbreviation"] = mh_full_df["state_abbreviation"].astype(str).str.strip().str.upper()
+
+# Create a mask for mismatches
+mask_mismatch = mh_full_df["state"] != mh_full_df["state_abbreviation"]
+mh_state_mismatch = mh_full_df[mask_mismatch]
+
+
+# Quick diagnostics for the unmatching on the fips keys 
+print(f"🔍 Rows where state != state_abbreviation': {len(mh_state_mismatch)}")
+print("Sample mismatches:")
+print(mh_state_mismatch[["county","state","state_abbreviation"]].head(10)) # cannot figure this out 
+
+
+mh_full_df["state_abbreviation"].unique()
+"state_abbreviation" in mh_df.columns # lets drop all rows that don't correspond to the counties 
+
+# remove the non-county observations 
+bad_states = ["US", "STATE", "NAN"]
+mh_df[mh_df["state_abbreviation"].isin(bad_states)][["state_abbreviation"]].value_counts()
+mh_df = mh_df[~mh_df["state_abbreviation"].isin(bad_states)]
+
+"fips" in mh_df
+print(f"Unique FIPS in mh_df:      {mh_df['fips'].nunique()}")
+print(f"Unique FIPS in wide_fips:  {wide_fips['fips'].nunique()}")
 
 # export clean, complete health data frame 
 
