@@ -388,41 +388,41 @@ for p in paths:
     dfs.append(df)
 
 #concat each YR dataframe together
-combined = pd.concat(dfs, ignore_index=True, sort=False)
+combined_1 = pd.concat(dfs, ignore_index=True, sort=False)
 
 # lower case / clean col names 
-combined.columns = (combined.columns
+combined_1.columns = (combined_1.columns
                 .str.lower()
                 .str.strip()        # remove leading/trailing spaces
                 .str.replace(" ", "_")  # replace spaces with underscores
                 .str.replace(r"[^\w_]", "", regex=True))  # drop punctuation
 
 # drop the notes col (not needed)
-combined = combined.drop(columns=["notes"])
+combined_1 = combined_1.drop(columns=["notes"])
 
 # split the county / state out of the county col 
-combined["state"] = combined["county"].str[-3:].str.replace(",", "", regex=False).str.strip()
-combined["county"] = combined["county"].str[:-4].str.strip()
+combined_1["state"] = combined_1["county"].str[-3:].str.replace(",", "", regex=False).str.strip()
+combined_1["county"] = combined_1["county"].str[:-4].str.strip()
 
 # add padding to fips (4 digits ----> 5 digits)
-combined["county_code"] = (
-    combined["county_code"]
+combined_1["county_code"] = (
+    combined_1["county_code"]
     .apply(lambda x: str(int(x)) if pd.notna(x) and re.match(r"^\d+(\.0+)?$", str(x)) else str(x))
     .str.strip()
 )
 
 #count the number of entries < 5 digits
-num_padded = (combined["county_code"].str.len() == 4).sum()
+num_padded = (combined_1["county_code"].str.len() == 4).sum()
 
 #pad to 5 digits
-combined["county_code"] = combined["county_code"].str.zfill(5)
+combined_1["county_code"] = combined_1["county_code"].str.zfill(5)
 print(f"Padded {num_padded} county_code entries to 5 digits.") # check number of padding
 
 # our FIPS key has different codes depending on the year (potential for change)
 ## want to QA this data to see if it records FIP code changes or backfills 
 ## IF THE FIPS CODES ARE THE SAME ----> WE SHOULD REPLACE WITH THE annual/fips code key
 code_counts = (
-    combined.groupby(["county", "state"])["county_code"]
+    combined_1.groupby(["county", "state"])["county_code"]
             .nunique()
             .reset_index(name="n_unique_codes")
 )
@@ -432,16 +432,81 @@ changing = code_counts[code_counts["n_unique_codes"] > 1]
 
 # 3) show which codes each (county, state) has (for the changing ones)
 codes_per_group = (
-    combined.groupby(["county", "state"])["county_code"]
+    combined_1.groupby(["county", "state"])["county_code"]
             .apply(lambda s: sorted(s.dropna().unique().tolist()))
             .reset_index(name="codes")
 )
 changing_details = changing.merge(codes_per_group, on=["county","state"])
 
-print(changing_details.sort_values(["state","county"]))
+print(changing_details.sort_values(["state","county"])) # no code changes - will need to merge on names, not fips 
+
+# checking the percentage of deaths column (I think I should make it from scratch)
+print(combined_1.columns.tolist()) # looking at all col names 
+
+# to fix the percentage col (object --> num) 
+combined_1["_of_total_deaths"].dtype
+combined_1["_of_total_deaths"].describe()
+
+combined_1["_of_total_deaths"] = (
+    combined_1["_of_total_deaths"]
+    .astype(str)                                      # everything to string
+    .replace(["", "None", "none", "NULL", "null", "NaN", "nan", "<NA>"], np.nan)  # unify nulls
+    .str.replace("%", "", regex=False)                # drop %
+    .str.strip()                                      # clean spaces
+)
+
+# now convert only valid numeric strings
+combined_1["_of_total_deaths"] = pd.to_numeric(combined_1["_of_total_deaths"], errors="coerce")
+combined_1["_of_total_deaths"] = combined_1["_of_total_deaths"] / 100
+# the percentages don't make a lot of sense, I think there was a read in error - going to delete and calculate myself 
+combined_1 = combined_1.drop(columns=["_of_total_deaths"])
+
+combined_1["percent_sex_race_deaths"] = (
+    combined_1["deaths"] / combined_1["population"]
+)
+combined_1["percent_sex_race_deaths"].describe() # matches and is more decimal places 
+
+# eliminate age b/c we never use it 
+keys = ["year", "county", "state", "race", "gender", "icd_chapter", "icd_chapter_code"]
+
+# collapse over age: sum deaths & population
+collapsed = (
+    combined_1
+      .groupby(keys, as_index=False)
+      .agg(deaths=("deaths","sum"),
+           population=("population","sum"))
+)
+
+# crude rate per 100k (CDC-style)
+collapsed["crude_rate_per_100k"] = (collapsed["deaths"] / collapsed["population"]) * 100_000
+
+# % of total deaths in county-year (share by race/gender/ICD)
+totals = collapsed.groupby(["year","county","state"])["deaths"].transform("sum")
+collapsed["pct_of_total_deaths"] = (collapsed["deaths"] / totals) * 100
+
+# export the deaths data 
+clean_mortality_data = f"{today_str}_mortality_sex_race_disagg.csv"
+mpath = os.path.join(outf, clean_mortality_data)
+combined_1.to_csv(mpath, index=False)
 
 
-# merge with the mental health data 
+### merge with the mental health data 
+
+# COLLAPSE MORTALITY DATA 
+
+
+
+
+# LOAD IN FIPS 
+
+# CHECK WHICH FIPS CHANGE over years 
+
+# UPDATE FIPS in the MH data 
+
+# UPDATE FIPS in the mortality data (YR-FIPS)
+
+# merge all health data together
+
 
 # export clean, complete health data frame 
 
