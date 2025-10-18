@@ -89,7 +89,7 @@ for i, d in enumerate(agdfs, 1):
     dfs_aligned.append(df_i)
 
 # row-bind (union is identical to baseline since we reindexed)
-combined = pd.concat(dfs_aligned, ignore_index=True)
+combined = pd.concat(dfs_aligned, ignore_index=True)  
 
 # post-check: confirm columns unchanged
 same_cols = list(combined.columns) == base_cols
@@ -121,6 +121,17 @@ fdf_2012 = fips_df[fips_df["year"] == 2012]
 fdf_2017 = fips_df[fips_df["year"] == 2017]     
 # length is significantly shorter of course - need to understand the repetition in the USDA data 
 
+########## NEED TO CHECK HERE ON THE FIPS COLS AGAIN! THERE IS AN ISSUE WITH THE 2012, 2017 data 
+# multiple entries where they were combined in that year, so need to keep only the unique one 
+dup_counts = fdf_2012.groupby(["fips", "year"]).size().reset_index(name="n_rows")
+print(dup_counts["n_rows"].value_counts())  # quick frequency check
+fdf_2012_dedup = fdf_2012.drop_duplicates(subset=["fips", "year"], keep="first")
+
+dup_counts_17 = fdf_2017.groupby(["fips", "year"]).size().reset_index(name="n_rows")
+print(dup_counts_17["n_rows"].value_counts())  # quick frequency check
+fdf_2017_dedup = fdf_2017.drop_duplicates(subset=["fips", "year"], keep="first")
+
+
 # to see what the grouping level is - lets investigate unique values
 grouped = combined.groupby(["STATE_FIPS_CODE", "COUNTY_CODE", "YEAR"])
 
@@ -148,6 +159,7 @@ print("Is it a full range? ",
 
 # prep ag raw df for pivot, then export and saving  
 ag_raw_df = clean_cols(combined)
+ag_raw_df.head()
 
 # create total fips code 
 ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="county_code")
@@ -158,12 +170,13 @@ candidates = [c for c in ag_raw_df.columns if c not in ["state_fips_code", "coun
                                                         "FIPS_generated", "year", "group_desc"]]
 print(candidates) # note all cols are candidate cols 
 
-keys = ["fips", "year", "group_desc"]
-cols = ["metric_a", "metric_b"]     # the two subgroup columns
+keys = ["FIPS_generated", "year", "group_desc"]
+cols = ["commodity_desc", "agg_level_desc"]     # the two subgroup columns --> TO CHANGE 
 val  = "value"                      # the value to spread 
 
-wide = (
-    df.pivot_table(
+###### ERROR HERE ON THE PIVOT - need to fix COLS for the subgroup --- NEED TO COME BACK TO THIS 
+wide_TEST = (
+    ag_raw_df.pivot_table(
         index=keys,
         columns=cols,               # <- multiple columns become a MultiIndex
         values=val,
@@ -173,8 +186,8 @@ wide = (
 )
 
 # optional: if you prefer single-level columns, flatten them:
-if isinstance(wide.columns, pd.MultiIndex):
-    wide.columns = [
+if isinstance(wide_TEST.columns, pd.MultiIndex):
+    wide_TEST.columns = [
         "_".join([str(x) for x in tup if x != ""]) for tup in wide.columns
     ]
 
