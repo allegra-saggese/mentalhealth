@@ -492,12 +492,56 @@ combined_1.to_csv(mpath, index=False)
 
 ### merge with the mental health data 
 
-# COLLAPSE MORTALITY DATA 
+# COLLAPSE MORTALITY DATA over age, race, gender first (so one obs per icd_chapter–county–year)
+by_chapter = (
+    combined_1
+    .groupby(["year","state","county","icd_chapter"], as_index=False)
+    .agg(deaths=("deaths","sum"),
+         population=("population","sum"))
+)
 
+#totals per county–year (for denominators)
+totals = (
+    by_chapter.groupby(["year","state","county"], as_index=False)
+              .agg(total_deaths=("deaths","sum"),
+                   population=("population","sum"))
+)
 
+by_chapter = by_chapter.merge(totals, on=["year","state","county"], how="left")
+
+# compute each ICD’s crude rate & % of total
+by_chapter["icd_crude_rate_per_100k"] = (
+    by_chapter["deaths"] / by_chapter["population_x"] * 100_000
+)
+by_chapter["icd_pct_of_total_deaths"] = (
+    by_chapter["deaths"] / by_chapter["total_deaths"] * 100
+)
+
+#pivot wide to get a col for each type of ISD category of death 
+wide = (
+    by_chapter
+    .pivot_table(
+        index=["year","state","county"],
+        columns="icd_chapter",
+        values=["deaths","icd_crude_rate_per_100k","icd_pct_of_total_deaths"],
+        aggfunc="first"
+    )
+)
+
+# flatten 
+wide.columns = [
+    f"{icd}_{metric}"
+    for metric, icd in wide.columns
+]
+wide = wide.reset_index()
+wide = wide.merge(totals, on=["year","state","county"], how="left")
+
+filled_summary = (1 - wide.isna().sum() / len(wide)) * 100
+print(filled_summary)
 
 
 # LOAD IN FIPS 
+
 
 # CHECK WHICH FIPS CHANGE over years 
 
