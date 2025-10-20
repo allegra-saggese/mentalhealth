@@ -197,7 +197,53 @@ collapsed["n_rows"] = df.groupby(keys).size().reset_index(name="n")["n"]
 #check avg incident / yr (and demog decomp) collapse size 
 7631205/209760 # 36.380649313501145
 
+# check fips uniqueness
+# group by year/state/county and count distinct FIPS in each
+check = (
+    combined_df.groupby(["year", "state", "county"])["fips"]
+    .nunique()
+    .reset_index(name="n_unique_fips")
+)
 
+# find any that violate uniqueness (more than one FIPS)
+violations = check[check["n_unique_fips"] > 1]
+
+print(f"Total groups with multiple FIPS: {len(violations)}") # no violations
+
+
+#### COLLAPSE TO ELIMINATE DISAGGREGATION BY DEMOGRAPHICS 
+# keys for the final panel
+keys_fips = ["year", "state", "county", "fips"]
+
+# keep only crime columns that exist
+crime_cols_present = [c for c in crime_cols if c in collapsed.columns]
+
+# aggregate to fips × year (drop sex/race/ethnicity)
+agg_dict = {c: "sum" for c in crime_cols_present}
+if "n_rows" in collapsed.columns:
+    agg_dict["n_rows"] = "sum"   # optional: sum raw incident rows too
+
+collapsed_fips_only = (
+    collapsed.groupby(keys_fips, as_index=False)
+             .agg(agg_dict)
+)
+
+# recompute total incidents across all crime types
+collapsed_fips_only["total_incidents"] = collapsed_fips_only[crime_cols_present].sum(axis=1)
+
+
+
+### EXPORT BOTH DATAFRAMES 
+today_str = date.today().strftime("%Y-%m-%d")
+
+crime_w_demog = f"{today_str}_crime_demog_final.csv"
+cdpath = os.path.join(outf, crime_w_demog)
+combined_df.to_csv(cdpath, index=False)
+
+
+crime_flat= f"{today_str}_crime_fips_level_final.csv"
+cpath = os.path.join(outf, crime_flat)
+collapsed_fips_only.to_csv(cpath, index=False)
 
 
 

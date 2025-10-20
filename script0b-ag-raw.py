@@ -93,9 +93,24 @@ combined = pd.concat(dfs_aligned, ignore_index=True)
 
 # post-check: confirm columns unchanged
 same_cols = list(combined.columns) == base_cols
+combocols = list(combined.columns)
+combocols == base_cols
 print("Columns identical to baseline after concat:", same_cols) # YIELDING FALSE why? 
 len(base_cols) == len(list(combined.columns)) # TRUE 
+
 # manual inspection shows they are the same --- need to check the QA code above 
+only_in_combined = [c for c in combocols if c not in base_cols]
+only_in_base = [c for c in base_cols if c not in combocols]
+print("Columns in combined but not in base:", only_in_combined)
+print("Columns in base but not in combined:", only_in_base)
+
+# trying again with the ordering bc i just can't seem to find why there is the fail 
+set_combined = set(combocols)
+set_base = set(base_cols)
+
+print("Only in combined:", sorted(set_combined - set_base))
+print("Only in base:", sorted(set_base - set_combined))
+set_combined == set_base # NOW YIELDING TRUE --- it was simply an ordering thing
 
 
 # print any issues found in step 1
@@ -171,7 +186,7 @@ candidates = [c for c in ag_raw_df.columns if c not in ["state_fips_code", "coun
 print(candidates) # note all cols are candidate cols 
 
 keys = ["FIPS_generated", "year", "group_desc"]
-cols = ["commodity_desc", "agg_level_desc"]     # the two subgroup columns --> TO CHANGE 
+cols = ["commodity_desc", "agg_level_desc"]     # subgroups need to differ on the unit description and the statistical description i.e. sales, inventory, or operations are all measuring different things about the CAFO 
 val  = "value"                      # the value to spread 
 
 ###### ERROR HERE ON THE PIVOT - need to fix COLS for the subgroup --- NEED TO COME BACK TO THIS 
@@ -180,7 +195,7 @@ wide_TEST = (
         index=keys,
         columns=cols,               # <- multiple columns become a MultiIndex
         values=val,
-        aggfunc="first"             # or "sum"/"mean" if duplicates exist per cell
+        aggfunc=" "             # will need to sum 
     )
     .reset_index()
 )
