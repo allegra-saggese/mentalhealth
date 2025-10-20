@@ -163,16 +163,8 @@ for col in problem_cols:
     print(f"\n--- {col} ---")
     print(df[col].unique())
 
-######## ISOLATE FOR ONLY AG OF INTEREST ##########
 
-# start with largest categorizations first 
-
-
-
-
-
-
-# prep ag raw df for pivot, then export and saving  
+# prep ag raw df for iteration, then export and saving  
 ag_raw_df = clean_cols(combined)
 ag_raw_df.head()
 
@@ -181,11 +173,35 @@ ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="coun
 ag_raw_df.columns
 
 
+# iterate forward
+base_years = [2002,2007,2012,2017]
+n_forward = 4   # number of years to create after each base year
+year_col = "year"
+
+new_frames = []
+for b in base_years:
+    base = ag_raw_df[ag_raw_df[year_col] == b].copy()
+    if base.empty:
+        continue
+    for y in range(b+1, b+1 + n_forward):
+        new_frames.append(base.assign(**{year_col: y}))
+
+new_rows = pd.concat(new_frames, ignore_index=True) if new_frames else pd.DataFrame(columns=ag_raw_df.columns)
+df_big = pd.concat([ag_raw_df, new_rows], ignore_index=True)
+
+df_big = df_big.drop_duplicates(ignore_index=True) # drop dupes - although it should be the same 
+
+# export in this form -- create cafos after 
+today_str = date.today().strftime("%Y-%m-%d")
+
+clean_ag_census = f"{today_str}_ag_annual_df.csv"
+ag_path = os.path.join(outf, clean_ag_census)
+df_big.to_csv(ag_path, index=False)
 
 
+############ COLLAPSE THE DATA FOR COUNTY LEVEL EASE (creating columns for the CAFOs instead)
 
-
-keys = ["FIPS_generated", "year", "group_desc"]
+keys = ["FIPS_generated", "year"] # may have t0 change 
 cols = ["commodity_desc", "agg_level_desc"]     # subgroups need to differ on the unit description and the statistical description i.e. sales, inventory, or operations are all measuring different things about the CAFO 
 val  = "value"                      # the value to spread 
 
@@ -193,26 +209,20 @@ val  = "value"                      # the value to spread
 wide_TEST = (
     ag_raw_df.pivot_table(
         index=keys,
-        columns=cols,               # <- multiple columns become a MultiIndex
+        columns=cols,               # <- multiple columns become a MultiIndex (to delete)
         values=val,
-        aggfunc=" "             # will need to sum 
+        aggfunc=" "             # will need to sum I reckon... or count?  
     )
     .reset_index()
 )
 
-# optional: if you prefer single-level columns, flatten them:
+# single-level columns, flatten them:
 if isinstance(wide_TEST.columns, pd.MultiIndex):
     wide_TEST.columns = [
         "_".join([str(x) for x in tup if x != ""]) for tup in wide.columns
     ]
 
 
-# export in this form -- create cafos after 
-today_str = date.today().strftime("%Y-%m-%d")
-
-clean_ag_census = f"{today_str}_ag_raw_full.csv"
-ag_path = os.path.join(outf, clean_ag_census)
-combined.to_csv(ag_path, index=False)
 
 
 
