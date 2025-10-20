@@ -150,27 +150,27 @@ fdf_2017_dedup = fdf_2017.drop_duplicates(subset=["fips", "year"], keep="first")
 # to see what the grouping level is - lets investigate unique values
 grouped = combined.groupby(["STATE_FIPS_CODE", "COUNTY_CODE", "YEAR"])
 
-# count unique values for each column within each group
-uniq_counts = grouped.nunique()
+# count unique values for each column within each group (s.t. its combined by state/county/year)
+uniq_counts = grouped.nunique() # see table
 
-# see which columns have more than 1 unique value per (fips, year)
+# see which columns have more than 1 unique value per (fips, year) - most should as its gonna have the stats on all types of farming ops in that county
 problem_cols = (uniq_counts > 1).any()
 problem_cols = problem_cols[problem_cols].index.tolist()
 print("Columns that vary within (fips, year):", problem_cols)
 
-# print unique values for each problem column
+# print unique values for each problem column to help us find the unique CAFO identifier
 for col in problem_cols: 
     print(f"\n--- {col} ---")
     print(df[col].unique())
 
-# check to see if we should use the code
-vals = combined["BEGIN_CODE"].dropna().unique()
-vals.sort()
+######## ISOLATE FOR ONLY AG OF INTEREST ##########
 
-print("Unique values:", vals)
-print("Is it a full range? ", 
-      set(range(vals.min(), vals.max() + 1)) == set(vals))
-# FALSE - only contains 0,12
+# start with largest categorizations first 
+
+
+
+
+
 
 # prep ag raw df for pivot, then export and saving  
 ag_raw_df = clean_cols(combined)
@@ -180,10 +180,10 @@ ag_raw_df.head()
 ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="county_code")
 ag_raw_df.columns
 
-# based on USDA source, should use GROUP_DESC as next group in the panel, make panel wide  
-candidates = [c for c in ag_raw_df.columns if c not in ["state_fips_code", "county_code", 
-                                                        "FIPS_generated", "year", "group_desc"]]
-print(candidates) # note all cols are candidate cols 
+
+
+
+
 
 keys = ["FIPS_generated", "year", "group_desc"]
 cols = ["commodity_desc", "agg_level_desc"]     # subgroups need to differ on the unit description and the statistical description i.e. sales, inventory, or operations are all measuring different things about the CAFO 
