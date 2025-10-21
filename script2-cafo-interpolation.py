@@ -14,6 +14,9 @@ Created on Mon Jun 30 18:55:21 2025
 @author: allegrasaggese
 """
 
+### NOTE THIS SCRIPT IS OUT OF DATE AS OF OCT 2025 DO NOT USE! 
+
+
 # purpose (1) iterate the CAFO data to have annual figures instead of every 5 years
 # (2) create scatterplots for important pairwise matches
 
@@ -21,6 +24,7 @@ Created on Mon Jun 30 18:55:21 2025
 # load packages, functions, databases 
 from packages import *
 from functions import * 
+
 
 # set additional directories
 db_scatter = os.path.join(db_me, "2025-scatterplots") # for saving scatterplots 

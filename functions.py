@@ -96,7 +96,38 @@ def clean_cols(df):
     return df
 
 
+# read in files 
+def read_and_prepare(path):
+    """Simple reader: csv/parquet/xlsx -> lower-case cols, strip strings, standardize fips/year."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        df = pd.read_csv(path, dtype=str)
+    elif ext in (".parquet", ".pq"):
+        df = pd.read_parquet(path)
+    elif ext in (".xlsx", ".xls"):
+        df = pd.read_excel(path, dtype=str)
+    else:
+        raise ValueError("unsupported file type")
 
+    # normalize column names and trim string columns
+    df.columns = df.columns.str.lower().str.strip()
+    for c in df.select_dtypes(include="object").columns:
+        df[c] = df[c].astype("string").str.strip()
+
+    # rename common fips/year variants if present
+    fips_candidates = [c for c in df.columns if c in ("fips","fips_generated","fips_code","geoid","county_fips")]
+    year_candidates = [c for c in df.columns if c in ("year","yr")]
+
+    if fips_candidates:
+        df = df.rename(columns={fips_candidates[0]: "fips"})
+        # normalize to zero-padded 5-char string where possible
+        df["fips"] = df["fips"].astype("string").str.replace(r"\.0$", "", regex=True).str.zfill(5)
+
+    if year_candidates:
+        df = df.rename(columns={year_candidates[0]: "year"})
+        df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+
+    return df
 
 
 

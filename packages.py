@@ -37,7 +37,9 @@ from sklearn.linear_model import LassoCV, LinearRegression, Ridge, RidgeCV
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-
+# for other
+from collections import Counter
+from functools import reduce
 
 # set common directories 
 db_base = os.path.expanduser("~/Dropbox/Mental")
