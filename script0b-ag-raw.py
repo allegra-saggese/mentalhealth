@@ -10,6 +10,8 @@ Created on Mon Aug 11 15:19:00 2025
 import sys, importlib.util
 from collections import Counter
 import re
+from functools import reduce
+
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
 repo = "/Users/allegrasaggese/Documents/GitHub/mentalhealth"
@@ -208,7 +210,7 @@ ag_raw = pd.read_csv(ag_path)
 ag_raw.columns.tolist()
 
 # list of cols that will be created 
-CAFO_cols = c("broiler_cafos_lrg_op",
+CAFO_cols = ("broiler_cafos_lrg_op",
   "broiler_cafos_med_op",
   "layer_cafos_lrg_op",
   "layer_cafos_med_op",
@@ -228,17 +230,17 @@ CAFO_cols = c("broiler_cafos_lrg_op",
   "hog_cafos_SALES_med_op",     
   "hog_cafos_SALES_lrg_head",
   "hog_cafos_SALES_med_head"   
-))
+)
 
 # CAFO size limits, and can adjust these values for the S/M/L CAFO development 
-broiler_cutoff_lrg <- 5
-broiler_cutoff_med <- 3
-layer_cutoff_lrg <- 9
-layer_cutoff_med <- 7
-cattle_cutoff_lrg <- 7
-cattle_cutoff_med <- 6
-hog_cutoff_lrg <- 7
-hog_cutoff_med <- 1
+broiler_cutoff_lrg = 5
+broiler_cutoff_med =  3
+layer_cutoff_lrg =  9
+layer_cutoff_med =  7
+cattle_cutoff_lrg =  7
+cattle_cutoff_med = 6
+hog_cutoff_lrg =  7
+hog_cutoff_med = 1
 
 
 # make a df copy for ease 
@@ -259,6 +261,14 @@ df[['domaincat_desc','unit_desc']] = (
 def map_size(df, mapping, unit_match, out_col):
     mask = df['unit_desc'] == unit_match
     df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
+
+# check the col for chickens
+col = "commodity_desc"
+# normalized, sorted uniques (exclude NA)
+uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
+print(len(uniques), "unique")
+for v in uniques:
+    print(v)
 
 
 # put all mappings together first 
@@ -332,24 +342,118 @@ map_size(df, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
 map_size(df, hog_sales_map, unit_match="operations", out_col="hog_ops_size_sales")
 
 map_size(df, broiler_map, unit_match="head", out_col="broiler_head_size")
+map_size(df, broiler_map, unit_match="operations", out_col="broiler_ops_size")
 map_size(df, layer_map, unit_match="head", out_col="layer_head_size")
 map_size(df, cattle_inv_map, unit_match="head", out_col="cattle_head_size_inv")
 map_size(df, cattle_sales_map, unit_match="head", out_col="cattle_head_size_sales")
 map_size(df, hog_inv_map, unit_match="head", out_col="hog_head_size_inv")
 map_size(df, hog_sales_map, unit_match="head", out_col="hog_head_size_sales")
 
+df.columns.tolist()
+
+# check on the chickens bc we only have broilers w/ sales, layers w/ inventory
+col_filter = "commodity_desc"
+col_target = "domaincat_desc"
+
+mask = df[col_filter].astype("string").str.strip().str.lower() == "chickens"
+vals = df.loc[mask, col_target].astype("string").str.strip().str.lower().dropna()
+
+uniques = sorted(vals.unique())
+print(f"{len(uniques)} unique domaincat_desc values for commodity_desc=='chickens'")
+for v in uniques:
+    print(v)
+
+# frequency table (most common first)
+print("\nCounts:")
+print(vals.value_counts(dropna=True).head(200))
 
 
+# review the interim dataset to understand what the value column is - value is the numeric value assoc. with the unit (inventory, sales, etc)
+subset = df.iloc[:500].copy()
+subset.to_csv("first_500_rows.csv", index=False)
+
+# set value to numeric 
+df['value'] = pd.to_numeric(df['value'].astype(str).str.replace(',', '', regex=False), errors='coerce')
+
+# group for year
+group_cols = ['FIPS_generated','year']
+# add in a layer of QA to see if year<>FIPS doesn't go
+for c in group_cols:
+    if c not in df.columns:
+        raise KeyError(f"required column '{c}' not found in df")
 
 
+# create sum and count cols for the CAFOs 
+def agg_mask(mask, prefix):
+    # select only needed cols so groupby always has fips and year
+    sub = df.loc[mask, group_cols + ['value']].copy()
+    if sub.empty:
+        # return empty frame with correct column names so merges keep year
+        return pd.DataFrame(columns=group_cols + [f"{prefix}_value_sum", f"{prefix}_count"])
+    g = (
+        sub
+        .groupby(group_cols, dropna=False)
+        .agg(**{
+            f"{prefix}_value_sum": ('value', 'sum'),
+            f"{prefix}_count":     ('value', 'count')   # non-missing value count
+        })
+        .reset_index()
+    )
+    return g
+
+frames = []
+
+# broiler
+frames.append(agg_mask(df['broiler_ops_size'] >= broiler_cutoff_lrg, 'broiler_lrg_op'))
+frames.append(agg_mask((df['broiler_ops_size'] >= broiler_cutoff_med) & (df['broiler_ops_size'] < broiler_cutoff_lrg), 'broiler_med_op'))
+
+# layer (if present)
+if 'layer_ops_size' in df.columns:
+    frames.append(agg_mask(df['layer_ops_size'] >= layer_cutoff_lrg, 'layer_lrg_op'))
+    frames.append(agg_mask((df['layer_ops_size'] >= layer_cutoff_med) & (df['layer_ops_size'] < layer_cutoff_lrg), 'layer_med_op'))
+
+# cattle (inv & sales)
+if 'cattle_ops_size_inv' in df.columns:
+    frames.append(agg_mask(df['cattle_ops_size_inv'] >= cattle_cutoff_lrg, 'cattle_lrg_op_inv'))
+    frames.append(agg_mask((df['cattle_ops_size_inv'] >= cattle_cutoff_med) & (df['cattle_ops_size_inv'] < cattle_cutoff_lrg), 'cattle_med_op_inv'))
+if 'cattle_ops_size_sales' in df.columns:
+    frames.append(agg_mask(df['cattle_ops_size_sales'] >= cattle_cutoff_lrg, 'cattle_lrg_op_sales'))
+    frames.append(agg_mask((df['cattle_ops_size_sales'] >= cattle_cutoff_med) & (df['cattle_ops_size_sales'] < cattle_cutoff_lrg), 'cattle_med_op_sales'))
+
+# hog (inv & sales)
+if 'hog_ops_size_inv' in df.columns:
+    frames.append(agg_mask(df['hog_ops_size_inv'] >= hog_cutoff_lrg, 'hog_lrg_op_inv'))
+    frames.append(agg_mask((df['hog_ops_size_inv'] >= hog_cutoff_med) & (df['hog_ops_size_inv'] < hog_cutoff_lrg), 'hog_med_op_inv'))
+if 'hog_ops_size_sales' in df.columns:
+    frames.append(agg_mask(df['hog_ops_size_sales'] >= hog_cutoff_lrg, 'hog_lrg_op_sales'))
+    frames.append(agg_mask((df['hog_ops_size_sales'] >= hog_cutoff_med) & (df['hog_ops_size_sales'] < hog_cutoff_lrg), 'hog_med_op_sales'))
+
+# start from the full set of observed (fips, year) so we keep year dimension
+all_fips_year = df[group_cols].drop_duplicates().reset_index(drop=True)
 
 
+# merge each aggregate onto all_fips_year
+agg_by_fips_year = all_fips_year.copy()
+for frame in frames:
+    if frame.empty:
+        # create frame with same index columns and no metric cols -> skip
+        continue
+    agg_by_fips_year = agg_by_fips_year.merge(frame, on=group_cols, how='left')
 
 
+# fill missing numeric metrics with 0
+metric_cols = [c for c in agg_by_fips_year.columns if c not in group_cols]
+if metric_cols:
+    agg_by_fips_year[metric_cols] = agg_by_fips_year[metric_cols].fillna(0)
+    # make sure count cols are ints
+    count_cols = [c for c in metric_cols if c.endswith('_count')]
+    if count_cols:
+        agg_by_fips_year[count_cols] = agg_by_fips_year[count_cols].astype(int)
 
 
-
-
-
+# export the CAFO data 
+clean_cafo = f"{today_str}_cafo_annual_df.csv"
+ag_path2 = os.path.join(outf, clean_cafo)
+agg_by_fips_year.to_csv(ag_path2, index=False)
 
 
