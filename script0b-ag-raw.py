@@ -201,26 +201,153 @@ df_big.to_csv(ag_path, index=False)
 
 ############ COLLAPSE THE DATA FOR COUNTY LEVEL EASE (creating columns for the CAFOs instead)
 
-keys = ["FIPS_generated", "year"] # may have t0 change 
-cols = ["commodity_desc", "agg_level_desc"]     # subgroups need to differ on the unit description and the statistical description i.e. sales, inventory, or operations are all measuring different things about the CAFO 
-val  = "value"                      # the value to spread 
+# unhash next line if you don't want to remerge the ag data 
+ag_path = os.path.join(outf, "2025-10-19_ag_annual_df.csv")
+ag_raw = pd.read_csv(ag_path)
 
-###### ERROR HERE ON THE PIVOT - need to fix COLS for the subgroup --- NEED TO COME BACK TO THIS 
-wide_TEST = (
-    ag_raw_df.pivot_table(
-        index=keys,
-        columns=cols,               # <- multiple columns become a MultiIndex (to delete)
-        values=val,
-        aggfunc=" "             # will need to sum I reckon... or count?  
-    )
-    .reset_index()
+ag_raw.columns.tolist()
+
+# list of cols that will be created 
+CAFO_cols = c("broiler_cafos_lrg_op",
+  "broiler_cafos_med_op",
+  "layer_cafos_lrg_op",
+  "layer_cafos_med_op",
+  "cattle_cafos_INV_lrg_op",
+  "cattle_cafos_INV_med_op",
+  "cattle_cafos_INV_lrg_head",
+  "cattle_cafos_INV_med_head",
+  "cattle_cafos_SALES_lrg_op",
+  "cattle_cafos_SALES_med_op",
+  "cattle_cafos_SALES_lrg_head",
+  "cattle_cafos_SALES_med_head",
+  "hog_cafos_INV_lrg_op",
+  "hog_cafos_INV_med_op",
+  "hog_cafos_INV_lrg_head",
+  "hog_cafos_INV_med_head",
+  "hog_cafos_SALES_lrg_op",
+  "hog_cafos_SALES_med_op",     
+  "hog_cafos_SALES_lrg_head",
+  "hog_cafos_SALES_med_head"   
+))
+
+# CAFO size limits, and can adjust these values for the S/M/L CAFO development 
+broiler_cutoff_lrg <- 5
+broiler_cutoff_med <- 3
+layer_cutoff_lrg <- 9
+layer_cutoff_med <- 7
+cattle_cutoff_lrg <- 7
+cattle_cutoff_med <- 6
+hog_cutoff_lrg <- 7
+hog_cutoff_med <- 1
+
+
+# make a df copy for ease 
+df = ag_raw
+
+# put it all in strings
+df[['domaincat_desc','unit_desc']] = df[['domaincat_desc','unit_desc']].astype("string").apply(lambda s: s.str.strip())
+
+# normalize strings
+df[['domaincat_desc','unit_desc']] = (
+    df[['domaincat_desc','unit_desc']]
+    .astype("string")
+    .apply(lambda s: s.str.strip().str.lower())
 )
 
-# single-level columns, flatten them:
-if isinstance(wide_TEST.columns, pd.MultiIndex):
-    wide_TEST.columns = [
-        "_".join([str(x) for x in tup if x != ""]) for tup in wide.columns
-    ]
+
+# make a wrapper to map the inventory the same way in all of them 
+def map_size(df, mapping, unit_match, out_col):
+    mask = df['unit_desc'] == unit_match
+    df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
+
+
+# put all mappings together first 
+layer_map = {
+ "inventory: (1 to 49 head)":1,
+ "inventory: (50 to 99 head)":2,
+ "inventory: (100 to 399 head)":3,
+ "inventory: (400 to 3,199 head)":4,
+ "inventory: (3,200 to 9,999 head)":5,
+ "inventory: (10,000 to 19,999 head)":6,
+ "inventory: (20,000 to 49,999 head)":7,
+ "inventory: (50,000 to 99,999 head)":8,
+ "inventory: (100,000 or more head)":9
+}
+
+cattle_inv_map = {
+ "inventory of cattle, incl calves: (1 to 9 head)":1,
+ "inventory of cattle, incl calves: (10 to 19 head)":2,
+ "inventory of cattle, incl calves: (20 to 49 head)":3,
+ "inventory of cattle, incl calves: (50 to 99 head)":4,
+ "inventory of cattle, incl calves: (100 to 199 head)":5,
+ "inventory of cattle, incl calves: (200 to 499 head)":6,
+ "inventory of cattle, incl calves: (500 or more head)":7
+}
+
+cattle_sales_map = {
+ "sales of cattle, incl calves: (1 to 9 head)":1,
+ "sales of cattle, incl calves: (10 to 19 head)":2,
+ "sales of cattle, incl calves: (20 to 49 head)":3,
+ "sales of cattle, incl calves: (50 to 99 head)":4,
+ "sales of cattle, incl calves: (100 to 199 head)":5,
+ "sales of cattle, incl calves: (200 to 499 head)":6,
+ "sales of cattle, incl calves: (500 or more head)":7
+}
+
+hog_inv_map = {
+ "inventory of hogs: (1 to 24 head)":1,
+ "inventory of hogs: (25 to 49 head)":2,
+ "inventory of hogs: (50 to 99 head)":3,
+ "inventory of hogs: (100 to 199 head)":4,
+ "inventory of hogs: (200 to 499 head)":5,
+ "inventory of hogs: (500 to 999 head)":6,
+ "inventory of hogs: (1,000 or more head)":7
+}
+
+hog_sales_map = {
+ "sales of hogs: (1 to 24 head)":1,
+ "sales of hogs: (25 to 49 head)":2,
+ "sales of hogs: (50 to 99 head)":3,
+ "sales of hogs: (100 to 199 head)":4,
+ "sales of hogs: (200 to 499 head)":5,
+ "sales of hogs: (500 to 999 head)":6,
+ "sales of hogs: (1,000 or more head)":7
+}
+
+# broiler/sales maps (same as earlier broiler mapping)
+broiler_map = {
+ "sales: (1 to 1,999 head)":1,
+ "sales: (2,000 to 59,999 head)":2,
+ "sales: (60,000 to 99,999 head)":3,
+ "sales: (100,000 to 199,999 head)":4,
+ "sales: (200,000 to 499,999 head)":5,
+ "sales: (500,000 or more head)":6
+}
+
+# apply mappings
+map_size(df, layer_map, unit_match="operations", out_col="layer_ops_size")
+map_size(df, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
+map_size(df, cattle_sales_map, unit_match="operations", out_col="cattle_ops_size_sales")
+map_size(df, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
+map_size(df, hog_sales_map, unit_match="operations", out_col="hog_ops_size_sales")
+
+map_size(df, broiler_map, unit_match="head", out_col="broiler_head_size")
+map_size(df, layer_map, unit_match="head", out_col="layer_head_size")
+map_size(df, cattle_inv_map, unit_match="head", out_col="cattle_head_size_inv")
+map_size(df, cattle_sales_map, unit_match="head", out_col="cattle_head_size_sales")
+map_size(df, hog_inv_map, unit_match="head", out_col="hog_head_size_inv")
+map_size(df, hog_sales_map, unit_match="head", out_col="hog_head_size_sales")
+
+
+
+
+
+
+
+
+
+
+
 
 
 
