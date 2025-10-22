@@ -111,6 +111,8 @@ merged_all.to_csv(out_path, index=False)
 
 ########## VISUALIZATIONS  #############
 df = merged_all
+df = pd.read_csv()
+
 
 # test on a single variable and single year across all counties -- will later update to do for year and at state level
 var = "hog_med_op_sales_count_cafo"   # replace with your variable
@@ -130,3 +132,28 @@ else:
     plt.title(f"{var} — {year_val}")
     plt.tight_layout()
     plt.show()
+
+
+# TEST OUT GALINA'S CODE FOR VIOLIN PLOT 
+plt.figure(figsize=(12, 8),dpi=200)
+sns.violinplot(x='cat', y='B_Lgrcarbon1', data=df, inner='quartile', palette='pink_r',bw=0.2)
+ 
+
+# Manually set category labels
+plt.xticks(ticks=[0, 1, 2, 3], labels=[])  
+
+# Limit y-axis range
+plt.ylim(-0.2, 0.2)  # Adjust min and max y-axis values
+
+
+# Customization
+#plt.title("Violin Plot by Category")
+plt.xlabel("")
+plt.ylabel("Beta")
+
+
+# Show plot
+#plt.show()
+plt.savefig("mg.png", format="png", bbox_inches="tight")
+plt.show()
+plt.close()
