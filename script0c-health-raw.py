@@ -7,11 +7,8 @@ Created on Wed Aug 13 10:13:23 2025
 """
 # purpose: ALL MENTAL HEALTH AND CDC DATA UPLOAD! 
 
-# pandas is all fucked
-conda activate mentalhealth && python - <<'PY'
-
-
 # load packages and workspaces
+import pandas as pd
 import sys, importlib.util
 from collections import Counter
 import re
