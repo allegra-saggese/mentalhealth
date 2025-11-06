@@ -112,7 +112,7 @@ merged_all.to_csv(out_path, index=False)
 ########## VISUALIZATIONS  #############
 df = merged_all
 df = pd.read_csv()
-
+ eve
 
 # test on a single variable and single year across all counties -- will later update to do for year and at state level
 var = "hog_med_op_sales_count_cafo"   # replace with your variable
