@@ -140,6 +140,11 @@ path = "/Users/allegrasaggese/Dropbox/Mental/Data/raw/fips/foruse_FIPScodes2010_
 fips_10 = pd.read_table(path, sep=",", engine="python", encoding="latin1", on_bad_lines="warn")
 # create full FIPS
 generate_fips(fips_10, state_col="STATEFP", city_col="COUNTYFP")
+
+# collapse on subfips because we don't need them 
+fips_10 = fips_10.drop(columns=['COUSUBFP', 'COUSUBNAME', 'FUNCSTAT'], errors='ignore')
+fips_10 = fips_10.drop_duplicates(subset='FIPS_generated', keep='first')
+
 # add years
 yrs2 = list(range(2010, 2020))
 yrs2df = pd.DataFrame({"year": yrs2})
@@ -159,7 +164,13 @@ for p in pipe_files:
     
 fips_20 = pipe_dfs[0]
 generate_fips(fips_20, state_col="STATEFP", city_col="COUNTYFP")
-fips_20 = fips_20.drop(columns=["source_file"])   
+fips_20 = fips_20.drop(columns=["source_file"]) 
+
+# similar to fips_10 drop subfips! 
+fips_20 = fips_20.drop(columns=['COUSUBFP', 'COUSUBNAME', 'FUNCSTAT'], errors='ignore')
+fips_20 = fips_20.drop_duplicates(subset='FIPS_generated', keep='first')
+
+  
 # add years
 yrs3 = list(range(2020, 2025))
 yrs3df = pd.DataFrame({"year": yrs3})
@@ -192,11 +203,26 @@ fips_20_expanded = fips_20_expanded.rename(columns={
     "fips_generated": "fips"
 })
 
+# BEFORE MERGE - make sure the same count of cols + col types 
+fips_10_expanded = fips_10_expanded.drop(columns=['state'], errors='ignore')
+fips_20_expanded = fips_20_expanded.drop(columns=['state', 'cousubns', 'classfp'], errors='ignore')
+
+# standardize col types
+for df in [fips_90_expanded, fips_00_expanded, fips_10_expanded, fips_20_expanded]:
+    df['fips'] = pd.to_numeric(df['fips'], errors='coerce')
+    df['year'] = pd.to_numeric(df['year'], errors='coerce')
+    df['state_code'] = df['state_code'].astype(str) # no pad
+    df['county_code'] = df['county_code'].astype(str) # no pad 
+    df['county'] = df['county'].astype(str)
+
+
 # combine all FIPS data 
 fips_annual_full = pd.concat([fips_90_expanded, fips_00_expanded, 
                               fips_10_expanded, fips_20_expanded],
                              axis=0, join="outer", ignore_index=True)
 
+
+#### PICK UP HERE!!! 
 
 # backfill missing state data by taking the assignment in other rows 
 # convert to string

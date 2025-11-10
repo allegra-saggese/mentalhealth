@@ -7,6 +7,7 @@ Created on Sat Aug  2 13:14:43 2025
 """
 
 # set packages to import - basic data manipulation
+import sys
 import os
 import pandas as pd
 import numpy as np
