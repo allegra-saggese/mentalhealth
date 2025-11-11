@@ -110,62 +110,56 @@ print("Columns in combined but not in base:", only_in_combined)
 print("Columns in base but not in combined:", only_in_base)
 
 
-# print any issues found in step 1
+# print any issues found in step 1 -- empty set so yields nothing (but it serves as a QA road block for future analysis)
 for i, missing, extra in problems:
     if missing:
         print(f"df_{i} MISSING cols vs baseline: {missing}")
     if extra:
         print(f"df_{i} EXTRA cols vs baseline (dropped by reindex): {extra}")
-        
-        
-# sense check the length of the dataframe against the FIPS data to see how many observations there are 
-fips_sense = os.path.join(outf, "2025-08-11_fips_full.csv") 
-fips_df = pd.read_csv(fips_sense) 
+    
+
+
+########### DATA CLEANING FOR ALL FIPS / AG -- ENSURING MATCH WILL WORK ####################
+
+# sense check the length of the dataframe against the FIPS data 
+# PURPOSE: to see how many observations there are 
+
+matches = glob.glob(os.path.join(outf, "*fips_full*.csv")) # pull the most recent fips file 
+if matches:
+    fips_sense = max(matches, key=os.path.getmtime)
+    print("Using:", fips_sense)
+else:
+    print("No matching file found.")
+    
+fips_df = pd.read_csv(fips_sense)   # upload fips_df 
 
 for i, df in enumerate(agdfs, 1):
     print(f"\n--- Dataframe {i} number of rows ---")
     print(len(df)) 
 
-# fips check by year of data
+# create fips slide df by year (to match w/ ag)
 fdf_2002 = fips_df[fips_df["year"] == 2002]     
 fdf_2007 = fips_df[fips_df["year"] == 2007]     
 fdf_2012 = fips_df[fips_df["year"] == 2012]     
 fdf_2017 = fips_df[fips_df["year"] == 2017]     
-# length is significantly shorter of course - need to understand the repetition in the USDA data 
 
-
-########### DATA CLEANING FOR ALL AG DATA - COL SPECIFIC ####################
-
-
-
-
-########## NEED TO CHECK HERE ON THE FIPS COLS AGAIN! THERE IS AN ISSUE WITH THE 2012, 2017 data 
-# multiple entries where they were combined in that year, so need to keep only the unique one 
+# checking dupes on fips data - although I'm certain we shouldn't have any
 dup_counts = fdf_2012.groupby(["fips", "year"]).size().reset_index(name="n_rows")
 print(dup_counts["n_rows"].value_counts())  # quick frequency check
-fdf_2012_dedup = fdf_2012.drop_duplicates(subset=["fips", "year"], keep="first")
-
 dup_counts_17 = fdf_2017.groupby(["fips", "year"]).size().reset_index(name="n_rows")
 print(dup_counts_17["n_rows"].value_counts())  # quick frequency check
-fdf_2017_dedup = fdf_2017.drop_duplicates(subset=["fips", "year"], keep="first")
 
+# check variation by fips/year --- should be each type of potential ag op in the fips --- so we should expect a lot of variation
+var_cols = (uniq_counts > 1).any()
+var_cols = var_cols[var_cols].index.tolist()
+print("Columns that vary within (fips, year):", var_cols)
 
-# to see what the grouping level is - lets investigate unique values
-grouped = combined.groupby(["STATE_FIPS_CODE", "COUNTY_CODE", "YEAR"])
-
-# count unique values for each column within each group (s.t. its combined by state/county/year)
-uniq_counts = grouped.nunique() # see table
-
-# see which columns have more than 1 unique value per (fips, year) - most should as its gonna have the stats on all types of farming ops in that county
-problem_cols = (uniq_counts > 1).any()
-problem_cols = problem_cols[problem_cols].index.tolist()
-print("Columns that vary within (fips, year):", problem_cols)
-
-# print unique values for each problem column to help us find the unique CAFO identifier
-for col in problem_cols: 
+for col in var_cols: 
     print(f"\n--- {col} ---")
-    print(df[col].unique())
+    print(df[col].unique()) # check the potential cafo combos
 
+
+########### DATA CLEANING FOR ALL AG DATA - ITERATING OVER MISSING YRS ####################
 
 # prep ag raw df for iteration, then export and saving  
 ag_raw_df = clean_cols(combined)
