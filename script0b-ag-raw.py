@@ -99,13 +99,12 @@ combined = pd.concat(dfs_aligned, ignore_index=True)
 # post-check: confirm columns unchanged by comparing the list of cols 
 base_cols = list(base_cols)
 same_cols = list(combined.columns) == base_cols
-combocols == base_cols
 print("Columns identical to baseline after concat:", same_cols) # TRUE - needed to convert base_cols to a list  
 len(base_cols) == len(list(combined.columns)) # TRUE 
 
 # manual inspection shows they are the same 
-only_in_combined = [c for c in combocols if c not in base_cols]
-only_in_base = [c for c in base_cols if c not in combocols]
+only_in_combined = [c for c in list(combined.columns) if c not in base_cols]
+only_in_base = [c for c in base_cols if c not in list(combined.columns)]
 print("Columns in combined but not in base:", only_in_combined)
 print("Columns in base but not in combined:", only_in_base)
 
@@ -149,14 +148,6 @@ print(dup_counts["n_rows"].value_counts())  # quick frequency check
 dup_counts_17 = fdf_2017.groupby(["fips", "year"]).size().reset_index(name="n_rows")
 print(dup_counts_17["n_rows"].value_counts())  # quick frequency check
 
-# check variation by fips/year --- should be each type of potential ag op in the fips --- so we should expect a lot of variation
-var_cols = (uniq_counts > 1).any()
-var_cols = var_cols[var_cols].index.tolist()
-print("Columns that vary within (fips, year):", var_cols)
-
-for col in var_cols: 
-    print(f"\n--- {col} ---")
-    print(df[col].unique()) # check the potential cafo combos
 
 
 ########### DATA CLEANING FOR ALL AG DATA - ITERATING OVER MISSING YRS ####################
@@ -185,8 +176,19 @@ for b in base_years:
 
 new_rows = pd.concat(new_frames, ignore_index=True) if new_frames else pd.DataFrame(columns=ag_raw_df.columns)
 df_big = pd.concat([ag_raw_df, new_rows], ignore_index=True)
+len_df_big_predupe = len(df_big)
+len_it_rows = len(new_rows)
 
-df_big = df_big.drop_duplicates(ignore_index=True) # drop dupes - although it should be the same 
+df_big = df_big.drop_duplicates(ignore_index=True) # drop dupes
+# sense check bind -- comparing lengths 
+len_raw_df = len(ag_raw_df)
+len_df_big_post_dupe= len(df_big)
+
+print("No duplicates found in final dataframe? ", 
+      (len_df_big_post_dupe == len_df_big_predupe == (len_it_rows + len_raw_df)))
+
+# INTERPRETATION: about 14 million farm(s) or farm operations from 2002-2021
+# for QA --- USDA census reports about 1.9 mil farms (in 2022 - data we don't have), so this number seems fair although maybe a little low) 
 
 # export in this form -- create cafos after 
 today_str = date.today().strftime("%Y-%m-%d")
@@ -198,11 +200,22 @@ df_big.to_csv(ag_path, index=False)
 
 ############ COLLAPSE THE DATA FOR COUNTY LEVEL EASE (creating columns for the CAFOs instead)
 
-# unhash next line if you don't want to remerge the ag data 
-ag_path = os.path.join(outf, "2025-10-19_ag_annual_df.csv")
-ag_raw = pd.read_csv(ag_path)
+# # # # unhash if you are just remaking the CAFOs (i.e. you don't want to remake the RAW AG DATA!)
+# match_ag_df = glob.glob(os.path.join(outf, "*ag_annual_df*.csv")) # pull the most recent fips file 
+# if match_ag_df:
+#    ag_complete = max(match_ag_df, key=os.path.getmtime)
+#    print("Using:", ag_complete)
+# else:
+#    print("No matching file found.")
+    
+# ag_iterated = pd.read_csv(ag_complete)   # upload ag_complete iterated data
+ag_iterated = df_big.copy()
+ag_iterated.columns.tolist()
 
-ag_raw.columns.tolist()
+# remove files from cleaning / iterating ag data that take up a ton of space
+del ag_raw_df, agdfs, agfiles, all_match, b, clean_ag_census, d, df, df_big, df_i
+del dup_counts, dup_counts_17, extra, fips_sense, i, matches, missing, n_forward, new_frames, new_rows
+del only_in_base, only_in_combined, problems, same_cols, year_col, y
 
 # list of cols that will be created 
 CAFO_cols = ("broiler_cafos_lrg_op",
@@ -239,7 +252,7 @@ hog_cutoff_med = 1
 
 
 # make a df copy for ease 
-df = ag_raw
+df = ag_iterated.copy()
 
 # put it all in strings
 df[['domaincat_desc','unit_desc']] = df[['domaincat_desc','unit_desc']].astype("string").apply(lambda s: s.str.strip())
@@ -265,6 +278,21 @@ print(len(uniques), "unique")
 for v in uniques:
     print(v)
 
+col = "unit_desc"
+# normalized, sorted uniques (exclude NA)
+uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
+print(len(uniques), "unique")
+for v in uniques:
+    print(v)
+    
+# clean the domain description before making the map 
+df["domaincat_desc"] = (
+    df["domaincat_desc"]
+    .astype(str)
+    .str.strip()
+    .str.lower()
+)
+
 
 # put all mappings together first 
 layer_map = {
@@ -279,6 +307,7 @@ layer_map = {
  "inventory: (100,000 or more head)":9
 }
 
+
 cattle_inv_map = {
  "inventory of cattle, incl calves: (1 to 9 head)":1,
  "inventory of cattle, incl calves: (10 to 19 head)":2,
@@ -288,6 +317,7 @@ cattle_inv_map = {
  "inventory of cattle, incl calves: (200 to 499 head)":6,
  "inventory of cattle, incl calves: (500 or more head)":7
 }
+
 
 cattle_sales_map = {
  "sales of cattle, incl calves: (1 to 9 head)":1,
@@ -329,6 +359,54 @@ broiler_map = {
  "sales: (500,000 or more head)":6
 }
 
+# ADDITIONAL MAPPINGS CREATED TO INCREASE MATCH RATE - NEED TO ADD MORE
+beef_cows_map = {
+ "inventory of beef cows: (1 to 9 head)":1,
+ "inventory of beef cows: (10 to 19 head)":2,
+ "inventory of beef cows: (20 to 49 head)":3,
+ "inventory of beef cows: (50 to 99 head)":4,
+ "inventory of beef cows: (100 to 199 head)":5,
+ "inventory of beef cows: (200 to 499 head)":6,
+ "inventory of beef cows: (500 or more head)":7
+}
+
+cattle_inv_map_no_cows = {
+'inventory of cattle, (excl cows): (1 to 9 head)': 1,
+'inventory of cattle, (excl cows): (10 to 19 head)': 2,
+'inventory of cattle, (excl cows): (100 to 199 head)': 3,
+'inventory of cattle, (excl cows): (20 to 49 head)': 4,
+'inventory of cattle, (excl cows): (200 to 499 head)': 5,
+'inventory of cattle, (excl cows): (50 to 99 head)': 6
+}
+
+milk_cows_map = {
+ "inventory of milk cows: (1 to 9 head)":1,
+ "inventory of milk cows: (10 to 19 head)":2,
+ "inventory of milk cows: (20 to 49 head)":3,
+ "inventory of milk cows: (50 to 99 head)":4,
+ "inventory of milk cows: (100 to 199 head)":5,
+ "inventory of milk cows: (200 to 499 head)":6,
+ "inventory of milk cows: (500 or more head)":7
+}
+
+sheep_map = {
+ "inventory of sheep, incl lambs: (1 to 24 head)":1,
+ "inventory of sheep, incl lambs: (25 to 99 head)":2,
+ "inventory of sheep, incl lambs: (100 to 299 head)":3,
+ "inventory of sheep, incl lambs: (300 to 999 head)":4,
+ "inventory of sheep, incl lambs: (1,000 or more head)":5
+}
+
+breeding_hogs_map = {
+ "inventory of breeding hogs: (1 to 24 head)": 1,
+ "inventory of breeding hogs: (25 to 49 head)": 2,
+ "inventory of breeding hogs: (50 to 99 head)": 3,
+ "inventory of breeding hogs: (100 or more head)": 4
+}
+
+
+
+# NEED TO ADD NEW MAPPINGS HERE 
 # apply mappings
 map_size(df, layer_map, unit_match="operations", out_col="layer_ops_size")
 map_size(df, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
@@ -344,7 +422,65 @@ map_size(df, cattle_sales_map, unit_match="head", out_col="cattle_head_size_sale
 map_size(df, hog_inv_map, unit_match="head", out_col="hog_head_size_inv")
 map_size(df, hog_sales_map, unit_match="head", out_col="hog_head_size_sales")
 
+
+##################### -- QA POST MAPPING --  #########################
+
 df.columns.tolist()
+
+# check outcol fill rate --- if the mapping is working 
+out_cols = [
+    "layer_ops_size", "cattle_ops_size_inv", "cattle_ops_size_sales",
+    "hog_ops_size_inv", "hog_ops_size_sales", "broiler_head_size",
+    "broiler_ops_size", "layer_head_size", "cattle_head_size_inv",
+    "cattle_head_size_sales", "hog_head_size_inv", "hog_head_size_sales"
+] # super low rate of match -- TO FIX 
+
+# other qa - check the set of the domaincat_desc and the keys I created --- i am missing many! 
+cols_to_create_mapping_for = set(df["domaincat_desc"].unique()) - set(layer_map.keys())
+# other qa - check mean of missing of a few of the cols 
+for c in ["layer_ops_size", "hog_ops_size_inv", "broiler_head_size"]:
+    print(c, df[c].isna().mean() * 100)
+
+# count and percent of missing for each
+na_summary = df[out_cols].isna().agg(['sum', 'mean']).T
+na_summary['mean'] = na_summary['mean'] * 100  # convert to percent
+na_summary.columns = ['n_missing', 'pct_missing']
+print(na_summary) # VERY LOW = NOT GOOD REDO 
+
+# some of the cols getting carried over --- 
+df.loc[df["unit_desc"] == "head", "domaincat_desc"].dropna().unique()[:70]
+
+# check the count of each mapping so I can see if its actually that we have low match rate i.e. low count of observations or if its a matching error 
+mask = df['domaincat_desc'].isin(layer_map.keys())
+print(mask.sum(), "rows match layer_map keys")
+print(df.loc[mask, 'domaincat_desc'].unique()[:10])
+
+unmatched = set(df['domaincat_desc'].unique()) - set(layer_map.keys())
+print(sorted([x for x in unmatched if "inventory" in x.lower()][:10])) # decent amount unmatched I can't quite see why 
+
+# verify both are the correct object type - although with low match rate i think it must be, and is not an issue with the type but instead is the data issue 
+print(type(next(iter(layer_map.keys()))))
+print(df['domaincat_desc'].dtype)
+
+test_key = "inventory: (1 to 49 head)"
+print(test_key in df['domaincat_desc'].unique())
+df['mapped_layer'] = df['domaincat_desc'].map(layer_map_clean)
+print(df['mapped_layer'].notna().mean()) #(1% match rate)
+
+# going to compare raw data numbers on those two cols with the mapping output - should be the same count of rows 
+matching = df[
+    (df['unit_desc'].str.lower() == 'operations')
+    & (df['domaincat_desc'].isin(layer_map.keys()))
+]
+print(len(matching))
+print(matching['domaincat_desc'].unique())
+print(df['layer_ops_size'].notna().sum()) # SAME QUANTITY - JUST A SMALL PORTION OF THE CENSUS DATA - NEED TO EXPAND CAFO CLASSIFICATIONS TO MORE UNIT DESCRIPTIONS! 
+
+
+
+
+
+###### SECOND ROUND OF CAFO TESTING! #########
 
 # check on the chickens bc we only have broilers w/ sales, layers w/ inventory
 col_filter = "commodity_desc"
