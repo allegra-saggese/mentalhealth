@@ -28,7 +28,7 @@ from packages import *
 inf = os.path.join(db_data, "raw") # input 
 outf = os.path.join(db_data, "clean") #outpit
 
-# ----------------------- DATA PART 1 -------------------- -#
+# ----------------------- DATA PART 1 : CREATE FIPS KEY  -------------------- -#
 
 
 ## UPLOAD ALL CENSUS DATA - ALL YEARS, RAW 
@@ -80,7 +80,6 @@ for p in fipsfiles:
         ws_files.append(p)
 
 # load each bucket (three separate lines/loops)
-
 # whitespace (or fixed-width) files (2000)
 ws_dfs = []
 for p in ws_files:
@@ -275,14 +274,26 @@ out_path = os.path.join(clean_dir, clean_fips_df)
 # export to csv in clean folder
 fips_annual_full_v2.to_csv(out_path, index=False)
 
+# clean up
+del fips_00, fips_00_expanded, fips_10, fips_10_expanded, fips_20 
+del fips_20_expanded, fips_90, fips_90_expanded, fips_annual_full
+del fips_annual_full_v2, missing_pct, mt_fips, new_row1, new_row2, rawfips
+del rows_with_missing, boston_fips
 
-# ----------------------- DATA PART 2 -------------------- -#
+
+# ----------------------- DATA PART 2: POPULATION  -------------------- -#
 
 
 ## INVESTIGATE COLUMNS ACROSS DISAGGREGATED DFs for patterns 
 col_lists = [df.columns.tolist() for df in dfs]
 
-# issue - only one col in the 1990-2000 data, need to change 
+print(len(dfs[0].columns)) #96
+print(len(dfs[1].columns)) #20
+print(len(dfs[2].columns)) #180
+print(len(dfs[3].columns)) #1
+
+
+# issue - only one col in the 1990-2000 data, need to separate by spaces
 dfs[3].head(50) 
 raw_col = dfs[3].iloc[:, 0]
 raw_header = dfs[3].columns[0]  # example: "FIPS  STATE_NAME   TOTAL_ HEAD COUNT  AVG_WEIGHT"
@@ -296,15 +307,21 @@ split_data = raw_col.str.split(expand=True)
 dfs[3] = split_data
 dfs[3].columns = new_colnames
 print(dfs[3].head())
- 
+print(len(dfs[3].columns))  # now 10 cols 
 
-# get all cols across all dfs
-colsets = [set(df.columns) for df in dfs[:4]]
-common_cols = set.intersection(*colsets)
-print("Columns common to all 4:", sorted(common_cols)) # none across all four 
 
-all_cols = set.union(*colsets)
-print("Total unique columns across all:", len(all_cols)) # 292 total unique 
+# standardize col names to lower case and remove white spaces
+for i in range(len(dfs)):
+    dfs[i].columns = dfs[i].columns.str.lower().str.replace(r'[\s\-]+', '', regex=True)
+
+# create sets of column names
+colsets = [set(df.columns) for df in dfs]
+common_cols = set.intersection(*colsets) # print common cols 
+print(f"Columns common to all dfs: {len(common_cols)}")
+print(common_cols)
+
+all_cols = set.union(*colsets) # get all unique cols 
+print("Total unique columns across all:", len(all_cols)) # 291 total unique 
 
 # count of columns 
 all_columns = [col for colset in colsets for col in colset]
@@ -314,49 +331,71 @@ col_counts = Counter(all_columns)
 col_presence = pd.DataFrame.from_dict(col_counts, orient="index", columns=["count"])
 col_presence = col_presence.reset_index().rename(columns={"index": "column"})
 col_presence = col_presence.sort_values(by="count", ascending=False)
+print(col_presence) 
+# 2000-2020 (dfs[1] = 2010, dfs[2] = 2020, dfs[0] = 2000, data is in wide format, need to convert to long 
 
-print(col_presence) # 2000-2020 data is in wide format, need to convert to long 
 
 ## CLEAN UP ENVIRO 
-del all_cols, all_columns, col_counts, col_lists, col_presence, comma_dfs, comma_files, common_cols, d, demo_cols, file_list, fips20, fips_00, fips_10    
-del fips_20, fips_90, fipsdfs, new_row1, new_row2, pipe_dfs, pipe_files, p, path
+del all_cols, all_columns, col_counts, col_lists, col_presence,     
 del ws_dfs, ws_files
 del yrs0, yrs2, yrs0df, yrs2df, yrs3, yrs3df
 
 
-## MAKE EACH DATA FRAME IN SAME FORMAT FOR THE MERGE
+######### ------- DATA CLEANING - POPULATION ------ ####### ####### ####### 
+##------- MAKE THE SAME DATAFRAME FOR ALL FOUR SETS OF POPULATION DATA 
 
 ##1990-2000 DATA:
-df1990s = dfs[3]   
-# need to combine to make one aggregate census estimate (as opposed to disagg)
-df1990s = df1990s.apply(pd.to_numeric, errors="coerce")
-cols_to_sum = [col for col in df1990s.columns if col.startswith("NH_") or col.startswith("H_")]
+df1990s = dfs[3].copy() 
+print(df1990s.dtypes) # check col types 
+df1990s.columns = df1990s.columns.str.lower() # make all lower 
+
+# need to combine to make one aggregate census estimate (as opposed to disagg by race)
+cols_to_sum = [col for col in df1990s.columns if col.startswith("nh_") or col.startswith("h_")]
+df1990s[cols_to_sum] = df1990s[cols_to_sum].apply(pd.to_numeric, errors="coerce")
 df1990s["pop"] = df1990s[cols_to_sum].sum(axis=1)
 
-# drop demographic data
-demo_cols = [col for col in df1990s.columns if col.startswith("NH_") or col.startswith("H_")]
-df1990s.drop(columns=demo_cols, inplace=True)
+df1990s[cols_to_sum].apply(lambda x: x.unique()) # check rows 
 
-# make all colnames lowercase 
-df1990s.columns = df1990s.columns.str.lower()
+# create percentage cols 
+for col in cols_to_sum:
+    new_col = f"percent_{col.lower()}"
+    df1990s[new_col] = df1990s[col] / df1990s["pop"]
+
+
+# make sep dataframe w/ demographics
+demo_cols = [col for col in df1990s.columns if col.startswith("nh_") 
+             or col.startswith("h_") 
+             or col.startswith("percent")]
+
+df1990s_disaggregated = df1990s.copy() # save a copy of the DF with disagg b/f removing for merge 
+df1990s.drop(columns=demo_cols, inplace=True) # drop demo data from main DF 
+
 # pad fips 
 df1990s["fips"] = df1990s["fips"].astype(str).str.zfill(5)
 
 # merge with fips county name data
-sub_cols = ["fips", "county", "state_code", "county_code", "year", "state"]
+sub_cols = ["fips", "county", "state_code", "county_code", "year"]
 fips_sub = fips_annual_full[sub_cols]
-df1990s_full = df1990s.merge(fips_sub, on=["fips", "year"], how="inner")  
 
-df1990s_full = df1990s_full.rename(columns={"pop": "population" })
+fips_sub['fips'] = fips_sub['fips'].astype(int) # set type
+df1990s['fips'] = df1990s['fips'].astype(int) # set type as the same for fips
+fips_sub['year'] = fips_sub['year'].astype(int)
+df1990s['year'] = df1990s['year'].astype(int)
+
+# use fips data to merge in state, county information 
+df1990s_full = df1990s.merge(fips_sub, on=["fips", "year"], how="inner")  
+df1990s_full = df1990s_full.rename(columns={"pop": "population"})
+df1990s_full["fips"] = df1990s_full["fips"].astype(str).str.zfill(5)
+
 print(df1990s_full.shape)
 
 
 ##2000-2010 DATA:
-df2000 = dfs[1]
+df2000 = dfs[1].copy()
 
 # make wide to long
 year_cols = [col for col in df2000.columns if re.search(r"20\d{2}$", col)]
-manual_cols = ["CENSUS2010POP"] # census pop not meeting the re.search method, manual add 
+manual_cols = ["census2010pop"] # census pop not meeting the re.search method, manual add 
 year_cols = list(set(year_cols + manual_cols)) # combine and update
 
 df2000_long = pd.melt(
@@ -370,17 +409,20 @@ df2000_long = pd.melt(
 df2000_long["year"] = df2000_long["raw_year_col"].str.extract(r"(20\d{2})").astype(int)
 
 # drop estimate for 2000 and 2010 (where we have base est, census data)
-df2000_long = df2000_long[~df2000_long["raw_year_col"].isin(["POPESTIMATE2000", "POPESTIMATE2010"])]
+df2000_long = df2000_long[~df2000_long["raw_year_col"].isin(["popestimate2000", "popestimate2010"])]
 
 # rename pop column, drop unneccessary cols, create FIPS code
 df2000_long = df2000_long.rename(columns={
     "value": "population",
 })
-df2000_long = df2000_long.drop(columns=["raw_year_col", "SUMLEV"])
-generate_fips(df2000_long, state_col="STATE", city_col="COUNTY")
+df2000_long = df2000_long.drop(columns=["raw_year_col", "sumlev"])
+generate_fips(df2000_long, state_col="state", city_col="county")
 
-df2000s = df2000_long
-df2000s.columns = df2000s.columns.str.lower()
+df2000s = df2000_long.copy()
+df2000s.columns = df2000s.columns.str.lower() # making lower case again 
+df2000s["state"] = df2000s["state"].astype(str).str.zfill(2) # pad 
+df2000s["county"] = df2000s["county"].astype(str).str.zfill(3) # pad 
+
 
 df2000s_cleannames = df2000s.rename(columns={
     "stname": "state",
@@ -390,16 +432,22 @@ df2000s_cleannames = df2000s.rename(columns={
     "fips_generated": "fips"
 })
 
+# drop state-only observations
+before = len(df2000s_cleannames)
+df2000s_cleannames = df2000s_cleannames[df2000s_cleannames["county"] != df2000s_cleannames["state"]]
+dropped = before - len(df2000s_cleannames)
+print("Rows dropped:", dropped)
+
 # FINAL OUTPUT for 2000s POP DATA
 df2000s_full = df2000s_cleannames
 
 
 
 ##2010-2020 DATA:
-df2010 = dfs[2] 
+df2010 = dfs[2].copy()
 
-id_cols = ["STATE", "COUNTY", "DIVISION", "REGION", "STNAME", "CTYNAME"]  # add any others you need
-cols_to_keep = id_cols + [col for col in df2010.columns if col.startswith("POPESTIMATE")]
+id_cols = ["state", "county", "division", "region", "stname", "ctyname"]
+cols_to_keep = id_cols + [col for col in df2010.columns if col.startswith("popestimate")]
 df2010 = df2010[cols_to_keep]
 
 years_c = [col for col in df2010.columns if re.search(r"20\d{2}$", col)]
@@ -427,21 +475,81 @@ df2010_full = df2010_long.rename(columns={
     "value": "population"
 })
 
-# FINAL OUTPUT for 2010s DATA 
+
 df2010_full = df2010_full.drop(columns=["raw_year_col"])
+
+# drop 2010 data as previous census has this data 
+df2010_full = df2010_full[df2010_full["year"] != 2010]
+
+# drop state only observations 
+before2 = len(df2010_full)
+df2010_full = df2010_full[df2010_full["county"] != df2010_full["state"]]
+dropped2 = before2 - len(df2010_full)
+print("Rows dropped:", dropped2)
+
+# FINAL OUTPUT for 2010s DATA 
+df2010_full_v2 = df2010_full.copy()
+
+
+###### MERGING ALL TOGETHER ######
 
 # sort columns (alphabetical) for easier comparison
 df1990s_full = df1990s_full[sorted(df1990s_full.columns)]
 df2000s_full = df2000s_full[sorted(df2000s_full.columns)]
-df2010_full = df2010_full[sorted(df2010_full.columns)]
+df2010_full_v2 = df2010_full_v2[sorted(df2010_full_v2 .columns)]
+
+
+# for 1990s data - get state code 
+state_key = df2010_full[["state_code", "state"]].drop_duplicates(subset="state_code")
+state_key["state_code"] = state_key["state_code"].astype(str).str.zfill(2) # pad 
+new_row = {"state_code": "11", "state": "District of Columbia"} # manually add DC 
+state_key = pd.concat([state_key, pd.DataFrame([new_row])], ignore_index=True)
+
+df1990s_full["state_code"] = df1990s_full["state_code"].astype(str) # make both string
+state_key["state_code"] = state_key["state_code"].astype(str) # make both string
+# merge
+df1990s_full = df1990s_full.merge(state_key, on="state_code", how="left")
 
 
 # check all columns for the rowbind 
 df1990s_full.columns.tolist()
 df2000s_full.columns.tolist()
-df2010_full.columns.tolist()
+df2010_full_v2.columns.tolist()
 
-full_pop_df = pd.concat([df1990s_full, df2000s_full, df2010_full], ignore_index=True, sort=False)
+full_pop_df = pd.concat([df1990s_full, df2000s_full, df2010_full_v2], ignore_index=True, sort=False)
+
+# QA MERGE 
+numeric_cols = full_pop_df.select_dtypes(include=[np.number])
+ranges = numeric_cols.agg(['min', 'max']).T
+
+# unique counts
+unique_counts = {
+    "state_code_unique": full_pop_df["state_code"].nunique(),
+    "county_code_unique": full_pop_df["county_code"].nunique()
+}
+
+# missing stats
+missing_pct = full_pop_df.isna().mean() * 100
+rows_with_3plus_missing = (full_pop_df.isna().sum(axis=1) >= 3).sum()
+
+print("Numeric column ranges:\n", ranges)
+print("\nUnique counts:\n", unique_counts)
+print("\n% missing per column:\n", missing_pct)
+print(f"\nRows with ≥3 missing: {rows_with_3plus_missing}")
+
+# only rows with missing data are those without info on region and division
+# but strangely - there are 101 state codes --- need to investigate this 
+print(full_pop_df["state_code"].unique()[:50])  # sample of unique entries - beginning 
+print(full_pop_df["state_code"].unique()[50:])  # sample of unique entries - end 
+print("\nData types:", full_pop_df["state_code"].dtype)
+
+
+# issue is the padding format - so add in pad 
+full_pop_df["state_code"] = (
+    full_pop_df["state_code"].astype(str).str.extract(r"(\d+)")[0].str.zfill(2)
+)
+
+# re-ran QA and now we have 51 unique codes --- correct including DC 
 
 # export to CSV 
 clean_pop_df = f"{today_str}_population_full.csv"
