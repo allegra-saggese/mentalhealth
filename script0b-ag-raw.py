@@ -40,6 +40,9 @@ agdfs = [pd.read_stata(file) for file in agfiles]
 
 print(f"Loaded {len(agdfs)} .dta files")
 
+
+################## DATA CLEANING FOR ALL AG DATA ######################
+
 # check head
 agdfs[0].head(20)
 
@@ -93,26 +96,18 @@ for i, d in enumerate(agdfs, 1):
 # row-bind (union is identical to baseline since we reindexed)
 combined = pd.concat(dfs_aligned, ignore_index=True)  
 
-# post-check: confirm columns unchanged
+# post-check: confirm columns unchanged by comparing the list of cols 
+base_cols = list(base_cols)
 same_cols = list(combined.columns) == base_cols
-combocols = list(combined.columns)
 combocols == base_cols
-print("Columns identical to baseline after concat:", same_cols) # YIELDING FALSE why? 
+print("Columns identical to baseline after concat:", same_cols) # TRUE - needed to convert base_cols to a list  
 len(base_cols) == len(list(combined.columns)) # TRUE 
 
-# manual inspection shows they are the same --- need to check the QA code above 
+# manual inspection shows they are the same 
 only_in_combined = [c for c in combocols if c not in base_cols]
 only_in_base = [c for c in base_cols if c not in combocols]
 print("Columns in combined but not in base:", only_in_combined)
 print("Columns in base but not in combined:", only_in_base)
-
-# trying again with the ordering bc i just can't seem to find why there is the fail 
-set_combined = set(combocols)
-set_base = set(base_cols)
-
-print("Only in combined:", sorted(set_combined - set_base))
-print("Only in base:", sorted(set_base - set_combined))
-set_combined == set_base # NOW YIELDING TRUE --- it was simply an ordering thing
 
 
 # print any issues found in step 1
@@ -137,6 +132,12 @@ fdf_2007 = fips_df[fips_df["year"] == 2007]
 fdf_2012 = fips_df[fips_df["year"] == 2012]     
 fdf_2017 = fips_df[fips_df["year"] == 2017]     
 # length is significantly shorter of course - need to understand the repetition in the USDA data 
+
+
+########### DATA CLEANING FOR ALL AG DATA - COL SPECIFIC ####################
+
+
+
 
 ########## NEED TO CHECK HERE ON THE FIPS COLS AGAIN! THERE IS AN ISSUE WITH THE 2012, 2017 data 
 # multiple entries where they were combined in that year, so need to keep only the unique one 
