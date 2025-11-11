@@ -28,6 +28,9 @@ from packages import *
 inf = os.path.join(db_data, "raw") # input 
 outf = os.path.join(db_data, "clean") #outpit
 
+# ----------------------- DATA PART 1 -------------------- -#
+
+
 ## UPLOAD ALL CENSUS DATA - ALL YEARS, RAW 
 rawpop = os.path.join(inf, "population")
 file_list = glob.glob(os.path.join(rawpop, "*.csv")) + \
@@ -222,24 +225,46 @@ fips_annual_full = pd.concat([fips_90_expanded, fips_00_expanded,
                              axis=0, join="outer", ignore_index=True)
 
 
-#### PICK UP HERE!!! 
+#### QA before further cleaning 
+missing_pct = fips_annual_full.isna().mean() * 100
+print(missing_pct)
 
-# backfill missing state data by taking the assignment in other rows 
-# convert to string
-fips_annual_full["state_code"] = fips_annual_full["state_code"].astype(str).str.zfill(2)
+rows_with_missing = fips_annual_full.isna().any(axis=1).sum()
+print(rows_with_missing) # 20 are missing at least one value 
+df_missing = fips_annual_full[fips_annual_full.isna().any(axis=1)]
 
-# create mapping state_code -> state
-map_state = (
-    fips_annual_full.loc[fips_annual_full["state"].notna(), ["state_code", "state"]]
-      .groupby("state_code")["state"]
-      .agg(lambda s: s.mode().iat[0] if not s.mode().empty else s.iloc[0])
-      .to_dict()
-)
+# manually add in the missing fips --- its given by census.gov file 
+# https://www2.census.gov/programs-surveys/popest/geographies/1990-2000/90s-fips.txt
+mt_fips = 30113
+boston_fips = 51780 
+# testing on sliced df
+df_missing.loc[df_missing['county'].str.contains('Yellowstone', case=False, na=False), 'fips'] = mt_fips
+df_missing.loc[df_missing['county'].str.contains('Boston', case=False, na=False), 'fips'] = boston_fips
 
-# map and check
-fips_annual_full["state"] = fips_annual_full["state"].fillna(fips_annual_full["state_code"].map(map_state))
-unmapped = sorted(fips_annual_full.loc[fips_annual_full["state"].isna(), "state_code"].unique())
-print("Unmapped state_code:", unmapped) # complete map
+# do in main 
+fips_annual_full.loc[
+    fips_annual_full['fips'].isna() & 
+    fips_annual_full['county'].str.contains('Yellowstone', case=False, na=False),
+    'fips'
+] = mt_fips
+
+fips_annual_full.loc[
+    fips_annual_full['fips'].isna() & 
+    fips_annual_full['county'].str.contains('Boston', case=False, na=False),
+    'fips'
+] = boston_fips
+
+# recheck missing percentage and its zero! move on 
+
+# remove state level values (keeping DC), based on county_code
+fips_annual_full_v2 = fips_annual_full[
+    ~((fips_annual_full['county_code'] == "000") &
+      (fips_annual_full['county'] != "District of Columbia"))
+]
+
+# reindex 
+fips_annual_full_v2 = fips_annual_full_v2.sort_values(by='year').reset_index(drop=True)
+
 
 # export clean data
 clean_dir = os.path.join(db_data, "clean")
@@ -248,12 +273,13 @@ clean_fips_df = f"{today_str}_fips_full.csv"
 out_path = os.path.join(clean_dir, clean_fips_df)
 
 # export to csv in clean folder
-fips_annual_full.to_csv(out_path, index=False)
+fips_annual_full_v2.to_csv(out_path, index=False)
 
 
+# ----------------------- DATA PART 2 -------------------- -#
 
 
-## INVESTIGATE COLS across dataframes for patterns 
+## INVESTIGATE COLUMNS ACROSS DISAGGREGATED DFs for patterns 
 col_lists = [df.columns.tolist() for df in dfs]
 
 # issue - only one col in the 1990-2000 data, need to change 
