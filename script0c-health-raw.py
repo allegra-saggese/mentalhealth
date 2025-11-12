@@ -329,7 +329,7 @@ dfs_ready_v2[0] = dfs_ready_v2[0].loc[:, ~dfs_ready_v2[0].columns.duplicated()]
 combined = pd.concat(dfs_ready_v2, ignore_index=True, sort=False)
 
 
-# ensure one row per FIPS×year (only needed if duplicates exist)
+# ensure one row per FIPS × year (only needed if duplicates exist)
 def first_notna(s):
     idx = s.first_valid_index()
     return s.loc[idx] if idx is not None else pd.NA
@@ -354,7 +354,7 @@ combined.to_csv(mh_path, index=False)
 
 
 ### UPLOAD CDC MORTALITY DATA - NOTE THIS DATA IS ONLY FOR FIVE STATES!!!!!! 
-
+#### NEW ALL CAUSE MORTALITY DATA TO BE UPLOADED LATER! 
 #upload from raw text files and create merged dataset with year indicators 
 cdc_data_folder = "/Users/allegrasaggese/Dropbox/Mental/Data/raw/cdc"
 paths = sorted(glob.glob(os.path.join(cdc_data_folder , "*.txt")))

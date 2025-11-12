@@ -965,11 +965,9 @@ print("Remaining columns:", len(count_by_group.columns))
 count_by_group.info()
 
 
-
-
 # export the CAFO data 
 clean_cafo = f"{today_str}_cafo_annual_df.csv"
 ag_path2 = os.path.join(outf, clean_cafo)
-agg_by_fips_year.to_csv(ag_path2, index=False)
+count_by_group.to_csv(ag_path2, index=False)
 
 
