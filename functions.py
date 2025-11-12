@@ -131,6 +131,55 @@ def read_and_prepare(path):
 
 
 
+##### CAFO MAPPING FUNCTIONS ##### 
+
+# wrapper for ambiguous descriptions 
+def map_ambiguous(df, mapping, keywords, unit_label):
+    """
+    df: dataframe
+    mapping: mapping dict (e.g., sales_map)
+    keywords: list of substrings to look for in short_desc related to the type of animal 
+    unit_label: suffix for the output column (e.g., 'sales_size')
+    """
+    for kw in keywords:
+        mask = (
+            df['domaincat_desc'].isin(mapping.keys()) &
+            df['short_desc'].str.contains(kw, case=False, na=False)
+        )
+        out_col = f"{kw.lower().replace(',', '').replace(' ', '_')}_{unit_label}"
+        df[out_col] = df.loc[mask, 'domaincat_desc'].map(mapping).astype('Int64')
+        
+keywords = ['poultry', 'chickens, layers', 'chickens, broilers', 'cattle', 'hogs']
+
+
+
+# make a wrapper to map the inventory the same way in all of them 
+def map_size(df, mapping, unit_match, out_col):
+    mask = df['unit_desc'] == unit_match
+    df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
+
+
+
+# creating CAFO thresholds 
+def assign_size(df, col, med_thresh, lrg_thresh):
+    df = df.copy()
+    # keep Int64Dtype and use nullable comparisons
+    cond_large  = df[col].ge(lrg_thresh)
+    cond_medium = df[col].ge(med_thresh) & df[col].lt(lrg_thresh)
+    cond_small  = df[col].lt(med_thresh)
+
+    df['size'] = pd.Series(pd.NA, index=df.index, dtype="string")
+    df.loc[cond_large.fillna(False), 'size']  = 'large'
+    df.loc[cond_medium.fillna(False), 'size'] = 'medium'
+    df.loc[cond_small.fillna(False), 'size']  = 'small'
+
+    df['size_col'] = col
+    return df
+
+
+
+
+
 
 
 
