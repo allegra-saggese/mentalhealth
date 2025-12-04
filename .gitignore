@@ -42,6 +42,10 @@ vignettes/*.pdf
 # pkgdown site
 docs/
 
+# file types 
+*.csv
+*.xlsx
+
 # translation temp files
 po/*~
 
