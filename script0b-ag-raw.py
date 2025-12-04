@@ -117,7 +117,6 @@ for i, missing, extra in problems:
         print(f"df_{i} EXTRA cols vs baseline (dropped by reindex): {extra}")
     
 
-
 ########### DATA CLEANING FOR ALL FIPS / AG -- ENSURING MATCH WILL WORK ####################
 
 # sense check the length of the dataframe against the FIPS data 
@@ -131,6 +130,13 @@ else:
     print("No matching file found.")
     
 fips_df = pd.read_csv(fips_sense)   # upload fips_df 
+=======
+        
+        
+# sense check the length of the dataframe against the FIPS data to see how many observations there are 
+fips_sense = os.path.join(outf, "2025-11-10_fips_full.csv") 
+fips_df = pd.read_csv(fips_sense) 
+>>>>>>> Stashed changes
 
 for i, df in enumerate(agdfs, 1):
     print(f"\n--- Dataframe {i} number of rows ---")
@@ -187,8 +193,9 @@ len_df_big_post_dupe= len(df_big)
 print("No duplicates found in final dataframe? ", 
       (len_df_big_post_dupe == len_df_big_predupe == (len_it_rows + len_raw_df)))
 
-# INTERPRETATION: about 14 million farm(s) or farm operations from 2002-2021
+# INTERPRETATION: about 14 million farm level observations --  2002-2021
 # for QA --- USDA census reports about 1.9 mil farms (in 2022 - data we don"t have), so this number seems fair although maybe a little low) 
+# recall that USDA aggregates to keep anonymity of the survey, so the FIPS level will not give us the exact number of rows = number of farms 
 
 # export in this form -- create cafos after 
 today_str = date.today().strftime("%Y-%m-%d")
@@ -240,7 +247,7 @@ CAFO_cols = ("broiler_cafos_lrg_op",
   "hog_cafos_SALES_med_head"   
 )
 
-# CAFO size limits, and can adjust these values for the S/M/L CAFO development (operations count)
+# CAFO size limits, and can adjust these values for the S/M/L CAFO development by inventory size
 broiler_cutoff_lrg = 5
 broiler_cutoff_med =  3
 layer_cutoff_lrg =  9
@@ -248,9 +255,11 @@ layer_cutoff_med =  7
 cattle_cutoff_lrg =  7
 cattle_cutoff_med = 6
 hog_cutoff_lrg =  7
-hog_cutoff_med = 1
+hog_cutoff_med = 6
 
-# CAFO size limits - head counts
+
+### MAY DELETE THIS 
+# CAFO size limits - head counts - will need to use this once we get AVERAGE SIZE by COUNTY - otherwise not useful 
 h_dairy_cutoff_lrg = 700
 h_dairy_cutoff_med = 200
 h_all_cattle_cutoff_lrg = 1000
@@ -292,6 +301,8 @@ df[['domaincat_desc','unit_desc']] = (
 def map_size(df, mapping, unit_match, out_col):
     mask = df['unit_desc'] == unit_match
     df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
+    
+    
 
 # check the col for chickens
 col = "commodity_desc"
@@ -301,12 +312,22 @@ print(len(uniques), "unique")
 for v in uniques:
     print(v)
 
+
 col = "unit_desc"
 # normalized, sorted uniques (exclude NA)
 uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
 print(len(uniques), "unique")
 for v in uniques:
     print(v)
+    
+
+# check unit units 
+    col = "unit_desc"
+    # normalized, sorted uniques (exclude NA)
+    uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
+    print(len(uniques), "unique")
+    for v in uniques:
+        print(v)
     
 # clean the domain description before making the map 
 df["domaincat_desc"] = (
@@ -317,7 +338,18 @@ df["domaincat_desc"] = (
 )
 
 
+# CREATE SUBSET OF THE DATA so we work only with commodities of interest 
+comms_of_interest = ["CATTLE", "CHICKENS", "MILK", "EGGS", "HOGS"]
+df_sub = df[df['commodity_desc'].isin(comms_of_interest)]
+
+# subset to only units of interest (count of operations, count of inventory)
+units_of_interest = ["head", "operations"]
+df_sub = df_sub[df_sub['unit_desc'].isin(units_of_interest)]
+
+
+
 # put all mappings together first 
+# TO QA: do some of these mappings double count through different statistical items - i.e. ops and heads
 layer_map = {
  "inventory: (1 to 49 head)":1,
  "inventory: (50 to 99 head)":2,
@@ -342,16 +374,6 @@ cattle_inv_map = {
 }
 
 
-cattle_sales_map = {
- "sales of cattle, incl calves: (1 to 9 head)":1,
- "sales of cattle, incl calves: (10 to 19 head)":2,
- "sales of cattle, incl calves: (20 to 49 head)":3,
- "sales of cattle, incl calves: (50 to 99 head)":4,
- "sales of cattle, incl calves: (100 to 199 head)":5,
- "sales of cattle, incl calves: (200 to 499 head)":6,
- "sales of cattle, incl calves: (500 or more head)":7
-}
-
 hog_inv_map = {
  "inventory of hogs: (1 to 24 head)":1,
  "inventory of hogs: (25 to 49 head)":2,
@@ -362,24 +384,6 @@ hog_inv_map = {
  "inventory of hogs: (1,000 or more head)":7
 }
 
-hog_sales_map = {
- "sales of hogs: (1 to 24 head)":1,
- "sales of hogs: (25 to 49 head)":2,
- "sales of hogs: (50 to 99 head)":3,
- "sales of hogs: (100 to 199 head)":4,
- "sales of hogs: (200 to 499 head)":5,
- "sales of hogs: (500 to 999 head)":6,
- "sales of hogs: (1,000 or more head)":7
-}
-
-broiler_map = {
- "sales: (1 to 1,999 head)":1,
- "sales: (2,000 to 59,999 head)":2,
- "sales: (60,000 to 99,999 head)":3,
- "sales: (100,000 to 199,999 head)":4,
- "sales: (200,000 to 499,999 head)":5,
- "sales: (500,000 or more head)":6
-}
 
 # ADDITIONAL MAPPINGS CREATED TO INCREASE number of data points in 2025
 beef_cows_map = {
@@ -429,94 +433,69 @@ breeding_hogs_map = {
  "inventory of breeding hogs: (100 or more head)": 4
 }
 
-calves_sales_map = {
-    "sales of calves: (1 to 9 head)": 1,
-    "sales of calves: (10 to 19 head)": 2,
-    "sales of calves: (20 to 49 head)": 3,
-    "sales of calves: (50 to 99 head)": 4,
-    "sales of calves: (100 to 199 head)": 5,
-    "sales of calves: (200 to 499 head)": 6,
-    "sales of calves: (500 or more head)": 7
-}
-
-cattle_500lbs_sales_map = {
-    "sales of cattle ge 500 lbs: (1 to 9 head)": 1,
-    "sales of cattle ge 500 lbs: (10 to 19 head)": 2,
-    "sales of cattle ge 500 lbs: (20 to 49 head)": 3,
-    "sales of cattle ge 500 lbs: (50 to 99 head)": 4,
-    "sales of cattle ge 500 lbs: (100 to 199 head)": 5,
-    "sales of cattle ge 500 lbs: (200 to 499 head)": 6,
-    "sales of cattle ge 500 lbs: (500 or more head)": 7
-}
-
-cattle_feed_sales_map = {
-    "sales of cattle on feed: (1 to 9 head)": 1,
-    "sales of cattle on feed: (10 to 19 head)": 2,
-    "sales of cattle on feed: (20 to 49 head)": 3,
-    "sales of cattle on feed: (50 to 99 head)": 4,
-    "sales of cattle on feed: (100 to 199 head)": 5,
-    "sales of cattle on feed: (200 to 499 head)": 6,
-    "sales of cattle on feed: (500 or more head)": 7
-}
-
-cattle_incl_calves_sales_map = {
-    "sales of cattle, incl calves: (1 to 9 head)": 1,
-    "sales of cattle, incl calves: (10 to 19 head)": 2,
-    "sales of cattle, incl calves: (20 to 49 head)": 3,
-    "sales of cattle, incl calves: (50 to 99 head)": 4,
-    "sales of cattle, incl calves: (100 to 199 head)": 5,
-    "sales of cattle, incl calves: (200 to 499 head)": 6,
-    "sales of cattle, incl calves: (500 or more head)": 7
-}
-
 
 # b/f adding in mappings - check that unit_match and domaincat_desc are comprehensive 
-mask = df["domaincat_desc"].isin(cattle_inv_map.keys())
-df.loc[mask, "unit_desc"].value_counts()
+mask = df_sub["domaincat_desc"].isin(cattle_inv_map.keys())
+df_sub.loc[mask, "unit_desc"].value_counts()
 
-sample_head = df.loc[mask & (df["unit_desc"] == "head")].sample(20, random_state=1)
-sample_ops  = df.loc[mask & (df["unit_desc"] == "operations")].sample(20, random_state=1)
+# sample of the dataframe for output
+sample_head = df_sub.loc[mask & (df_sub["unit_desc"] == "head")].sample(20, random_state=1)
+sample_ops  = df_sub.loc[mask & (df_sub["unit_desc"] == "operations")].sample(20, random_state=1)
 cattletst = pd.concat([sample_head, sample_ops])
 
 
 # apply mappings
-map_size(df, layer_map, unit_match="operations", out_col="layer_ops_size") 
-map_size(df, layer_map, unit_match="head", out_col="layer_head_size")
+map_size(df_sub, layer_map, unit_match="operations", out_col="layer_ops_size") 
+map_size(df_sub, layer_map, unit_match="head", out_col="layer_head_size")
 
-map_size(df, broiler_map, unit_match="head", out_col="broiler_head_size")
-map_size(df, broiler_map, unit_match="operations", out_col="broiler_ops_size")
+map_size(df_sub, broiler_map, unit_match="head", out_col="broiler_head_size")
+map_size(df_sub, broiler_map, unit_match="operations", out_col="broiler_ops_size")
 
-map_size(df, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
-map_size(df, cattle_inv_map, unit_match="head", out_col="cattle_head_size_inv")
-map_size(df, cattle_sales_map, unit_match="operations", out_col="cattle_ops_size_sales")
+map_size(df_sub, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
+map_size(df_sub, cattle_inv_map, unit_match="head", out_col="cattle_head_size_inv")
 
-map_size(df, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
-map_size(df, hog_inv_map, unit_match="head", out_col="hog_head_size_inv")
-map_size(df, hog_sales_map, unit_match="operations", out_col="hog_ops_size_sales")
+map_size(df_sub, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
+map_size(df_sub, hog_inv_map, unit_match="head", out_col="hog_head_size_inv")
 
-map_size(df, milk_cows_map, unit_match="operations", out_col="dairy_ops_size_inv")
-map_size(df, milk_cows_map, unit_match="head", out_col="dairy_head_size_inv")
+map_size(df_sub, milk_cows_map, unit_match="operations", out_col="dairy_ops_size_inv")
+map_size(df_sub, milk_cows_map, unit_match="head", out_col="dairy_head_size_inv")
 
-map_size(df, breeding_hogs_map, unit_match="operations", out_col="breed_hog_ops_size_inv")
-map_size(df, breeding_hogs_map, unit_match="head", out_col="breed_hog_head_size_inv")
+map_size(df_sub, breeding_hogs_map, unit_match="operations", out_col="breed_hog_ops_size_inv")
+map_size(df_sub, breeding_hogs_map, unit_match="head", out_col="breed_hog_head_size_inv")
 
-map_size(df, cattle_inv_map_no_cows, unit_match="operations", out_col="cattle_senzcow_ops_size_inv")
-map_size(df, cattle_inv_map_no_cows, unit_match="head", out_col="cattle_senzcow_head_size_inv")
+map_size(df_sub, cattle_inv_map_no_cows, unit_match="operations", out_col="cattle_senzcow_ops_size_inv")
+map_size(df_sub, cattle_inv_map_no_cows, unit_match="head", out_col="cattle_senzcow_head_size_inv")
 
-map_size(df, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
-map_size(df, cattle_feed_map, unit_match="head", out_col="cattle_feed_map_head_size_inv")
+map_size(df_sub, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
+map_size(df_sub, cattle_feed_map, unit_match="head", out_col="cattle_feed_map_head_size_inv")
 
-map_size(df, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
-map_size(df, beef_cows_map, unit_match="head", out_col="beef_map_head_size_inv")
+map_size(df_sub, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
+map_size(df_sub, beef_cows_map, unit_match="head", out_col="beef_map_head_size_inv")
 
-map_size(df, cattle_incl_calves_sales_map, unit_match="operations", out_col="cattle_calves_ops_size_sales")
-map_size(df, cattle_feed_sales_map, unit_match="operations", out_col="cattle_feed_ops_size_sales")
-map_size(df, cattle_500lbs_sales_map, unit_match="operations", out_col="cattle_500lbs_ops_size_sales")
-map_size(df, calves_sales_map, unit_match="operations", out_col="calves_ops_size_sales")
 
+# note we're excluding sales in this round - no mapping possible 
+#map_size(df_sub, cattle_incl_calves_sales_map, unit_match="operations", out_col="cattle_calves_ops_size_sales")
+#map_size(df_sub, cattle_feed_sales_map, unit_match="operations", out_col="cattle_feed_ops_size_sales")
+#map_size(df_sub, cattle_500lbs_sales_map, unit_match="operations", out_col="cattle_500lbs_ops_size_sales")
+#map_size(df_sub, calves_sales_map, unit_match="operations", out_col="calves_ops_size_sales")
+
+
+# inspect after mapping
+df_small = df_sub.sample(n=500, random_state=1)
+df_sub.shape
+df_sub.head()
+
+print(type(df_sub))
+print(df_sub.shape)
+print(df_sub.head())
+print(df_sub.columns.tolist())
+
+# drop unneccessary rows (total or unspecified)
+df_sub = df_sub[df_sub['domaincat_desc'] != 'unspecified']
 
 
 ### DEEPER DIVE MAPPING - for ambiguous domaincat_desc - try to assign based on short_desc 
+#### IN FINAL CODE - WE CAN IGNORE THIS --- USING JUST INVENTORY FOR NOW 
 df["short_desc"] = df["short_desc"].astype("string")
 
 def map_ambiguous(df, mapping, keywords, unit_label):
@@ -563,15 +542,15 @@ map_ambiguous(df, inv_map, keywords, unit_label='ops_size') # same number of lay
 
 
 # quick QA - ambiguous mapping yielded no matches within the sales 
-cols = [c for c in df.columns if c.endswith(("_sales_size", "_ops_size"))]
-df[cols].describe(include="all")
-df[cols].isna().mean().sort_values(ascending=False)  # percent missing
-df[cols].notna().sum()
+cols = [c for c in df_sub.columns if c.endswith(("_sales_size", "_ops_size"))]
+df_sub[cols].describe(include="all")
+df_sub[cols].isna().mean().sort_values(ascending=False)  # percent missing
+df_sub[cols].notna().sum()
+
 
 
 ##################### -- QA POST MAPPING --  #########################
-
-df.columns.tolist()
+df_sub.columns.tolist()
 
 # check outcol fill rate --- if the mapping is working 
 out_cols = [
@@ -602,35 +581,35 @@ out_cols = [
 
 
 # other qa - check the set of the domaincat_desc 
-cols_to_create_mapping_for = set(df["domaincat_desc"].unique()) - set(layer_map.keys())
+cols_to_create_mapping_for = set(df_sub["domaincat_desc"].unique()) - set(layer_map.keys())
 # other qa - check mean of missing of a few of the cols 
 for c in out_cols:
-    print(c, df[c].isna().mean() * 100)
+    print(c, df_sub[c].isna().mean() * 100)
 
 # count and percent of missing for each
-na_summary = df[out_cols].isna().agg(['sum', 'mean']).T
+na_summary = df_sub[out_cols].isna().agg(['sum', 'mean']).T
 na_summary['mean'] = na_summary['mean'] * 100  # convert to percent
 na_summary.columns = ['n_missing', 'pct_missing']
 print(na_summary) # VERY LOW, but unfortunately thats seems to be our match rate 
 
-print(len(df)) # check length against the n_missing
+print(len(df_sub)) # check length against the n_missing
 tot_obs = 14196115
 na_summary['obs'] = tot_obs - na_summary['n_missing'] 
 print(na_summary)
 
 # check the count of each mapping so I can see if its actually that we have low match rate i.e. low count of observations or if its a matching error 
-mask = df['domaincat_desc'].isin(layer_map.keys())
+mask = df_sub['domaincat_desc'].isin(layer_map.keys())
 print(mask.sum(), "rows match layer_map keys")
-print(df.loc[mask, 'domaincat_desc'].unique()[:10])
+print(df_sub.loc[mask, 'domaincat_desc'].unique()[:10])
 
-unmatched = set(df['domaincat_desc'].unique()) - set(layer_map.keys())
+unmatched = set(df_sub['domaincat_desc'].unique()) - set(layer_map.keys())
 print(sorted([x for x in unmatched if "inventory" in x.lower()][:10])) # smaller set of unmatched rows - still need if mapping is not picking up as many operations as we would like 
 
 
 test_key = "inventory: (1 to 49 head)"
-print(test_key in df['domaincat_desc'].unique())
-df['mapped_layer'] = df['domaincat_desc'].map(layer_map)
-print(df['mapped_layer'].notna().mean()) #1.2% of total df  
+print(test_key in df_sub['domaincat_desc'].unique())
+df_sub['mapped_layer'] = df_sub['domaincat_desc'].map(layer_map)
+print(df_sub['mapped_layer'].notna().mean()) #1.2% of total df  
 
 # going to compare raw data numbers on those two cols with the mapping output - should be the same count of rows 
 matching = df[
@@ -668,7 +647,16 @@ subset = df.iloc[:500].copy()
 subset.to_csv("first_500_rows.csv", index=False)
 
 # set value to numeric 
-df['value'] = pd.to_numeric(df['value'].astype(str).str.replace(',', '', regex=False), errors='coerce')
+df["value"] = (
+    df["value"]
+    .astype(str)                     # ensure string
+    .str.strip()                     # remove spaces
+    .str.replace(",", "", regex=False)  # remove commas
+    .replace({"(D)": pd.NA, "": pd.NA}) # turn (D) and empty to NA
+    .pipe(pd.to_numeric, errors="coerce")  # convert to numbers
+)
+
+
 
 # group by year
 group_cols = ['FIPS_generated','year']
@@ -676,6 +664,8 @@ group_cols = ['FIPS_generated','year']
 for c in group_cols:
     if c not in df.columns:
         raise KeyError(f"required column '{c}' not found in df")
+
+
 
 
 ################ TAKE ONLY CAFO OBSERVATIONS FROM THE DATA ####################
