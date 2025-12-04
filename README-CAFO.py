@@ -228,9 +228,12 @@ hog_inv_map = {
 “inventory of hogs: (1,000 or more head)”:7
 }
 
+<<<<<<< Updated upstream
 
 #### NOTE AS OF DEC 2025 WE HAVE DROPPED ANY SALES CLASSIFICATION - WE CAN RECONSIDER THIS IN THE FUTURE 
 
+=======
+>>>>>>> Stashed changes
 hog_sales_map = {
 “sales of hogs: (1 to 24 head)”:1,
 “sales of hogs: (25 to 49 head)”:2,
@@ -280,11 +283,65 @@ group_cols = [‘FIPS_generated’,‘year’]
 
 
 # STEP 4 - CREATE FUNCTION TO SUM BY THE COUNT OF EACH CLASSIFICATION 
+<<<<<<< Updated upstream
 
 
 # to fill in to create (a) simple string classification and (b) sum total of inventory by classification and count of farms 
 
 
+=======
+def agg_mask(mask, prefix):
+    sub = df.loc[mask, group_cols + [‘value’]].copy()
+    if sub.empty:
+        # return empty frame with correct column names so merges keep year
+        return pd.DataFrame(columns=group_cols + [f”{prefix}_value_sum”, f”{prefix}_count”])
+    g = (
+        sub
+        .groupby(group_cols, dropna=False)
+        .agg(**{
+            f”{prefix}_value_sum”: (‘value’, ‘sum’),
+    f”{prefix}_count”:     (‘value’, ‘count’)   # non-missing value count
+    })
+    .reset_index()
+    )
+    return g
+
+frames = []
+
+### broiler
+
+frames.append(agg_mask(df[‘broiler_ops_size’] >= broiler_cutoff_lrg, ‘broiler_lrg_op’))
+frames.append(agg_mask((df[‘broiler_ops_size’] >= broiler_cutoff_med) & (df[‘broiler_ops_size’] < broiler_cutoff_lrg), ‘broiler_med_op’))
+
+### layer (if present)
+
+if ‘layer_ops_size’ in df.columns:
+frames.append(agg_mask(df[‘layer_ops_size’] >= layer_cutoff_lrg, ‘layer_lrg_op’))
+frames.append(agg_mask((df[‘layer_ops_size’] >= layer_cutoff_med) & (df[‘layer_ops_size’] < layer_cutoff_lrg), ‘layer_med_op’))
+
+### cattle (inv & sales)
+
+if ‘cattle_ops_size_inv’ in df.columns:
+frames.append(agg_mask(df[‘cattle_ops_size_inv’] >= cattle_cutoff_lrg, ‘cattle_lrg_op_inv’))
+frames.append(agg_mask((df[‘cattle_ops_size_inv’] >= cattle_cutoff_med) & (df[‘cattle_ops_size_inv’] < cattle_cutoff_lrg), ‘cattle_med_op_inv’))
+if ‘cattle_ops_size_sales’ in df.columns:
+frames.append(agg_mask(df[‘cattle_ops_size_sales’] >= cattle_cutoff_lrg, ‘cattle_lrg_op_sales’))
+frames.append(agg_mask((df[‘cattle_ops_size_sales’] >= cattle_cutoff_med) & (df[‘cattle_ops_size_sales’] < cattle_cutoff_lrg), ‘cattle_med_op_sales’))
+
+## hog (inv & sales)
+
+if ‘hog_ops_size_inv’ in df.columns:
+frames.append(agg_mask(df[‘hog_ops_size_inv’] >= hog_cutoff_lrg, ‘hog_lrg_op_inv’))
+frames.append(agg_mask((df[‘hog_ops_size_inv’] >= hog_cutoff_med) & (df[‘hog_ops_size_inv’] < hog_cutoff_lrg), ‘hog_med_op_inv’))
+if ‘hog_ops_size_sales’ in df.columns:
+frames.append(agg_mask(df[‘hog_ops_size_sales’] >= hog_cutoff_lrg, ‘hog_lrg_op_sales’))
+frames.append(agg_mask((df[‘hog_ops_size_sales’] >= hog_cutoff_med) & (df[‘hog_ops_size_sales’] < hog_cutoff_lrg), ‘hog_med_op_sales’))
+
+
+# STEP 5 - FINAL MERGE: merge each aggregate onto all_fips_year
+
+agg_by_fips_year = all_fips_year.copy()
+>>>>>>> Stashed changes
 
 ### EXPORT 
 clean_cafo = f”{today_str}_cafo_annual_df.csv”
