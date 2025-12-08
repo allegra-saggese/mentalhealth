@@ -36,7 +36,8 @@ Raw inputs live in a separate `Data/` directory (not tracked in this GitHub repo
 
 Data/
 └── raw/
-    ├── cdc/              # CDC / health outcome files
+
+    ├── cdc/  # CDC / health outcome files
     ├── crime/            # crime and social-outcome files
     ├── fips/             # FIPS / geographic crosswalks
     ├── mental/           # mental-health specific inputs
