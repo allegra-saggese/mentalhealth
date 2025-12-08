@@ -130,13 +130,12 @@ else:
     print("No matching file found.")
     
 fips_df = pd.read_csv(fips_sense)   # upload fips_df 
-=======
+
         
         
 # sense check the length of the dataframe against the FIPS data to see how many observations there are 
 fips_sense = os.path.join(outf, "2025-11-10_fips_full.csv") 
 fips_df = pd.read_csv(fips_sense) 
->>>>>>> Stashed changes
 
 for i, df in enumerate(agdfs, 1):
     print(f"\n--- Dataframe {i} number of rows ---")
