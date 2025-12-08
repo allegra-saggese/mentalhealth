@@ -68,81 +68,61 @@ Intermediate datasets for testing and review will be created in local dropbox `i
 # Input Path Audit
 ### Below each script is the dataset required for script execution
 
-## `script0a-pop-fips-raw-merge.py`
-
+#### `script0a-pop-fips-raw-merge.py`
 **Input reads found:**
 
 1. `pd.read_csv("data/raw/population.csv")`  
 2. `pd.read_csv("data/raw/fips_crosswalk.csv")`
-
 **Path type:**  
 Relative → **portable**.  
 These files must live in `data/raw/`.
 
----
 
-## `script0b-ag-raw.py`
-
+#### `script0b-ag-raw.py`
 **Input reads found:**
 
-1. `pd.read_csv("data/raw/usda_ag_inventory.csv")`  
-2. `pd.read_csv("data/raw/usda_slaughterhouses.csv")`
-
+1. `pd.read_dta` + `\usda.dta`
+2. Note: This will be updated to pull data directly from USDA API, as opposed to hard-coded .dta files 
 **Path type:**  
 Relative → **portable**.
 
----
 
-## `script0c-health-raw.py`
-
+#### `script0c-health-raw.py`
 **Input reads found:**
 
 1. `pd.read_csv("data/raw/cdc_health_measures.csv")`  
 2. `pd.read_csv("data/raw/county_health_rankings.csv")`
-
 **Path type:**  
 Relative → **portable**.
 
----
 
-## `script0d-crime-raw.py`
-
+#### `script0d-crime-raw.py`
 **Input reads found:**
 
 1. `pd.read_csv("data/raw/crime_fbi.csv")`  
-2. `pd.read_csv("data/raw/domestic_violence_reports.csv")`
-
 **Path type:**  
 Relative → **portable**.
 
----
 
-## `script1-review-main-data.py`
-
+#### `script1-review-main-data.py`
 **Input reads found:**
 
 1. `pd.read_parquet("interim-dfs-copy/main_merged_raw.parquet")`
-
 **Path type:**  
 Relative → **portable**, but depends on outputs from scripts 0a–0d.
 
----
 
-## `script2-aggregate-merge.py`
-
+#### `script2-aggregate-merge.py`
 **Input reads found:**
 
-1. `pd.read_parquet("interim-dfs-copy/main_merged_clean.parquet")`
-
+1. `pd.read_csv("/"todays_str_date"clean.csv")`
 **Path type:**  
 Relative → **portable**.
 
----
 
-## `script3-ridge.py`
-
+#### `script3-ridge.py`
 **Input reads found:**
 
-1. `pd.read_parquet("interim-dfs-copy/analysis_dataset.parquet")`
+1. `pd.read_csv("interim-dfs-copy/analysis.csv")`
 
 
