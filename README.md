@@ -35,14 +35,14 @@ dependencies:
 Raw inputs live in a separate `Data/` directory (not tracked in this GitHub repo), with this structure:
 
 Data/
-└── raw/
 
-    ├── cdc/  # CDC / health outcome files
-    ├── crime/            # crime and social-outcome files
-    ├── fips/             # FIPS / geographic crosswalks
-    ├── mental/           # mental-health specific inputs
-    ├── population/       # population and demographics
-    └── usda/             # USDA / slaughterhouse / ag data
+    └── raw/
+      ├── cdc/              # CDC / health outcome files
+      ├── crime/            # crime and social-outcome files
+      ├── fips/             # FIPS / geographic crosswalks
+      ├── mental/           # mental-health specific inputs
+      ├── population/       # population and demographics
+      └── usda/             # USDA / slaughterhouse / ag data
 
 The Python scripts `script0a`–`script0d` read one or more files from each of these folders.  
 To see exactly which input filenames are required, search the scripts for `read_csv`, `read_parquet`, etc.
