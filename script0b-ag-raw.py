@@ -19,7 +19,7 @@ from urllib.request import urlopen, Request
 
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
-repo = "/Users/allegrasaggese/Documents/GitHub/mentalhealth"
+repo = "/Users/allegrasaggese/Documents/GitHub/mentalhealth" # change this so any user path should generate correctly 
 if repo not in sys.path:
     sys.path.append(repo)
 
@@ -179,6 +179,8 @@ print("Columns:", sorted(combined.columns))
 print(combined.dtypes)
     
 
+
+
 ########### DATA CLEANING FOR ALL FIPS / AG -- ENSURING MATCH WILL WORK ####################
 
 # sense check the length of the dataframe against the FIPS data 
@@ -284,28 +286,7 @@ del ag_raw_df, b, clean_ag_census, df, df_big
 del dup_counts, dup_counts_17, fips_sense, i, matches, n_forward, new_frames, new_rows
 del year_col, y
 
-# list of cols that will be created --- MAY REMOVE 
-CAFO_cols = ("broiler_cafos_lrg_op",
-  "broiler_cafos_med_op",
-  "layer_cafos_lrg_op",
-  "layer_cafos_med_op",
-  "cattle_cafos_INV_lrg_op",
-  "cattle_cafos_INV_med_op",
-  "cattle_cafos_INV_lrg_head",
-  "cattle_cafos_INV_med_head",
-  "cattle_cafos_SALES_lrg_op",
-  "cattle_cafos_SALES_med_op",
-  "cattle_cafos_SALES_lrg_head",
-  "cattle_cafos_SALES_med_head",
-  "hog_cafos_INV_lrg_op",
-  "hog_cafos_INV_med_op",
-  "hog_cafos_INV_lrg_head",
-  "hog_cafos_INV_med_head",
-  "hog_cafos_SALES_lrg_op",
-  "hog_cafos_SALES_med_op",     
-  "hog_cafos_SALES_lrg_head",
-  "hog_cafos_SALES_med_head"   
-)
+
 
 # ASSIGNMENT RULE (CAFO size classification)
 # 1) Map USDA inventory size classes (domaincat_desc) to numeric bins per species.
@@ -348,85 +329,62 @@ thresholds = [
     h_layers_cutoff_med]
 
 
-# make a df copy for ease 
+
+
+# ===== CLEAN + WRAPPERS + FILTER + QA =====
+
+# make a df copy
 df = ag_iterated.copy()
 
-# put it all in strings
-df[['domaincat_desc','unit_desc']] = df[['domaincat_desc','unit_desc']].astype("string").apply(lambda s: s.str.strip())
-df["domaincat_desc"] = df["domaincat_desc"].astype("string").str.strip()
+# normalize all relevant string columns (strip + lowercase)
+for c in [
+    "domaincat_desc", "unit_desc", "statisticcat_desc", "domain_desc",
+    "commodity_desc", "group_desc", "class_desc"
+]:
+    df[c] = df[c].astype("string").str.strip().str.lower()
 
-# normalize strings
-df[['domaincat_desc','unit_desc']] = (
-    df[['domaincat_desc','unit_desc']]
-    .astype("string")
-    .apply(lambda s: s.str.strip().str.lower())
-)
-
-
-# make a wrapper to map the inventory the same way in all of them
+# wrappers
 def map_size(df, mapping, unit_match, out_col):
-    mask = df['unit_desc'] == unit_match
-    df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
+    mask = df["unit_desc"] == unit_match
+    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
 
-
-# mapping with class_desc filter (e.g., broilers vs layers)
 def map_size_class(df, mapping, unit_match, class_match, out_col):
-    mask = (df['unit_desc'] == unit_match) & (df['class_desc'] == class_match)
-    df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
-    
-    
+    mask = (df["unit_desc"] == unit_match) & (df["class_desc"] == class_match)
+    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
 
-# check the col for chickens
-col = "commodity_desc"
-# normalized, sorted uniques (exclude NA)
-uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
-print(len(uniques), "unique")
-for v in uniques:
-    print(v)
+# ===== FILTER (updated spec) =====
+# 1) group_desc in livestock/poultry/dairy
+# 2) no filter on domain_desc
+# 3) unit_desc = operations
+# 4) statisticcat_desc = inventory
+# 5) commodity_desc in cattle/chickens/eggs/hogs/milk
+# 6) domaincat_desc starts with inventory
 
+comms_of_interest = ["cattle", "chickens", "eggs", "hogs", "milk"]
+groups_keep = ["livestock", "poultry", "dairy"]
 
-col = "unit_desc"
-# normalized, sorted uniques (exclude NA)
-uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
-print(len(uniques), "unique")
-for v in uniques:
-    print(v)
-    
-
-# check unit units 
-    col = "unit_desc"
-    # normalized, sorted uniques (exclude NA)
-    uniques = sorted(df[col].dropna().astype(str).str.strip().str.lower().unique())
-    print(len(uniques), "unique")
-    for v in uniques:
-        print(v)
-    
-# clean the domain description before making the map 
-df["domaincat_desc"] = (
-    df["domaincat_desc"]
-    .astype(str)
-    .str.strip()
-    .str.lower()
-)
-
-
-# CREATE SUBSET OF THE DATA so we work only with commodities of interest
-comms_of_interest = ["cattle", "chickens", "milk", "eggs", "hogs"]
 df_sub = df[
-    df["commodity_desc"].str.lower().isin(comms_of_interest)
-].copy()
-
-# drop groups we don't want
-groups_exclude = ["specialty", "aquaculture", "animal totals"]
-df_sub = df_sub[~df_sub['group_desc'].isin(groups_exclude)]
-
-# keep only operations rows for bin counts
-df_sub = df_sub[
-    (df_sub["unit_desc"].str.lower() == "operations")
+    (df["group_desc"].isin(groups_keep)) &
+    (df["commodity_desc"].isin(comms_of_interest)) &
+    (df["unit_desc"] == "operations") &
+    (df["statisticcat_desc"] == "inventory")
 ].copy()
 
 # keep only inventory bins
-# df_sub = df_sub[df_sub["domaincat_desc"].str.lower().str.startswith("inventory", na=False)].copy()
+df_sub = df_sub[df_sub["domaincat_desc"].str.startswith("inventory", na=False)].copy()
+
+# ===== QA =====
+print("df_sub rows:", len(df_sub))
+print("commodity_desc:", df_sub["commodity_desc"].value_counts().head(10))
+print("group_desc:", df_sub["group_desc"].value_counts().head(10))
+print("domaincat_desc top 10:")
+print(df_sub["domaincat_desc"].value_counts().head(10))
+
+
+
+
+
+
 
 
 # put all mappings together first 
