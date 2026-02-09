@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Style Review - AG Census Script</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .header p {
+            opacity: 0.95;
+            font-size: 15px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 35px;
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .emoji {
+            font-size: 24px;
+        }
+        .card {
+            background: #f8f9fa;
+            border-left: 4px solid;
+            padding: 15px 20px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateX(5px);
+        }
+        .card.positive {
+            border-color: #10b981;
+            background: #ecfdf5;
+        }
+        .card.improvement {
+            border-color: #f59e0b;
+            background: #fffbeb;
+        }
+        .card-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 15px;
+        }
+        .card-text {
+            font-size: 14px;
+            color: #555;
+        }
+        code {
+            background: #e5e7eb;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .score-box {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .score-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .score-number {
+            font-size: 36px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .score-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .tip {
+            background: #dbeafe;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+        }
+        .tip-title {
+            font-weight: 600;
+            color: #1e40af;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Code Style Review</h1>
+            <p>Agricultural Census Data Processing Script</p>
+        </div>
+        
+        <div class="content">
+            <div class="score-box">
+                <div class="score-item">
+                    <div class="score-number">7/10</div>
+                    <div class="score-label">Overall Quality</div>
+                </div>
+                <div class="score-item">
+                    <div class="score-number">8/10</div>
+                    <div class="score-label">Data Logic</div>
+                </div>
+                <div class="score-item">
+                    <div class="score-number">5/10</div>
+                    <div class="score-label">Code Organization</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="emoji">✅</span>
+                    <span>What You're Doing Well</span>
+                </div>
+                
+                <div class="card positive">
+                    <div class="card-title">Excellent Quality Assurance</div>
+                    <div class="card-text">You have thorough QA checks throughout - column matching, duplicate detection, data validation. This shows professional rigor.</div>
+                </div>
+
+                <div class="card positive">
+                    <div class="card-title">Clear Documentation Intent</div>
+                    <div class="card-text">Comments like <code># INTERPRETATION: about 14 million farm level observations</code> and <code># FUTURE CHANGE: JAN 2026</code> show good documentation habits.</div>
+                </div>
+
+                <div class="card positive">
+                    <div class="card-title">Smart Data Handling</div>
+                    <div class="card-text">The column alignment approach (<code>reindex</code>) and duplicate handling are well thought out.</div>
+                </div>
+
+                <div class="card positive">
+                    <div class="card-title">Good Use of Modern Pandas</div>
+                    <div class="card-text">Using <code>.pipe()</code>, <code>.transform()</code>, and method chaining shows you're keeping up with best practices.</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="emoji">🔧</span>
+                    <span>Areas for Improvement</span>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Hardcoded Paths</div>
+                    <div class="card-text">Line 17: <code>repo = "/Users/allegrasaggese/Documents/..."</code> won't work on other machines. Use relative paths or environment variables.</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Wildcard Imports</div>
+                    <div class="card-text">Lines 27-28: <code>from functions import *</code> makes it hard to track where functions come from. Be explicit: <code>from functions import clean_cols, generate_fips</code>.</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Mixed Naming Conventions</div>
+                    <div class="card-text">You use both <code>snake_case</code> (good!) and <code>camelCase</code>. Stick with <code>snake_case</code> for Python (PEP 8).</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Commented-Out Code</div>
+                    <div class="card-text">Lines 210-219 have commented alternatives. Either use version control or remove old code to keep things clean.</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Duplicate Logic</div>
+                    <div class="card-text">Lines 126-133 and 138-139 both load the same file. Pick one approach and stick with it.</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Missing Function Definitions</div>
+                    <div class="card-text">Functions like <code>clean_cols()</code>, <code>generate_fips()</code>, <code>map_ambiguous()</code> aren't defined here. This makes the script hard to understand in isolation.</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Magic Numbers</div>
+                    <div class="card-text">Lines 526-533 have unexplained mappings. Add comments explaining what these numbers represent (inventory size categories).</div>
+                </div>
+
+                <div class="card improvement">
+                    <div class="card-title">Long Functions Could Be Split</div>
+                    <div class="card-text">The script is 745 lines in one file. Consider breaking into functions: <code>load_ag_data()</code>, <code>validate_columns()</code>, <code>iterate_years()</code>, etc.</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="emoji">💡</span>
+                    <span>Quick Wins</span>
+                </div>
+
+                <div class="tip">
+                    <div class="tip-title">1. Use pathlib instead of os.path</div>
+                    Instead of: <code>os.path.join(db_data, "raw")</code><br>
+                    Try: <code>Path(db_data) / "raw"</code>
+                </div>
+
+                <div class="tip">
+                    <div class="tip-title">2. Add a config file</div>
+                    Put paths, cutoff values, and mappings in a <code>config.py</code> or YAML file. This makes changes easier and testing clearer.
+                </div>
+
+                <div class="tip">
+                    <div class="tip-title">3. Remove print statements for production</div>
+                    Use <code>logging</code> module instead so you can control verbosity: <code>logger.info("Loaded {len(agdfs)} files")</code>
+                </div>
+
+                <div class="tip">
+                    <div class="tip-title">4. Add docstrings</div>
+                    At minimum, add a module docstring explaining what this script does, inputs, and outputs.
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="emoji">🎯</span>
+                    <span>Bottom Line</span>
+                </div>
+                <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; border-left: 4px solid #0ea5e9;">
+                    <p style="margin-bottom: 10px;"><strong>Your code works and shows good analytical thinking.</strong> The data logic is solid, QA is thorough, and you're using pandas effectively.</p>
+                    <p style="margin-bottom: 10px;">The main issue is <strong>maintainability</strong> - it's hard for others (or future you!) to understand and modify. This is super common when working with AI assistants that focus on "getting it done."</p>
+                    <p><strong>Next steps:</strong> Refactor into functions, remove hardcoded paths, and document assumptions. You're 80% there - just needs some polish!</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

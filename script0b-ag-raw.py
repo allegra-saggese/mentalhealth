@@ -11,6 +11,11 @@ import sys, importlib.util
 from collections import Counter
 import re
 from functools import reduce
+import json
+import time
+import urllib.error
+from urllib.parse import urlencode
+from urllib.request import urlopen, Request
 
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
@@ -32,89 +37,116 @@ from packages import *
 inf = os.path.join(db_data, "raw") # input 
 outf = os.path.join(db_data, "clean") #output
 
-# import ag data 
-agfolder = os.path.join(inf, "usda")
-agfiles = glob.glob(os.path.join(agfolder, "*.dta"))
 
-agdfs = [pd.read_stata(file) for file in agfiles]
+# API setup
+# Pull USDA NASS Quick Stats data directly instead of reading .dta files.
+# Requires env var USDA_NASS_API_KEY to be set in your shell.
+NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY")
+if not NASS_API_KEY:
+    raise RuntimeError("Missing USDA_NASS_API_KEY env var. Set it before running this script.")
 
-print(f"Loaded {len(agdfs)} .dta files")
+NASS_BASE = "https://quickstats.nass.usda.gov/api/"
+
+
+def _nass_request(endpoint, params):
+    query = urlencode(params)
+    url = f"{NASS_BASE}{endpoint}/?{query}"
+    req = Request(url, headers={"User-Agent": "mentalhealth-ag-script/1.0"})
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"NASS API HTTP {e.code} for {url} :: {body}") from e
+
+
+def nass_get_counts(params):
+    payload = _nass_request("get_counts", params)
+    return int(payload.get("count", 0))
+
+
+def nass_get_data(params):
+    payload = _nass_request("api_GET", params)
+    data = payload.get("data", [])
+    return pd.DataFrame(data)
+
+
+# Filters (user-specified)
+source_desc = "CENSUS"
+agg_level_desc = "COUNTY"
+sector_desc = "ANIMALS & PRODUCTS"
+group_desc_allow = ["LIVESTOCK", "OPERATIONS", "POULTRY", "ANIMAL TOTALS"]
+commodity_desc_allow = ["CATTLE", "CHICKENS", "HOGS", "EGGS", "MILK", "POULTRY TOTALS", "ANIMAL TOTALS"]
+unit_desc_allow = ["HEAD", "OPERATIONS"]
+
+# Census years only
+census_years = [2002, 2007, 2012, 2017]
+
+# State list for chunking if any request exceeds 50k rows
+state_alpha = [
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+    "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+    "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"
+]
+
+
+def fetch_ag_data():
+    frames = []
+    for yr in census_years:
+        for grp in group_desc_allow:
+            for cmd in commodity_desc_allow:
+                time.sleep(0.2)  # be polite to the API
+                base_params = {
+                    "key": NASS_API_KEY,
+                    "source_desc": source_desc,
+                    "agg_level_desc": agg_level_desc,
+                    "sector_desc": sector_desc,
+                    "group_desc": grp,
+                    "commodity_desc": cmd,
+                    "unit_desc": ",".join(unit_desc_allow),
+                    "year": yr,
+                }
+
+                count = nass_get_counts(base_params)
+                if count == 0:
+                    continue
+
+                # If row count is too large, split by state_alpha
+                if count > 50000:
+                    for st in state_alpha:
+                        st_params = dict(base_params)
+                        st_params["state_alpha"] = st
+                        st_count = nass_get_counts(st_params)
+                        if st_count == 0:
+                            continue
+                        if st_count > 50000:
+                            raise RuntimeError(
+                                f"Request still >50k rows after state split: "
+                                f"year={yr}, group={grp}, commodity={cmd}, state={st}, count={st_count}"
+                            )
+                        df_st = nass_get_data(st_params)
+                        if not df_st.empty:
+                            frames.append(df_st)
+                else:
+                    df = nass_get_data(base_params)
+                    if not df.empty:
+                        frames.append(df)
+
+    if frames:
+        return pd.concat(frames, ignore_index=True)
+    return pd.DataFrame()
+
+
+# import ag data from API
+combined = fetch_ag_data()
+print(f"Loaded {len(combined):,} rows from USDA NASS Quick Stats API")
 
 
 ################## DATA CLEANING FOR ALL AG DATA ######################
 
-# check head
-agdfs[0].head(20)
-
-# check all columns match across all the years 
-base_cols = set(agdfs[0].columns)
-all_match = True
-
-for i, df in enumerate(agdfs, 1):
-    cols = set(df.columns)
-    if cols != base_cols:
-        all_match = False
-        only_in_base = sorted(base_cols - cols)
-        only_in_df   = sorted(cols - base_cols)
-        name = os.path.basename(dta_files[i-1]) if 'dta_files' in globals() else f"df_{i}"
-        print(f"\nColumns differ for {name}:")
-        if only_in_base:
-            print("  Missing (present in df_1, absent here):", only_in_base)
-        if only_in_df:
-            print("  Extra (present here, absent in df_1):  ", only_in_df)
-
-print("\nAll dataframes share identical columns:", all_match) # all match = true 
-
-# list all cols 
-all_cols = set().union(*[set(df.columns) for df in agdfs])
-unique_cols_sorted = sorted(all_cols)
-print("Total unique columns across all DFs:", len(unique_cols_sorted))
-print(unique_cols_sorted)
-
-# check col types 
-for i, df in enumerate(agdfs, 1):
-    print(f"\n--- Dataframe {i} ---")
-    print(df.dtypes) # fips code = int
-    
-
-# row bind the ag data 
-base_set  = set(base_cols)
-
-# verify every df matches the baseline (and align order)
-problems = []
-dfs_aligned = []
-for i, d in enumerate(agdfs, 1):
-    cols_set = set(d.columns)
-    missing  = base_set - cols_set
-    extra    = cols_set - base_set
-    if missing or extra:
-        problems.append((i, sorted(missing), sorted(extra)))
-    # align to baseline order; this also drops any extras if present
-    df_i = d.reindex(columns=base_cols)
-    dfs_aligned.append(df_i)
-
-# row-bind (union is identical to baseline since we reindexed)
-combined = pd.concat(dfs_aligned, ignore_index=True)  
-
-# post-check: confirm columns unchanged by comparing the list of cols 
-base_cols = list(base_cols)
-same_cols = list(combined.columns) == base_cols
-print("Columns identical to baseline after concat:", same_cols) # TRUE - needed to convert base_cols to a list  
-len(base_cols) == len(list(combined.columns)) # TRUE 
-
-# manual inspection shows they are the same 
-only_in_combined = [c for c in list(combined.columns) if c not in base_cols]
-only_in_base = [c for c in base_cols if c not in list(combined.columns)]
-print("Columns in combined but not in base:", only_in_combined)
-print("Columns in base but not in combined:", only_in_base)
-
-
-# print any issues found in step 1 -- empty set so yields nothing (but it serves as a QA road block for future analysis)
-for i, missing, extra in problems:
-    if missing:
-        print(f"df_{i} MISSING cols vs baseline: {missing}")
-    if extra:
-        print(f"df_{i} EXTRA cols vs baseline (dropped by reindex): {extra}")
+# basic QA
+print("Columns:", sorted(combined.columns))
+print(combined.dtypes)
     
 
 ########### DATA CLEANING FOR ALL FIPS / AG -- ENSURING MATCH WILL WORK ####################
@@ -137,9 +169,8 @@ fips_df = pd.read_csv(fips_sense)   # upload fips_df
 fips_sense = os.path.join(outf, "2025-11-10_fips_full.csv") 
 fips_df = pd.read_csv(fips_sense) 
 
-for i, df in enumerate(agdfs, 1):
-    print(f"\n--- Dataframe {i} number of rows ---")
-    print(len(df)) 
+print("\n--- Combined dataframe number of rows ---")
+print(len(combined))
 
 # create fips slide df by year (to match w/ ag)
 fdf_2002 = fips_df[fips_df["year"] == 2002]     
@@ -157,7 +188,7 @@ print(dup_counts_17["n_rows"].value_counts())  # quick frequency check
 
 ########### DATA CLEANING FOR ALL AG DATA - ITERATING OVER MISSING YRS ####################
 
-# prep ag raw df for iteration, then export and saving  
+# prep ag raw df for iteration, then export and saving
 ag_raw_df = clean_cols(combined)
 ag_raw_df.head()
 
@@ -192,7 +223,7 @@ len_df_big_post_dupe= len(df_big)
 print("No duplicates found in final dataframe? ", 
       (len_df_big_post_dupe == len_df_big_predupe == (len_it_rows + len_raw_df)))
 
-# INTERPRETATION: about 14 million farm level observations --  2002-2021
+# INTERPRETATION: about 14 million county observations --  2002-2021
 # for QA --- USDA census reports about 1.9 mil farms (in 2022 - data we don"t have), so this number seems fair although maybe a little low) 
 # recall that USDA aggregates to keep anonymity of the survey, so the FIPS level will not give us the exact number of rows = number of farms 
 
@@ -219,9 +250,9 @@ ag_iterated = pd.read_csv(ag_complete)   # upload ag_complete iterated data
 ag_iterated.columns.tolist()
 
 # remove files from cleaning / iterating ag data that take up a ton of space
-del ag_raw_df, agdfs, agfiles, all_match, b, clean_ag_census, d, df, df_big, df_i
-del dup_counts, dup_counts_17, extra, fips_sense, i, matches, missing, n_forward, new_frames, new_rows
-del only_in_base, only_in_combined, problems, same_cols, year_col, y
+del ag_raw_df, b, clean_ag_census, df, df_big
+del dup_counts, dup_counts_17, fips_sense, i, matches, n_forward, new_frames, new_rows
+del year_col, y
 
 # list of cols that will be created --- MAY REMOVE 
 CAFO_cols = ("broiler_cafos_lrg_op",
@@ -245,6 +276,12 @@ CAFO_cols = ("broiler_cafos_lrg_op",
   "hog_cafos_SALES_lrg_head",
   "hog_cafos_SALES_med_head"   
 )
+
+# ASSIGNMENT RULE (CAFO size classification)
+# 1) Map USDA inventory size classes (domaincat_desc) to numeric bins per species.
+# 2) For each species-specific bin, classify as small/medium/large using thresholds below.
+# 3) Final size_class is assigned per row based on the mapped bin and thresholds.
+# Note: No filtering by domain_desc; we rely on unit_desc in (HEAD, OPERATIONS).
 
 # CAFO size limits, and can adjust these values for the S/M/L CAFO development by inventory size
 broiler_cutoff_lrg = 5
@@ -337,8 +374,8 @@ df["domaincat_desc"] = (
 )
 
 
-# CREATE SUBSET OF THE DATA so we work only with commodities of interest 
-comms_of_interest = ["CATTLE", "CHICKENS", "MILK", "EGGS", "HOGS"]
+# CREATE SUBSET OF THE DATA so we work only with commodities of interest
+comms_of_interest = ["CATTLE", "CHICKENS", "MILK", "EGGS", "HOGS", "POULTRY TOTALS", "ANIMAL TOTALS"]
 df_sub = df[df['commodity_desc'].isin(comms_of_interest)]
 
 # subset to only units of interest (count of operations, count of inventory)
@@ -739,5 +776,3 @@ df2.groupby('unit_desc')['sum_value'].describe() # reasonable
 clean_cafo = f"{today_str}_cafo_annual_df.csv"
 ag_path2 = os.path.join(outf, clean_cafo)
 df2.to_csv(ag_path2, index=False)
-
-
