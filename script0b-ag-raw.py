@@ -41,8 +41,9 @@ outf = os.path.join(db_data, "clean") #output
 # API setup
 # Pull USDA NASS Quick Stats data directly instead of reading .dta files.
 # Requires env var USDA_NASS_API_KEY to be set in your shell.
+USE_API = True
 NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY")
-if not NASS_API_KEY:
+if USE_API and not NASS_API_KEY:
     raise RuntimeError("Missing USDA_NASS_API_KEY env var. Set it before running this script.")
 
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
@@ -92,54 +93,83 @@ state_alpha = [
 
 def fetch_ag_data():
     frames = []
+    rate_sleep = 0.4  # basic rate limiting
+
     for yr in census_years:
         for grp in group_desc_allow:
             for cmd in commodity_desc_allow:
-                time.sleep(0.2)  # be polite to the API
-                base_params = {
-                    "key": NASS_API_KEY,
-                    "source_desc": source_desc,
-                    "agg_level_desc": agg_level_desc,
-                    "sector_desc": sector_desc,
-                    "group_desc": grp,
-                    "commodity_desc": cmd,
-                    "unit_desc": ",".join(unit_desc_allow),
-                    "year": yr,
-                }
+                for unit in unit_desc_allow:
+                    time.sleep(rate_sleep)
+                    base_params = {
+                        "key": NASS_API_KEY,
+                        "source_desc": source_desc,
+                        "agg_level_desc": agg_level_desc,
+                        "sector_desc": sector_desc,
+                        "group_desc": grp,
+                        "commodity_desc": cmd,
+                        "unit_desc": unit,
+                        "year": yr,
+                    }
 
-                count = nass_get_counts(base_params)
-                if count == 0:
-                    continue
+                    try:
+                        count = nass_get_counts(base_params)
+                    except RuntimeError as e:
+                        # skip parameter combos that the API rejects (often 403)
+                        print("Skipping combo due to API error:", e)
+                        continue
 
-                # If row count is too large, split by state_alpha
-                if count > 50000:
-                    for st in state_alpha:
-                        st_params = dict(base_params)
-                        st_params["state_alpha"] = st
-                        st_count = nass_get_counts(st_params)
-                        if st_count == 0:
-                            continue
-                        if st_count > 50000:
-                            raise RuntimeError(
-                                f"Request still >50k rows after state split: "
-                                f"year={yr}, group={grp}, commodity={cmd}, state={st}, count={st_count}"
-                            )
-                        df_st = nass_get_data(st_params)
-                        if not df_st.empty:
-                            frames.append(df_st)
-                else:
-                    df = nass_get_data(base_params)
-                    if not df.empty:
-                        frames.append(df)
+                    if count == 0:
+                        continue
+
+                    # If row count is too large, split by state_alpha
+                    if count > 50000:
+                        for st in state_alpha:
+                            time.sleep(rate_sleep)
+                            st_params = dict(base_params)
+                            st_params["state_alpha"] = st
+                            try:
+                                st_count = nass_get_counts(st_params)
+                            except RuntimeError as e:
+                                print("Skipping state combo due to API error:", e)
+                                continue
+                            if st_count == 0:
+                                continue
+                            if st_count > 50000:
+                                raise RuntimeError(
+                                    f"Request still >50k rows after state split: "
+                                    f"year={yr}, group={grp}, commodity={cmd}, unit={unit}, state={st}, count={st_count}"
+                                )
+                            df_st = nass_get_data(st_params)
+                            if not df_st.empty:
+                                frames.append(df_st)
+                    else:
+                        df = nass_get_data(base_params)
+                        if not df.empty:
+                            frames.append(df)
 
     if frames:
         return pd.concat(frames, ignore_index=True)
     return pd.DataFrame()
 
 
-# import ag data from API
-combined = fetch_ag_data()
-print(f"Loaded {len(combined):,} rows from USDA NASS Quick Stats API")
+# import ag data from API (fallback to local .dta files if API fails)
+combined = pd.DataFrame()
+if USE_API:
+    try:
+        combined = fetch_ag_data()
+        print(f"Loaded {len(combined):,} rows from USDA NASS Quick Stats API")
+    except RuntimeError as e:
+        print("API fetch failed; falling back to local .dta files.")
+        print("Reason:", e)
+
+if combined.empty:
+    agfolder = os.path.join(inf, "usda")
+    agfiles = glob.glob(os.path.join(agfolder, "*.dta"))
+    if not agfiles:
+        raise RuntimeError(f"No .dta files found in {agfolder}")
+    agdfs = [pd.read_stata(file) for file in agfiles]
+    combined = pd.concat(agdfs, ignore_index=True)
+    print(f"Loaded {len(combined):,} rows from local .dta files")
 
 
 ################## DATA CLEANING FOR ALL AG DATA ######################
@@ -333,9 +363,15 @@ df[['domaincat_desc','unit_desc']] = (
 )
 
 
-# make a wrapper to map the inventory the same way in all of them 
+# make a wrapper to map the inventory the same way in all of them
 def map_size(df, mapping, unit_match, out_col):
     mask = df['unit_desc'] == unit_match
+    df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
+
+
+# mapping with class_desc filter (e.g., broilers vs layers)
+def map_size_class(df, mapping, unit_match, class_match, out_col):
+    mask = (df['unit_desc'] == unit_match) & (df['class_desc'] == class_match)
     df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
     
     
@@ -375,13 +411,22 @@ df["domaincat_desc"] = (
 
 
 # CREATE SUBSET OF THE DATA so we work only with commodities of interest
-comms_of_interest = ["CATTLE", "CHICKENS", "MILK", "EGGS", "HOGS", "POULTRY TOTALS", "ANIMAL TOTALS"]
-df_sub = df[df['commodity_desc'].isin(comms_of_interest)]
+comms_of_interest = ["cattle", "chickens", "milk", "eggs", "hogs"]
+df_sub = df[
+    df["commodity_desc"].str.lower().isin(comms_of_interest)
+].copy()
 
-# subset to only units of interest (count of operations, count of inventory)
-units_of_interest = ["head", "operations"]
-df_sub = df_sub[df_sub['unit_desc'].isin(units_of_interest)]
+# drop groups we don't want
+groups_exclude = ["specialty", "aquaculture", "animal totals"]
+df_sub = df_sub[~df_sub['group_desc'].isin(groups_exclude)]
 
+# keep only operations rows for bin counts
+df_sub = df_sub[
+    (df_sub["unit_desc"].str.lower() == "operations")
+].copy()
+
+# keep only inventory bins
+# df_sub = df_sub[df_sub["domaincat_desc"].str.lower().str.startswith("inventory", na=False)].copy()
 
 
 # put all mappings together first 
@@ -474,36 +519,19 @@ breeding_hogs_map = {
 mask = df_sub["domaincat_desc"].isin(cattle_inv_map.keys())
 df_sub.loc[mask, "unit_desc"].value_counts()
 
-# sample of the dataframe for output
-sample_head = df_sub.loc[mask & (df_sub["unit_desc"] == "head")].sample(20, random_state=1)
-sample_ops  = df_sub.loc[mask & (df_sub["unit_desc"] == "operations")].sample(20, random_state=1)
-cattletst = pd.concat([sample_head, sample_ops])
 
-
-# apply mappings
-map_size(df_sub, layer_map, unit_match="operations", out_col="layer_ops_size") 
-map_size(df_sub, layer_map, unit_match="head", out_col="layer_head_size")
+# apply mappings (operations only)
+# chickens: split layers vs broilers using class_desc
+map_size_class(df_sub, layer_map, unit_match="operations", class_match="layers", out_col="layer_ops_size")
+map_size_class(df_sub, layer_map, unit_match="operations", class_match="broilers", out_col="broiler_ops_size")
 
 map_size(df_sub, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
-map_size(df_sub, cattle_inv_map, unit_match="head", out_col="cattle_head_size_inv")
-
 map_size(df_sub, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
-map_size(df_sub, hog_inv_map, unit_match="head", out_col="hog_head_size_inv")
-
 map_size(df_sub, milk_cows_map, unit_match="operations", out_col="dairy_ops_size_inv")
-map_size(df_sub, milk_cows_map, unit_match="head", out_col="dairy_head_size_inv")
-
 map_size(df_sub, breeding_hogs_map, unit_match="operations", out_col="breed_hog_ops_size_inv")
-map_size(df_sub, breeding_hogs_map, unit_match="head", out_col="breed_hog_head_size_inv")
-
 map_size(df_sub, cattle_inv_map_no_cows, unit_match="operations", out_col="cattle_senzcow_ops_size_inv")
-map_size(df_sub, cattle_inv_map_no_cows, unit_match="head", out_col="cattle_senzcow_head_size_inv")
-
 map_size(df_sub, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
-map_size(df_sub, cattle_feed_map, unit_match="head", out_col="cattle_feed_map_head_size_inv")
-
 map_size(df_sub, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
-map_size(df_sub, beef_cows_map, unit_match="head", out_col="beef_map_head_size_inv")
 
 
 # note we're excluding sales in this round - no mapping possible 
@@ -588,25 +616,14 @@ df_sub.columns.tolist()
 # check outcol fill rate --- if the mapping is working 
 out_cols = [
     "layer_ops_size",
-    "layer_head_size",
+    "broiler_ops_size",
     "cattle_ops_size_inv",
-    "cattle_head_size_inv",
     "hog_ops_size_inv",
-    "hog_head_size_inv",
     "dairy_ops_size_inv",
-    "dairy_head_size_inv",
     "breed_hog_ops_size_inv",
-    "breed_hog_head_size_inv",
     "cattle_senzcow_ops_size_inv",
-    "cattle_senzcow_head_size_inv",
     "cattle_feed_ops_size_inv",
-    "cattle_feed_map_head_size_inv",
-    "beef_ops_size_inv",
-    "beef_map_head_size_inv"
-  #  "cattle_calves_ops_size_sales",
-  #  "cattle_feed_ops_size_sales",
-  #  "cattle_500lbs_ops_size_sales",
-  #  "calves_ops_size_sales"
+    "beef_ops_size_inv"
 ]
 
 
@@ -665,6 +682,9 @@ df_sub["value"] = (
     .pipe(pd.to_numeric, errors="coerce")  # convert to numbers
 )
 
+# count of operations in each inventory bin (per row)
+df_sub["ops_in_bin"] = df_sub["value"]
+
 
 
 # group by year
@@ -696,9 +716,9 @@ size_cols = out_cols # already created a vector of cols to sum over
 for col in size_cols:
     temp = (
         df_sub.dropna(subset=[col])
-              .groupby(['FIPS_generated','year', col, 'unit_desc'], as_index=False)['value']
+              .groupby(['FIPS_generated','year', col, 'unit_desc'], as_index=False)['ops_in_bin']
               .sum()
-              .rename(columns={'value': f'{col}_sum'})
+              .rename(columns={'ops_in_bin': f'{col}_sum'})
     )
 
     df_sub = df_sub.merge(
@@ -712,6 +732,10 @@ df_sub.columns.tolist() # list of cols
 df2 = df_sub.copy() # make a copy 
 inv_cols = [c for c in df2.columns if c.endswith('_inv')] # all threshold cols 
 
+# ensure size_class column exists even if no mappings were applied
+if "size_class" not in df2.columns:
+    df2["size_class"] = pd.Series(pd.NA, index=df2.index, dtype="string")
+
 # recall our mapping from above (simplified into a mapping) 
 cutoffs = {
     'hog':     {'med': 6, 'lrg': 7},
@@ -724,25 +748,18 @@ cutoffs = {
 col_thresholds = {
     # layers
     'layer_ops_size':                 (layer_cutoff_med,  layer_cutoff_lrg),
-    'layer_head_size':                (layer_cutoff_med,  layer_cutoff_lrg),
+    'broiler_ops_size':               (broiler_cutoff_med, broiler_cutoff_lrg),
 
     # cattle family (incl. dairy, beef, feedlots, etc.)
     'cattle_ops_size_inv':            (cattle_cutoff_med, cattle_cutoff_lrg),
-    'cattle_head_size_inv':           (cattle_cutoff_med, cattle_cutoff_lrg),
     'dairy_ops_size_inv':             (cattle_cutoff_med, cattle_cutoff_lrg),
-    'dairy_head_size_inv':            (cattle_cutoff_med, cattle_cutoff_lrg),
     'cattle_senzcow_ops_size_inv':    (cattle_cutoff_med, cattle_cutoff_lrg),
-    'cattle_senzcow_head_size_inv':   (cattle_cutoff_med, cattle_cutoff_lrg),
     'cattle_feed_ops_size_inv':       (cattle_cutoff_med, cattle_cutoff_lrg),
-    'cattle_feed_map_head_size_inv':  (cattle_cutoff_med, cattle_cutoff_lrg),
     'beef_ops_size_inv':              (cattle_cutoff_med, cattle_cutoff_lrg),
-    'beef_map_head_size_inv':         (cattle_cutoff_med, cattle_cutoff_lrg),
 
     # hog family
     'hog_ops_size_inv':               (hog_cutoff_med,    hog_cutoff_lrg),
-    'hog_head_size_inv':              (hog_cutoff_med,    hog_cutoff_lrg),
     'breed_hog_ops_size_inv':         (hog_cutoff_med,    hog_cutoff_lrg),
-    'breed_hog_head_size_inv':        (hog_cutoff_med,    hog_cutoff_lrg),
 }
 
 
@@ -764,12 +781,12 @@ for col, (med, lrg) in col_thresholds.items():
 
 
 
-# now sum the value cols - so that we have count of operations and aggregate inventory in CAFO x animal classification
+# now sum the value cols - total operations by size class x animal classification
 group_cols = ['year', 'FIPS_generated', 'size_class', 'unit_desc', 'commodity_desc']
-df2['sum_value'] = df2.groupby(group_cols)['value'].transform('sum')
+df2['sum_ops'] = df2.groupby(group_cols)['ops_in_bin'].transform('sum')
 
 # QA the range of values for the sums
-df2.groupby('unit_desc')['sum_value'].describe() # reasonable 
+df2.groupby('unit_desc')['sum_ops'].describe() # reasonable 
 
 
 # export the CAFO data 
