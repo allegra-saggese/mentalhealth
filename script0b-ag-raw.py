@@ -383,6 +383,173 @@ print(df_sub["domaincat_desc"].value_counts().head(10))
 
 
 
+# ===== MAP INVENTORY BINS TO NUMERIC CODES =====
+
+# mappings (same as before)
+layer_map = {
+ "inventory: (1 to 49 head)":1,
+ "inventory: (50 to 99 head)":2,
+ "inventory: (100 to 399 head)":3,
+ "inventory: (400 to 3,199 head)":4,
+ "inventory: (3,200 to 9,999 head)":5,
+ "inventory: (10,000 to 19,999 head)":6,
+ "inventory: (20,000 to 49,999 head)":7,
+ "inventory: (50,000 to 99,999 head)":8,
+ "inventory: (100,000 or more head)":9
+}
+
+cattle_inv_map = {
+ "inventory of cattle, incl calves: (1 to 9 head)":1,
+ "inventory of cattle, incl calves: (10 to 19 head)":2,
+ "inventory of cattle, incl calves: (20 to 49 head)":3,
+ "inventory of cattle, incl calves: (50 to 99 head)":4,
+ "inventory of cattle, incl calves: (100 to 199 head)":5,
+ "inventory of cattle, incl calves: (200 to 499 head)":6,
+ "inventory of cattle, incl calves: (500 or more head)":7
+}
+
+hog_inv_map = {
+ "inventory of hogs: (1 to 24 head)":1,
+ "inventory of hogs: (25 to 49 head)":2,
+ "inventory of hogs: (50 to 99 head)":3,
+ "inventory of hogs: (100 to 199 head)":4,
+ "inventory of hogs: (200 to 499 head)":5,
+ "inventory of hogs: (500 to 999 head)":6,
+ "inventory of hogs: (1,000 or more head)":7
+}
+
+milk_cows_map = {
+ "inventory of milk cows: (1 to 9 head)":1,
+ "inventory of milk cows: (10 to 19 head)":2,
+ "inventory of milk cows: (20 to 49 head)":3,
+ "inventory of milk cows: (50 to 99 head)":4,
+ "inventory of milk cows: (100 to 199 head)":5,
+ "inventory of milk cows: (200 to 499 head)":6,
+ "inventory of milk cows: (500 or more head)":7
+}
+
+breeding_hogs_map = {
+ "inventory of breeding hogs: (1 to 24 head)": 1,
+ "inventory of breeding hogs: (25 to 49 head)": 2,
+ "inventory of breeding hogs: (50 to 99 head)": 3,
+ "inventory of breeding hogs: (100 or more head)": 4
+}
+
+cattle_inv_map_no_cows = {
+ "inventory of cattle, (excl cows): (1 to 9 head)": 1,
+ "inventory of cattle, (excl cows): (10 to 19 head)": 2,
+ "inventory of cattle, (excl cows): (100 to 199 head)": 3,
+ "inventory of cattle, (excl cows): (20 to 49 head)": 4,
+ "inventory of cattle, (excl cows): (200 to 499 head)": 5,
+ "inventory of cattle, (excl cows): (50 to 99 head)": 6
+}
+
+cattle_feed_map = {
+ "inventory of cattle on feed: (1 to 19 head)":1,
+ "inventory of cattle on feed: (1 to 9 head)":2,
+ "inventory of cattle on feed: (10 to 19 head)":3,
+ "inventory of cattle on feed: (100 to 199 head)":4,
+ "inventory of cattle on feed: (20 to 49 head)":5,
+ "inventory of cattle on feed: (200 to 499 head)":6,
+ "inventory of cattle on feed: (50 to 99 head)":7,
+ "inventory of cattle on feed: (500 or more head)":8
+}
+
+beef_cows_map = {
+ "inventory of beef cows: (1 to 9 head)":1,
+ "inventory of beef cows: (10 to 19 head)":2,
+ "inventory of beef cows: (20 to 49 head)":3,
+ "inventory of beef cows: (50 to 99 head)":4,
+ "inventory of beef cows: (100 to 199 head)":5,
+ "inventory of beef cows: (200 to 499 head)":6,
+ "inventory of beef cows: (500 or more head)":7
+}
+
+# apply mappings (operations rows)
+map_size_class(df_sub, layer_map, unit_match="operations", class_match="layers", out_col="layer_ops_size")
+map_size_class(df_sub, layer_map, unit_match="operations", class_match="broilers", out_col="broiler_ops_size")
+
+map_size(df_sub, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
+map_size(df_sub, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
+map_size(df_sub, milk_cows_map, unit_match="operations", out_col="dairy_ops_size_inv")
+map_size(df_sub, breeding_hogs_map, unit_match="operations", out_col="breed_hog_ops_size_inv")
+map_size(df_sub, cattle_inv_map_no_cows, unit_match="operations", out_col="cattle_senzcow_ops_size_inv")
+map_size(df_sub, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
+map_size(df_sub, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
+
+# ===== THRESHOLDS -> SIZE CLASS =====
+broiler_cutoff_lrg = 5
+broiler_cutoff_med = 3
+layer_cutoff_lrg = 9
+layer_cutoff_med = 7
+cattle_cutoff_lrg = 7
+cattle_cutoff_med = 6
+hog_cutoff_lrg = 7
+hog_cutoff_med = 6
+
+col_thresholds = {
+    "layer_ops_size": (layer_cutoff_med, layer_cutoff_lrg),
+    "broiler_ops_size": (broiler_cutoff_med, broiler_cutoff_lrg),
+    "cattle_ops_size_inv": (cattle_cutoff_med, cattle_cutoff_lrg),
+    "dairy_ops_size_inv": (cattle_cutoff_med, cattle_cutoff_lrg),
+    "cattle_senzcow_ops_size_inv": (cattle_cutoff_med, cattle_cutoff_lrg),
+    "cattle_feed_ops_size_inv": (cattle_cutoff_med, cattle_cutoff_lrg),
+    "beef_ops_size_inv": (cattle_cutoff_med, cattle_cutoff_lrg),
+    "hog_ops_size_inv": (hog_cutoff_med, hog_cutoff_lrg),
+    "breed_hog_ops_size_inv": (hog_cutoff_med, hog_cutoff_lrg),
+}
+
+def categorize_code(v, med, lrg):
+    if pd.isna(v): return pd.NA
+    if v < med: return "small"
+    if v < lrg: return "medium"
+    return "large"
+
+df2 = df_sub.copy()
+df2["size_class"] = pd.Series(pd.NA, index=df2.index, dtype="string")
+
+### FIPS 
+from functions import generate_fips
+
+if "fips_generated" not in df2.columns:
+    df2 = generate_fips(df2, state_col="state_fips_code", city_col="county_code")
+    if "FIPS_generated" in df2.columns and "fips_generated" not in df2.columns:
+        df2 = df2.rename(columns={"FIPS_generated": "fips_generated"})
+
+
+for col, (med, lrg) in col_thresholds.items():
+    codes = df2[col]
+    mask = codes.notna()
+    df2.loc[mask, "size_class"] = codes[mask].apply(categorize_code, args=(med, lrg))
+
+# numeric ops
+df2["ops_in_bin"] = pd.to_numeric(df2["value"].astype(str).str.replace(",", ""), errors="coerce")
+
+# aggregate operations by size class
+group_cols = ["year", "fips_generated", "size_class", "unit_desc", "commodity_desc"]
+df2["sum_ops"] = df2.groupby(group_cols)["ops_in_bin"].transform("sum")
+
+df2["sum_ops"].isna().mean()
+df2["size_class"].value_counts(dropna=False)
+
+
+# compact summary
+summary = (
+    df2.groupby(
+        ["year", "fips_generated", "size_class", "commodity_desc"], 
+        as_index=False
+    )["ops_in_bin"]
+    .sum()
+    .rename(columns={"ops_in_bin": "sum_ops"})
+)
+
+# export
+from datetime import date
+today_str = date.today().strftime("%Y-%m-%d")
+outpath = f"/Users/allegrasaggese/Dropbox/Mental/Data/clean/{today_str}_cafo_ops_by_size.csv"
+summary.to_csv(outpath, index=False)
+outpath
+
 
 
 
@@ -751,3 +918,55 @@ df2.groupby('unit_desc')['sum_ops'].describe() # reasonable
 clean_cafo = f"{today_str}_cafo_annual_df.csv"
 ag_path2 = os.path.join(outf, clean_cafo)
 df2.to_csv(ag_path2, index=False)
+
+
+
+### PLOT SUMMARY STATS  
+
+
+outdir = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/figs"
+os.makedirs(outdir, exist_ok=True)
+
+# 1) Total ops over time by commodity (line)
+ts = (summary
+      .groupby(["year","commodity_desc"], as_index=False)["sum_ops"]
+      .sum())
+
+plt.figure(figsize=(10,6))
+sns.lineplot(data=ts, x="year", y="sum_ops", hue="commodity_desc", marker="o")
+plt.title("Total Operations Over Time by Commodity")
+plt.ylabel("Operations (sum)")
+plt.xlabel("Year")
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, "ops_over_time_by_commodity.png"), dpi=200)
+plt.close()
+
+# 2) Stacked ops by size_class over time (all commodities combined)
+ts_size = (summary
+           .groupby(["year","size_class"], as_index=False)["sum_ops"]
+           .sum())
+
+pivot = ts_size.pivot(index="year", columns="size_class", values="sum_ops").fillna(0)
+pivot = pivot[["small","medium","large"]]  # consistent order
+
+pivot.plot(kind="bar", stacked=True, figsize=(10,6))
+plt.title("Operations by Size Class Over Time (All Commodities)")
+plt.ylabel("Operations (sum)")
+plt.xlabel("Year")
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, "ops_by_size_over_time_stacked.png"), dpi=200)
+plt.close()
+
+# 3) Latest year snapshot: ops by size_class × commodity
+latest_year = summary["year"].max()
+snap = summary[summary["year"] == latest_year]
+snap_g = (snap.groupby(["commodity_desc","size_class"], as_index=False)["sum_ops"].sum())
+
+plt.figure(figsize=(10,6))
+sns.barplot(data=snap_g, x="commodity_desc", y="sum_ops", hue="size_class")
+plt.title(f"Operations by Size Class (Year {latest_year})")
+plt.ylabel("Operations (sum)")
+plt.xlabel("Commodity")
+plt.tight_layout()
+plt.savefig(os.path.join(outdir, f"ops_by_size_{latest_year}.png"), dpi=200)
+plt.close()
