@@ -140,6 +140,23 @@ def get_series(df_like, col):
     return obj
 
 
+def gini_from_values(values):
+    """
+    Gini for non-negative values. Returns nan if undefined.
+    """
+    x = np.array(values, dtype=float)
+    x = x[np.isfinite(x)]
+    x = x[x >= 0]
+    if x.size == 0:
+        return np.nan
+    if np.all(x == 0):
+        return 0.0
+    x = np.sort(x)
+    n = x.size
+    cumx = np.cumsum(x)
+    return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
+
+
 STATE_FIPS_TO_NAME = {
     "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas", "06": "California",
     "08": "Colorado", "09": "Connecticut", "10": "Delaware", "11": "District of Columbia",
@@ -214,6 +231,28 @@ write_csv_bundle(
         "row_fill_summary": row_fill_summary.reset_index(),
     },
 )
+
+# By-year share of missing/non-missing cells across all analysis variables
+missing_share_by_year = pd.DataFrame(
+    {
+        "year": sorted(df["year"].dropna().astype(int).unique()),
+    }
+)
+missing_share_by_year["missing_share_pct"] = [
+    float(df.loc[df["year"] == y, analysis_cols].isna().mean().mean() * 100)
+    for y in missing_share_by_year["year"]
+]
+missing_share_by_year["non_missing_share_pct"] = 100 - missing_share_by_year["missing_share_pct"]
+write_csv_bundle("missingness_share", {"by_year": missing_share_by_year})
+
+plt.figure(figsize=(10, 5))
+sns.lineplot(data=missing_share_by_year, x="year", y="missing_share_pct", marker="o", color="#d62728")
+plt.title("Share of Missing Data by Year (All Variables)")
+plt.xlabel("Year")
+plt.ylabel("Missing share (%)")
+out = os.path.join(figs_dir, f"{today_str}_missing_share_by_year.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
 
 # Top-60 heatmap
 top60 = missing_overall.loc[missing_overall["missing_pct"].between(1, 99), "variable"].head(60).tolist()
@@ -370,6 +409,54 @@ write_csv_bundle(
         "numeric_parse_meta": numeric_meta,
     },
 )
+
+# Descriptive structure add-ons: yearly means, YoY growth, CAGR, change stats
+if not numeric_df.empty:
+    yearly_means = numeric_df.copy()
+    yearly_means["year"] = df["year"].values
+    yearly_means = yearly_means.groupby("year", as_index=True).mean(numeric_only=True)
+    yearly_means = yearly_means.sort_index()
+
+    yoy_pct = yearly_means.pct_change() * 100
+    yoy_pct = yoy_pct.reset_index()
+    yearly_means_out = yearly_means.reset_index()
+
+    growth_rows = []
+    for c in yearly_means.columns:
+        s = yearly_means[c].dropna()
+        if s.empty:
+            growth_rows.append(
+                {"variable": c, "first_year": np.nan, "last_year": np.nan, "first_value": np.nan, "last_value": np.nan,
+                 "abs_change": np.nan, "pct_change": np.nan, "cagr_pct": np.nan}
+            )
+            continue
+        y0, y1 = int(s.index.min()), int(s.index.max())
+        v0, v1 = float(s.iloc[0]), float(s.iloc[-1])
+        n_years = max(y1 - y0, 1)
+        pct_change = ((v1 / v0 - 1) * 100) if (v0 not in [0, np.nan] and np.isfinite(v0)) else np.nan
+        cagr = (((v1 / v0) ** (1 / n_years) - 1) * 100) if (v0 > 0 and v1 > 0 and np.isfinite(v0) and np.isfinite(v1)) else np.nan
+        growth_rows.append(
+            {
+                "variable": c,
+                "first_year": y0,
+                "last_year": y1,
+                "first_value": v0,
+                "last_value": v1,
+                "abs_change": v1 - v0,
+                "pct_change": pct_change,
+                "cagr_pct": cagr,
+            }
+        )
+
+    growth_summary = pd.DataFrame(growth_rows).sort_values("cagr_pct", ascending=False)
+    write_csv_bundle(
+        "descriptive_growth",
+        {
+            "yearly_means": yearly_means_out,
+            "yoy_pct_change": yoy_pct,
+            "growth_summary": growth_summary,
+        },
+    )
 
 
 # ---------------------------------------------------------------------
@@ -529,6 +616,168 @@ for commodity in ["cattle", "chickens", "hogs"]:
 
 
 # ---------------------------------------------------------------------
+# 6b) CAFO concentration + transitions + entry/exit + density maps
+# ---------------------------------------------------------------------
+cafo_qc_dir = os.path.join(figs_dir, "cafo_quality")
+os.makedirs(cafo_qc_dir, exist_ok=True)
+
+# County-year commodity totals (across classes/sizes)
+cafo_cty_commodity = (
+    cafo_long.groupby(["year", "fips", "commodity_desc"], as_index=False)["ops_count"]
+    .sum()
+)
+
+# Concentration metrics by year x commodity
+concentration_rows = []
+for (yr, cmd), g in cafo_cty_commodity.groupby(["year", "commodity_desc"]):
+    x = g["ops_count"].fillna(0).astype(float).values
+    total = float(np.sum(x))
+    n = int((x > 0).sum())
+    if total > 0:
+        shares = x / total
+        hhi = float(np.sum(shares ** 2))
+    else:
+        hhi = np.nan
+    gini = gini_from_values(x)
+    top10_share = float(np.sort(x)[-10:].sum() / total * 100) if total > 0 else np.nan
+    concentration_rows.append(
+        {
+            "year": int(yr),
+            "commodity_desc": cmd,
+            "total_ops": total,
+            "n_counties_positive": n,
+            "hhi": hhi,
+            "gini": gini,
+            "top10_county_share_pct": top10_share,
+        }
+    )
+
+concentration_df = pd.DataFrame(concentration_rows).sort_values(["commodity_desc", "year"])
+concentration_df.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_concentration_by_year_commodity.csv"), index=False)
+
+# Plot concentration trends
+for metric in ["hhi", "gini", "top10_county_share_pct"]:
+    d = concentration_df.dropna(subset=[metric]).copy()
+    if d.empty:
+        continue
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=d, x="year", y=metric, hue="commodity_desc", marker="o")
+    plt.title(f"CAFO Concentration Trend: {metric}")
+    plt.xlabel("Year")
+    plt.ylabel(metric)
+    out = os.path.join(cafo_qc_dir, f"{today_str}_cafo_concentration_{metric}.png")
+    plt.savefig(out, dpi=220, bbox_inches="tight")
+    safe_plot_close()
+
+# Overall size-state transitions and entry/exit for large CAFO
+cafo_overall = cafo.groupby(["fips", "year"], as_index=False)[["small", "medium", "large"]].sum()
+cafo_overall["state_size"] = "no_cafo"
+cafo_overall.loc[cafo_overall["small"] > 0, "state_size"] = "small_only"
+cafo_overall.loc[cafo_overall["medium"] > 0, "state_size"] = "medium_or_more"
+cafo_overall.loc[cafo_overall["large"] > 0, "state_size"] = "large_present"
+cafo_overall = cafo_overall.sort_values(["fips", "year"])
+
+cafo_overall["next_year"] = cafo_overall.groupby("fips")["year"].shift(-1)
+cafo_overall["next_state_size"] = cafo_overall.groupby("fips")["state_size"].shift(-1)
+cafo_overall["lag_large"] = cafo_overall.groupby("fips")["large"].shift(1).fillna(0)
+cafo_overall["curr_large"] = cafo_overall["large"].fillna(0)
+
+transitions = cafo_overall[
+    cafo_overall["next_year"].notna() & ((cafo_overall["next_year"] - cafo_overall["year"]) == 1)
+].copy()
+transition_matrix = (
+    transitions.groupby(["state_size", "next_state_size"], as_index=False)
+    .size()
+    .rename(columns={"size": "n_transitions"})
+)
+transition_matrix.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_transition_matrix_overall.csv"), index=False)
+
+trans_by_year = (
+    transitions.groupby(["year", "state_size", "next_state_size"], as_index=False)
+    .size()
+    .rename(columns={"size": "n_transitions"})
+)
+trans_by_year.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_transition_matrix_by_year.csv"), index=False)
+
+entry_exit = cafo_overall.copy()
+entry_exit["entry_large"] = ((entry_exit["lag_large"] <= 0) & (entry_exit["curr_large"] > 0)).astype(int)
+entry_exit["exit_large"] = ((entry_exit["lag_large"] > 0) & (entry_exit["curr_large"] <= 0)).astype(int)
+
+entry_exit_year = (
+    entry_exit.groupby("year", as_index=False)
+    .agg(
+        entries_large=("entry_large", "sum"),
+        exits_large=("exit_large", "sum"),
+        counties=("fips", "nunique"),
+    )
+)
+entry_exit_year["entry_rate_pct"] = entry_exit_year["entries_large"] / entry_exit_year["counties"] * 100
+entry_exit_year["exit_rate_pct"] = entry_exit_year["exits_large"] / entry_exit_year["counties"] * 100
+entry_exit_year.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_entry_exit_large_by_year.csv"), index=False)
+
+plt.figure(figsize=(10, 6))
+sns.lineplot(data=entry_exit_year, x="year", y="entry_rate_pct", marker="o", label="Entry rate")
+sns.lineplot(data=entry_exit_year, x="year", y="exit_rate_pct", marker="o", label="Exit rate")
+plt.title("Large-CAFO Entry/Exit Rates by Year")
+plt.xlabel("Year")
+plt.ylabel("Rate (%) of counties")
+out = os.path.join(cafo_qc_dir, f"{today_str}_cafo_entry_exit_rates.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
+
+# County-level CAFO density maps (overall and large) by year
+cafo_map_dir = os.path.join(figs_dir, "cafo_density_maps")
+os.makedirs(cafo_map_dir, exist_ok=True)
+
+cafo_map = cafo_overall[["fips", "year", "small", "medium", "large"]].copy()
+cafo_map["total_ops"] = cafo_map[["small", "medium", "large"]].sum(axis=1)
+if "population_population_full" in df.columns:
+    pop_tmp = df[["fips", "year", "population_population_full"]].copy()
+    pop_tmp["population_population_full"] = to_numeric_series(get_series(pop_tmp, "population_population_full"))
+    cafo_map = cafo_map.merge(pop_tmp, on=["fips", "year"], how="left")
+    cafo_map["ops_per_10k_pop"] = np.where(
+        cafo_map["population_population_full"] > 0,
+        cafo_map["total_ops"] / cafo_map["population_population_full"] * 10000,
+        np.nan,
+    )
+else:
+    cafo_map["ops_per_10k_pop"] = np.nan
+
+cafo_map.to_csv(os.path.join(cafo_map_dir, f"{today_str}_cafo_density_map_data.csv"), index=False)
+
+if px is not None:
+    for yr in sorted(cafo_map["year"].dropna().astype(int).unique()):
+        d = cafo_map[cafo_map["year"] == yr].copy()
+        if d.empty:
+            continue
+        d["fips"] = d["fips"].astype(str).str.zfill(5)
+
+        for metric, title, rng in [
+            ("total_ops", f"CAFO Density (Total Ops) - {yr}", None),
+            ("large", f"CAFO Density (Large Ops) - {yr}", None),
+            ("ops_per_10k_pop", f"CAFO Density (Ops per 10k pop) - {yr}", (0, np.nanpercentile(d["ops_per_10k_pop"].dropna(), 99) if d["ops_per_10k_pop"].notna().any() else 1)),
+        ]:
+            if metric not in d.columns:
+                continue
+            fig = px.choropleth(
+                d,
+                geojson=COUNTY_GEOJSON_URL,
+                locations="fips",
+                color=metric,
+                color_continuous_scale="OrRd",
+                range_color=rng,
+                scope="usa",
+                hover_data={"fips": True, metric: ":.2f"},
+                title=title,
+            )
+            fig.update_geos(fitbounds="locations", visible=False)
+            out = os.path.join(cafo_map_dir, f"{today_str}_cafo_density_{metric}_{yr}.html")
+            fig.write_html(out, include_plotlyjs="cdn")
+else:
+    print("Plotly not available; skipped CAFO density maps.")
+
+
+# ---------------------------------------------------------------------
 # 7) Ridge-like plots for crime and mental health
 # ---------------------------------------------------------------------
 ridge_dir = os.path.join(figs_dir, "ridge")
@@ -631,7 +880,10 @@ for idx, var in enumerate(outcome_vars, start=1):
         size_titles = ["Small CAFO count", "Medium CAFO count", "Large CAFO count"]
 
         for i, (size_col, stitle) in enumerate(zip(size_cols, size_titles)):
-            panel = sub[["year", var, size_col] + ([pop_col] if pop_col else [])].copy()
+            panel_cols = ["year", var, size_col]
+            if pop_col and pop_col != var:
+                panel_cols.append(pop_col)
+            panel = sub[panel_cols].copy()
             panel = panel.dropna(subset=["year"])
             agg = panel.groupby("year", as_index=False).agg(
                 outcome_mean=(var, "mean"),
@@ -751,6 +1003,8 @@ state_large.to_csv(os.path.join(state_dir, f"{today_str}_states_with_large_cafo.
 
 # Plot several states (top by large-CAFO intensity)
 selected_states = state_large["state_fips"].head(STATE_PLOT_LIMIT).tolist()
+if "05" in state_large["state_fips"].values and "05" not in selected_states:
+    selected_states = selected_states + ["05"]  # always include Arkansas if present
 print("States with large CAFO (total):", len(state_large))
 print("States selected for state trend plots:", len(selected_states))
 
