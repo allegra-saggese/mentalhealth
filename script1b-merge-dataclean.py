@@ -16,6 +16,16 @@ import re
 clean_dir = os.path.join(db_data, "clean")
 merged_dir = os.path.join(db_data, "merged")
 
+# Merge configuration
+BASE_DESCRIPTOR = "cafo_ops_by_size_compact"
+MERGE_DESCRIPTORS = {
+    "crime_fips_level_final",
+    "mentalhealthrank_full",
+    "mh_mortality_fips_yr",
+    "population_full",
+}
+RURAL_DESCRIPTOR_HINT = "rural-key"
+
 
 def _split_descriptor(path):
     """
@@ -163,7 +173,7 @@ for desc, p in sorted(latest.items()):
 
 
 # Rural-key filter source
-rural_candidates = [d for d in latest if "rural-key" in d]
+rural_candidates = [d for d in latest if RURAL_DESCRIPTOR_HINT in d]
 if not rural_candidates:
     raise RuntimeError("Could not find rural-key file in clean folder.")
 rural_desc = sorted(rural_candidates)[-1]
@@ -188,16 +198,29 @@ if allowed_keys.empty:
 print(f"Rural-key filter rows kept (non_large_metro == 1): {len(allowed_keys):,}")
 
 
-# Base panel is rural key only (ensures all final rows satisfy filter)
+# Target files for this merge run
+target_descriptors = {BASE_DESCRIPTOR, *MERGE_DESCRIPTORS}
+missing = sorted([d for d in target_descriptors if d not in latest])
+if missing:
+    raise RuntimeError(f"Missing required clean descriptors: {missing}")
+
+print("Descriptors included in merge:")
+for d in sorted(target_descriptors):
+    print(f" - {d}: {os.path.basename(latest[d])}")
+
+# Base panel: CAFO compact reduced to one row per fips-year
+base = _read_filter_reduce(latest[BASE_DESCRIPTOR], BASE_DESCRIPTOR, allowed_keys)
+if base is None or base.empty:
+    raise RuntimeError(f"Base dataset {BASE_DESCRIPTOR} is empty after rural-key filter.")
+
 merged_all = allowed_keys.copy()
 merged_all["non_large_metro"] = 1
+merged_all = merged_all.merge(base, on=["fips", "year"], how="left")
 
 
-# Read, filter, reduce, and merge each latest file
-for descriptor, path in sorted(latest.items()):
-    if descriptor == rural_desc:
-        continue
-
+# Merge remaining selected datasets on top of base keys
+for descriptor in sorted(MERGE_DESCRIPTORS):
+    path = latest[descriptor]
     part = _read_filter_reduce(path, descriptor, allowed_keys)
     if part is None:
         continue
