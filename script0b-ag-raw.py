@@ -201,6 +201,62 @@ if combined.empty:
     agdfs = [pd.read_stata(file) for file in agfiles]
     combined = pd.concat(agdfs, ignore_index=True)
     print(f"Loaded {len(combined):,} rows from local .dta files")
+    
+ # ---------- Secondary API backfill for 2012 + 2017 (relaxed) ----------
+# due to API failures with 2012, 2017 data - backfilling with old ag data 
+
+donor_path = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/2026-02-09_ag_annual_df.csv"
+
+# 1) standardize both dataframes
+combined_c = clean_cols(combined).copy()
+donor = clean_cols(pd.read_csv(donor_path, low_memory=False)).copy()
+
+# 2) drop duplicate column names (critical for concat)
+combined_c = combined_c.loc[:, ~combined_c.columns.duplicated()].copy()
+donor = donor.loc[:, ~donor.columns.duplicated()].copy()
+
+# 3) normalize donor filter columns
+for c in ["commodity_desc", "unit_desc", "statisticcat_desc"]:
+    if c in donor.columns:
+        donor[c] = donor[c].astype("string").str.strip().str.lower()
+
+donor["year"] = pd.to_numeric(donor["year"], errors="coerce").astype("Int64")
+
+# 4) keep only 2012 + 2017 and core commodities
+backfill = donor[
+    donor["year"].isin([2012, 2017]) &
+    donor["commodity_desc"].isin(["cattle", "chickens", "hogs"])
+].copy()
+
+print("backfill rows:", len(backfill))
+print(backfill.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
+
+# 5) align schemas safely (union of columns)
+all_cols = sorted(set(combined_c.columns) | set(backfill.columns))
+combined_c = combined_c.reindex(columns=all_cols)
+backfill = backfill.reindex(columns=all_cols)
+
+# 6) append; do not overwrite existing rows
+before = len(combined_c)
+combined = pd.concat([combined_c, backfill], ignore_index=True)
+combined = combined.drop_duplicates(ignore_index=True)
+after = len(combined)
+
+print("combined before:", before)
+print("combined after :", after)
+print("rows added     :", after - before)
+
+# 7) quick confirmation of 2012/2017 operations presence
+chk = combined.copy()
+for c in ["commodity_desc", "unit_desc"]:
+    chk[c] = chk[c].astype("string").str.strip().str.lower()
+chk["year"] = pd.to_numeric(chk["year"], errors="coerce").astype("Int64")
+chk = chk[
+    chk["commodity_desc"].isin(["cattle", "chickens", "hogs"]) &
+    chk["year"].isin([2012, 2017])
+]
+print(chk.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
+
 
 
 ################## DATA CLEANING FOR ALL AG DATA ######################
