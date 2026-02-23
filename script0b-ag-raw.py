@@ -291,8 +291,18 @@ ag_raw_df.head()
 # create total fips code 
 ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="county_code")
 ag_raw_df.columns
-if "FIPS_generated" in ag_raw_df.columns:
+# normalize possible FIPS column variants and guard against duplicate column names
+if "FIPS_generated" in ag_raw_df.columns and "fips_generated" not in ag_raw_df.columns:
     ag_raw_df = ag_raw_df.rename(columns={"FIPS_generated": "fips_generated"})
+elif "FIPS_generated" in ag_raw_df.columns and "fips_generated" in ag_raw_df.columns:
+    # keep one canonical column name/value path
+    ag_raw_df = ag_raw_df.drop(columns=["FIPS_generated"])
+
+if ag_raw_df.columns.duplicated().any():
+    ag_raw_df = ag_raw_df.loc[:, ~ag_raw_df.columns.duplicated()]
+
+if "fips_generated" not in ag_raw_df.columns:
+    raise RuntimeError("fips_generated column missing after FIPS generation/normalization")
 
 ag_raw_df["fips_generated"] = ag_raw_df["fips_generated"].astype("string").str.zfill(5)
 ag_raw_df["year"] = pd.to_numeric(ag_raw_df["year"], errors="coerce").astype("Int64")
