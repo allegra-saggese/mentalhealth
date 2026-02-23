@@ -239,3 +239,22 @@ out_path = os.path.join(merged_dir, out_name)
 os.makedirs(merged_dir, exist_ok=True)
 merged_all.to_csv(out_path, index=False)
 print("Saved:", out_path)
+
+
+# Spliced exports
+slice_2005_2010 = merged_all[merged_all["year"].between(2005, 2010, inclusive="both")].copy()
+slice_2010_2020 = merged_all[merged_all["year"].between(2010, 2020, inclusive="both")].copy()
+slice_census_years = merged_all[merged_all["year"].isin([2002, 2005, 2007, 2012])].copy()
+
+slice_2005_2010_path = os.path.join(merged_dir, f"{today_str}_full_merged_2005_2010.csv")
+slice_2010_2020_path = os.path.join(merged_dir, f"{today_str}_full_merged_2010_2020.csv")
+slice_census_path = os.path.join(merged_dir, f"{today_str}_full_merged_census_years.csv")
+
+slice_2005_2010.to_csv(slice_2005_2010_path, index=False)
+slice_2010_2020.to_csv(slice_2010_2020_path, index=False)
+slice_census_years.to_csv(slice_census_path, index=False)
+
+print("Saved:", slice_2005_2010_path, "| rows:", len(slice_2005_2010))
+print("Saved:", slice_2010_2020_path, "| rows:", len(slice_2010_2020))
+print("Saved:", slice_census_path, "| rows:", len(slice_census_years))
+
