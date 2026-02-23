@@ -130,6 +130,16 @@ def weighted_mean(x, w):
     return np.average(x[m], weights=w[m])
 
 
+def get_series(df_like, col):
+    """
+    Always return a Series; protects against duplicate-label selection returning DataFrame.
+    """
+    obj = df_like[col]
+    if isinstance(obj, pd.DataFrame):
+        obj = obj.iloc[:, 0]
+    return obj
+
+
 STATE_FIPS_TO_NAME = {
     "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas", "06": "California",
     "08": "Colorado", "09": "Connecticut", "10": "Delaware", "11": "District of Columbia",
@@ -572,7 +582,7 @@ cafo_count = (
 
 pop_col = "population_population_full" if "population_population_full" in df.columns else None
 if pop_col is not None:
-    df[pop_col] = to_numeric_series(df[pop_col])
+    df[pop_col] = to_numeric_series(get_series(df, pop_col))
 
 skip_vars = {
     "year",
@@ -601,7 +611,7 @@ print("Trend variables to plot:", len(outcome_vars))
 for idx, var in enumerate(outcome_vars, start=1):
     if var not in df.columns:
         continue
-    df[var] = to_numeric_series(df[var])
+    df[var] = to_numeric_series(get_series(df, var))
     if df[var].notna().sum() < 30:
         continue
 
@@ -687,7 +697,7 @@ for var in key_outcomes:
     if var not in df.columns:
         continue
     v = df[["fips", "year", var]].copy()
-    v[var] = to_numeric_series(v[var])
+    v[var] = to_numeric_series(get_series(v, var))
     for commodity in ["cattle", "chickens", "hogs"]:
         cc = cafo_count[cafo_count["commodity_desc"] == commodity][["fips", "year", "small", "medium", "large"]].copy()
         if cc.empty:
@@ -759,7 +769,7 @@ df_state["state_fips"] = df_state["fips"].astype(str).str[:2]
 df_state["state_name"] = df_state["state_fips"].map(STATE_FIPS_TO_NAME).fillna(df_state["state_fips"])
 
 for v in state_outcomes:
-    df_state[v] = to_numeric_series(df_state[v])
+    df_state[v] = to_numeric_series(get_series(df_state, v))
 
 for st in selected_states:
     st_name = STATE_FIPS_TO_NAME.get(st, st)
@@ -771,12 +781,9 @@ for st in selected_states:
         ca_agg["total_cafo_ops"] = ca_agg[["small", "medium", "large"]].sum(axis=1)
 
         for out_var in state_outcomes:
-            y = (
-                df_state[df_state["state_fips"] == st]
-                .groupby("year", as_index=False)[out_var]
-                .mean()
-                .rename(columns={out_var: "outcome_mean"})
-            )
+            st_slice = df_state[df_state["state_fips"] == st].copy()
+            st_slice[out_var] = to_numeric_series(get_series(st_slice, out_var))
+            y = st_slice.groupby("year", as_index=False).agg(outcome_mean=(out_var, "mean"))
             z = ca_agg.merge(y, on="year", how="inner").dropna(subset=["outcome_mean"])
             if z.empty:
                 continue
