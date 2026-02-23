@@ -39,10 +39,10 @@ outf = os.path.join(db_data, "clean") #output
 
 
 # API setup
+os.environ["USDA_NASS_API_KEY"] = "30643212-7739-359A-B451-0EAD3D345DB9" # will have to change for user
 # Pull USDA NASS Quick Stats data directly instead of reading .dta files.
-# Requires env var USDA_NASS_API_KEY to be set in your shell.
 USE_API = True
-NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY")
+NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY") 
 if USE_API and not NASS_API_KEY:
     raise RuntimeError("Missing USDA_NASS_API_KEY env var. Set it before running this script.")
 
@@ -76,76 +76,107 @@ def nass_get_data(params):
 source_desc = "CENSUS"
 agg_level_desc = "COUNTY"
 sector_desc = "ANIMALS & PRODUCTS"
-group_desc_allow = ["LIVESTOCK", "OPERATIONS", "POULTRY", "ANIMAL TOTALS"]
-commodity_desc_allow = ["CATTLE", "CHICKENS", "HOGS", "EGGS", "MILK", "POULTRY TOTALS", "ANIMAL TOTALS"]
+commodity_desc_allow = ["CATTLE", "CHICKENS", "HOGS"]
+
 unit_desc_allow = ["HEAD", "OPERATIONS"]
+statisticcat_desc_allow = ["INVENTORY", "OPERATIONS"]
 
 # Census years only
 census_years = [2002, 2007, 2012, 2017]
 
-# State list for chunking if any request exceeds 50k rows
-state_alpha = [
-    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
-    "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
-    "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"
-]
+# Commodity-specific domain splits used only when a query exceeds 50k rows.
+commodity_domain_splits = {
+    "CATTLE": [
+        "INVENTORY",
+        "INVENTORY OF CATTLE, INCL CALVES",
+        "INVENTORY OF CATTLE, (EXCL COWS)",
+        "INVENTORY OF BEEF COWS",
+        "INVENTORY OF MILK COWS",
+        "INVENTORY OF CATTLE ON FEED",
+    ],
+    "CHICKENS": [
+        "INVENTORY",
+    ],
+    "HOGS": [
+        "INVENTORY OF HOGS",
+        "INVENTORY OF BREEDING HOGS",
+    ],
+}
 
 
 def fetch_ag_data():
+    def _keep_inventory_domaincat(df):
+        """Keep only rows where domaincat_desc starts with 'inventory' (case-insensitive)."""
+        if "domaincat_desc" in df.columns:
+            s = df["domaincat_desc"].astype(str).str.strip().str.lower()
+            return df[s.str.startswith("inventory", na=False)]
+        if "DOMAINCAT_DESC" in df.columns:
+            s = df["DOMAINCAT_DESC"].astype(str).str.strip().str.lower()
+            return df[s.str.startswith("inventory", na=False)]
+        return df
+
+    def _safe_get_counts(params):
+        try:
+            return nass_get_counts(params)
+        except RuntimeError as e:
+            print("Skipping combo due to API error:", e)
+            return None
+
+    def _safe_get_data(params):
+        try:
+            out = nass_get_data(params)
+        except RuntimeError as e:
+            print("Skipping data pull due to API error:", e)
+            return pd.DataFrame()
+        return _keep_inventory_domaincat(out)
+
     frames = []
     rate_sleep = 0.4  # basic rate limiting
 
     for yr in census_years:
-        for grp in group_desc_allow:
-            for cmd in commodity_desc_allow:
-                for unit in unit_desc_allow:
+        for cmd in commodity_desc_allow:
+            for unit in unit_desc_allow:
+                for stat in statisticcat_desc_allow:
                     time.sleep(rate_sleep)
                     base_params = {
                         "key": NASS_API_KEY,
                         "source_desc": source_desc,
                         "agg_level_desc": agg_level_desc,
                         "sector_desc": sector_desc,
-                        "group_desc": grp,
                         "commodity_desc": cmd,
                         "unit_desc": unit,
+                        "statisticcat_desc": stat,
                         "year": yr,
                     }
 
-                    try:
-                        count = nass_get_counts(base_params)
-                    except RuntimeError as e:
-                        # skip parameter combos that the API rejects (often 403)
-                        print("Skipping combo due to API error:", e)
+                    count = _safe_get_counts(base_params)
+                    if count is None or count == 0:
                         continue
 
-                    if count == 0:
+                    if count <= 50000:
+                        df_pull = _safe_get_data(base_params)
+                        if not df_pull.empty:
+                            frames.append(df_pull)
                         continue
 
-                    # If row count is too large, split by state_alpha
-                    if count > 50000:
-                        for st in state_alpha:
-                            time.sleep(rate_sleep)
-                            st_params = dict(base_params)
-                            st_params["state_alpha"] = st
-                            try:
-                                st_count = nass_get_counts(st_params)
-                            except RuntimeError as e:
-                                print("Skipping state combo due to API error:", e)
-                                continue
-                            if st_count == 0:
-                                continue
-                            if st_count > 50000:
-                                raise RuntimeError(
-                                    f"Request still >50k rows after state split: "
-                                    f"year={yr}, group={grp}, commodity={cmd}, unit={unit}, state={st}, count={st_count}"
-                                )
-                            df_st = nass_get_data(st_params)
-                            if not df_st.empty:
-                                frames.append(df_st)
-                    else:
-                        df = nass_get_data(base_params)
-                        if not df.empty:
-                            frames.append(df)
+                    # Still too large: split by commodity-specific domain_desc values.
+                    for dd in commodity_domain_splits.get(cmd, []):
+                        time.sleep(rate_sleep)
+                        dd_params = dict(base_params)
+                        dd_params["domain_desc"] = dd
+                        dd_count = _safe_get_counts(dd_params)
+                        if dd_count is None or dd_count == 0:
+                            continue
+                        if dd_count > 50000:
+                            print(
+                                "Skipping domain split still >50k rows: "
+                                f"year={yr}, commodity={cmd}, "
+                                f"unit={unit}, statisticcat={stat}, domain_desc={dd}, count={dd_count}"
+                            )
+                            continue
+                        df_pull = _safe_get_data(dd_params)
+                        if not df_pull.empty:
+                            frames.append(df_pull)
 
     if frames:
         return pd.concat(frames, ignore_index=True)
@@ -352,31 +383,63 @@ def map_size_class(df, mapping, unit_match, class_match, out_col):
     mask = (df["unit_desc"] == unit_match) & (df["class_desc"] == class_match)
     df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
 
-# ===== FILTER (updated spec) =====
-# 1) group_desc in livestock/poultry/dairy
-# 2) no filter on domain_desc
-# 3) unit_desc = operations
-# 4) statisticcat_desc = inventory
-# 5) commodity_desc in cattle/chickens/eggs/hogs/milk
-# 6) domaincat_desc starts with inventory
+# ===== FILTER (class_desc-driven spec) =====
+# 1) commodity in cattle/chickens/hogs
+# 2) unit_desc in operations/head
+# 3) statisticcat_desc in inventory/operations
+# 4) domaincat_desc starts with inventory
+# 5) class_desc kept from commodity-specific lists (including optional classes)
 
-comms_of_interest = ["cattle", "chickens", "eggs", "hogs", "milk"]
-groups_keep = ["livestock", "poultry", "dairy"]
+comms_of_interest = ["cattle", "chickens", "hogs"]
+
+class_keep_map = {
+    "cattle": {
+        "incl calves",
+        "(excl cows)",
+        "cows, beef",
+        "cows, milk",
+        "calves",
+        "calves, veal",
+        "ge 500 lbs",
+        "heifers, ge 500 lbs, milk replacement",
+    },
+    "chickens": {
+        "broilers",
+        "layers",
+        "layers & pullets",
+        "pullets, replacement",
+        "roosters",
+    },
+    "hogs": {
+        "all classes",
+        "breeding",
+    },
+}
 
 df_sub = df[
-    (df["group_desc"].isin(groups_keep)) &
     (df["commodity_desc"].isin(comms_of_interest)) &
-    (df["unit_desc"] == "operations") &
-    (df["statisticcat_desc"] == "inventory")
+    (df["unit_desc"].isin(["operations", "head"])) &
+    (df["statisticcat_desc"].isin(["inventory", "operations"])) &
+    (df["domaincat_desc"].str.startswith("inventory", na=False))
 ].copy()
 
-# keep only inventory bins
-df_sub = df_sub[df_sub["domaincat_desc"].str.startswith("inventory", na=False)].copy()
+# class-based keep filter
+allowed_pairs = {
+    (commodity, class_desc)
+    for commodity, classes in class_keep_map.items()
+    for class_desc in classes
+}
+pair_index = pd.MultiIndex.from_frame(df_sub[["commodity_desc", "class_desc"]])
+allowed_index = pd.MultiIndex.from_tuples(sorted(allowed_pairs))
+df_sub = df_sub[pair_index.isin(allowed_index)].copy()
 
 # ===== QA =====
 print("df_sub rows:", len(df_sub))
 print("commodity_desc:", df_sub["commodity_desc"].value_counts().head(10))
 print("group_desc:", df_sub["group_desc"].value_counts().head(10))
+print("class_desc:", df_sub["class_desc"].value_counts().head(20))
+print("statisticcat_desc:", df_sub["statisticcat_desc"].value_counts().head(10))
+print("unit_desc:", df_sub["unit_desc"].value_counts().head(10))
 print("domaincat_desc top 10:")
 print(df_sub["domaincat_desc"].value_counts().head(10))
 
