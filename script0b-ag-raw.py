@@ -257,6 +257,11 @@ chk = chk[
 ]
 print(chk.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
 
+print(df_big["year"].min(), df_big["year"].max())                      # expect max up to 2021
+print(df2[df2["size_source"].notna()]["year"].max())                   # should be > 2011 now
+print(summary_compact["year"].min(), summary_compact["year"].max())    # should extend beyond 2011
+
+print(combined["year"].value_counts().sort_index().tail(10))
 
 
 ################## DATA CLEANING FOR ALL AG DATA ######################
@@ -710,6 +715,10 @@ print("Stage 2 size class counts:")
 print(df2["size_class"].value_counts(dropna=False))
 print("Stage 2 compact rows:", len(summary_compact))
 
+# checking no years were dropped
+print(df2[df2["size_source"].notna()]["year"].value_counts().sort_index().tail(15))
+print(summary["year"].min(), summary["year"].max())
+print(summary_compact["year"].min(), summary_compact["year"].max())
 
 ################### STAGE 3: EXPORT CAFO OUTPUTS #####################
 
