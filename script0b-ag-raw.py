@@ -209,13 +209,51 @@ if combined.empty:
 print("Columns:", sorted(combined.columns))
 print(combined.dtypes)
     
+ag_iterated = clean_cols(combined).copy()
+df = ag_iterated.copy()
+
+for c in [
+    "domaincat_desc", "unit_desc", "statisticcat_desc", "domain_desc",
+    "commodity_desc", "group_desc", "class_desc"
+]:
+    df[c] = df[c].astype("string").str.strip().str.lower()
+
+comms_of_interest = ["cattle", "chickens", "hogs"]
+
+class_keep_map = {
+    "cattle": {"incl calves","(excl cows)","cows, beef","cows, milk","calves","calves, veal","ge 500 lbs","heifers, ge 500 lbs, milk replacement"},
+    "chickens": {"broilers","layers","layers & pullets","pullets, replacement","roosters"},
+    "hogs": {"all classes","breeding"},
+}
+
+df_sub = df[
+    (df["commodity_desc"].isin(comms_of_interest)) &
+    (df["unit_desc"].isin(["operations", "head"])) &
+    (df["statisticcat_desc"].isin(["inventory", "operations"])) &
+    (df["domaincat_desc"].str.startswith("inventory", na=False))
+].copy()
+
+allowed_pairs = {
+    (commodity, cls)
+    for commodity, classes in class_keep_map.items()
+    for cls in classes
+}
+pair_index = pd.MultiIndex.from_frame(df_sub[["commodity_desc", "class_desc"]])
+allowed_index = pd.MultiIndex.from_tuples(sorted(allowed_pairs))
+df_sub = df_sub[pair_index.isin(allowed_index)].copy()
+
+print("df_sub rows:", len(df_sub))
+
+# check value counts 
+df_sub["commodity_desc"].value_counts()
+df_sub["class_desc"].value_counts().head(20)
+df_sub["unit_desc"].value_counts()
+df_sub["statisticcat_desc"].value_counts()
 
 
 
-########### DATA CLEANING FOR ALL FIPS / AG -- ENSURING MATCH WILL WORK ####################
+########### DATA CLEANING FOR ALL FIPS / AG -- ENSURE MATCH ####################
 
-# sense check the length of the dataframe against the FIPS data 
-# PURPOSE: to see how many observations there are 
 
 matches = glob.glob(os.path.join(outf, "*fips_full*.csv")) # pull the most recent fips file 
 if matches:
@@ -224,28 +262,23 @@ if matches:
 else:
     print("No matching file found.")
     
-fips_df = pd.read_csv(fips_sense)   # upload fips_df 
+fips_df = pd.read_csv(fips_sense)   # upload fips_df
+fips_df = clean_cols(fips_df)
 
-        
-        
-# sense check the length of the dataframe against the FIPS data to see how many observations there are 
-fips_sense = os.path.join(outf, "2025-11-10_fips_full.csv") 
-fips_df = pd.read_csv(fips_sense) 
+# standardize fips key from external file
+fips_df["fips"] = pd.to_numeric(fips_df["fips"], errors="coerce").astype("Int64").astype("string").str.zfill(5)
+fips_df["year"] = pd.to_numeric(fips_df["year"], errors="coerce").astype("Int64")
 
-print("\n--- Combined dataframe number of rows ---")
-print(len(combined))
+fips_key = (
+    fips_df[["fips", "year", "county"]]
+    .rename(columns={"county": "county_fips_name"})
+    .drop_duplicates()
+)
 
-# create fips slide df by year (to match w/ ag)
-fdf_2002 = fips_df[fips_df["year"] == 2002]     
-fdf_2007 = fips_df[fips_df["year"] == 2007]     
-fdf_2012 = fips_df[fips_df["year"] == 2012]     
-fdf_2017 = fips_df[fips_df["year"] == 2017]     
+dupe_key = fips_key.duplicated(subset=["fips", "year"]).sum()
+if dupe_key:
+    raise RuntimeError(f"fips_full has duplicate fips-year keys: {dupe_key}")
 
-# checking dupes on fips data - although I"m certain we shouldn"t have any
-dup_counts = fdf_2012.groupby(["fips", "year"]).size().reset_index(name="n_rows")
-print(dup_counts["n_rows"].value_counts())  # quick frequency check
-dup_counts_17 = fdf_2017.groupby(["fips", "year"]).size().reset_index(name="n_rows")
-print(dup_counts_17["n_rows"].value_counts())  # quick frequency check
 
 
 
@@ -258,6 +291,11 @@ ag_raw_df.head()
 # create total fips code 
 ag_raw_df = generate_fips(ag_raw_df, state_col="state_fips_code", city_col="county_code")
 ag_raw_df.columns
+if "FIPS_generated" in ag_raw_df.columns:
+    ag_raw_df = ag_raw_df.rename(columns={"FIPS_generated": "fips_generated"})
+
+ag_raw_df["fips_generated"] = ag_raw_df["fips_generated"].astype("string").str.zfill(5)
+ag_raw_df["year"] = pd.to_numeric(ag_raw_df["year"], errors="coerce").astype("Int64")
 
 
 # iterate forward
@@ -284,38 +322,77 @@ len_raw_df = len(ag_raw_df)
 len_df_big_post_dupe= len(df_big)
 
 print("No duplicates found in final dataframe? ", 
-      (len_df_big_post_dupe == len_df_big_predupe == (len_it_rows + len_raw_df)))
-
-# INTERPRETATION: about 14 million county observations --  2002-2021
-# for QA --- USDA census reports about 1.9 mil farms (in 2022 - data we don"t have), so this number seems fair although maybe a little low) 
+      (len_df_big_post_dupe == len_df_big_predupe == (len_it_rows + len_raw_df))) # INTERPRETATION: 572,656 county observations (after filter for our commodities) from 2002-2021
 # recall that USDA aggregates to keep anonymity of the survey, so the FIPS level will not give us the exact number of rows = number of farms 
 
-# export in this form -- create cafos after 
+# attach external fips-year key and county name
+df_big = df_big.merge(
+    fips_key,
+    left_on=["fips_generated", "year"],
+    right_on=["fips", "year"],
+    how="left",
+    validate="m:1",
+    indicator=True,
+)
+
+print("FIPS merge status:")
+print(df_big["_merge"].value_counts(dropna=False))
+
+def _norm_county_name(s):
+    s = s.astype("string").str.lower().str.strip()
+    s = s.str.replace(r"[^a-z0-9 ]", "", regex=True)
+    s = s.str.replace(r"\b(county|parish|borough|census area|municipality|city and borough)\b", "", regex=True)
+    s = s.str.replace(r"\s+", " ", regex=True).str.strip()
+    return s
+
+df_big["county_name_norm"] = _norm_county_name(df_big["county_name"])
+df_big["county_fips_name_norm"] = _norm_county_name(df_big["county_fips_name"])
+
+name_mismatch = df_big[
+    df_big["county_name_norm"].notna()
+    & df_big["county_fips_name_norm"].notna()
+    & (df_big["county_name_norm"] != df_big["county_fips_name_norm"])
+].copy()
+
+missing_fips_key = df_big[df_big["_merge"] != "both"].copy()
+
+
 today_str = date.today().strftime("%Y-%m-%d")
 
 clean_ag_census = f"{today_str}_ag_annual_df.csv"
 ag_path = os.path.join(outf, clean_ag_census)
 df_big.to_csv(ag_path, index=False)
+print("Saved iterated AG panel:", ag_path)
+
+review_outf = "/Users/allegrasaggese/Dropbox/Mental/allegra-dropbox-copy/interim-data"
+os.makedirs(review_outf, exist_ok=True)
+mismatch_path = os.path.join(review_outf, f"{today_str}_ag_fips_name_mismatch.csv")
+missing_key_path = os.path.join(review_outf, f"{today_str}_ag_fips_missing_key.csv")
+name_mismatch.to_csv(mismatch_path, index=False)
+missing_fips_key.to_csv(missing_key_path, index=False)
+print("Saved county-name mismatch rows for manual review:", mismatch_path)
+print("Saved missing fips-year key rows for manual review:", missing_key_path)
 
 
-############ COLLAPSE THE DATA FOR COUNTY LEVEL EASE (creating columns for the CAFOs instead)
+################### OPTIONAL CODE COMPONENT - BEGIN #####################
+####### COLLAPSE THE DATA FOR COUNTY LEVEL EASE (creating columns for the CAFOs instead)
 
 # # # # unhash if you are just remaking the CAFOs (i.e. you don"t want to remake the RAW AG DATA!)
-match_ag_df = glob.glob(os.path.join(outf, "*ag_annual_df*.csv")) # pull the most recent fips file 
-if match_ag_df:
-    ag_complete = max(match_ag_df, key=os.path.getmtime)
-    print("Using:", ag_complete)
-else:
-    print("No matching file found.")
+#match_ag_df = glob.glob(os.path.join(outf, "*ag_annual_df*.csv")) # pull the most recent fips file 
+#if match_ag_df:
+#    ag_complete = max(match_ag_df, key=os.path.getmtime)
+#    print("Using:", ag_complete)
+#else:
+#    print("No matching file found.")
     
-ag_iterated = pd.read_csv(ag_complete)   # upload ag_complete iterated data
-# ag_iterated = df_big.copy()
-ag_iterated.columns.tolist()
+#ag_iterated = pd.read_csv(ag_complete)   # upload ag_complete iterated data
+#ag_iterated.columns.tolist()
 
 # remove files from cleaning / iterating ag data that take up a ton of space
-del ag_raw_df, b, clean_ag_census, df, df_big
-del dup_counts, dup_counts_17, fips_sense, i, matches, n_forward, new_frames, new_rows
-del year_col, y
+# del dup_counts, dup_counts_17, fips_sense, i, matches, n_forward, new_frames, new_rows
+# del year_col, y
+
+################### OPTIONAL CODE COMPONENT #####################
 
 
 
