@@ -384,98 +384,18 @@ print("Saved county-name mismatch rows for manual review:", mismatch_path)
 print("Saved missing fips-year key rows for manual review:", missing_key_path)
 
 
-################### OPTIONAL CODE COMPONENT - BEGIN #####################
-####### COLLAPSE THE DATA FOR COUNTY LEVEL EASE (creating columns for the CAFOs instead)
 
-# # # # unhash if you are just remaking the CAFOs (i.e. you don"t want to remake the RAW AG DATA!)
-#match_ag_df = glob.glob(os.path.join(outf, "*ag_annual_df*.csv")) # pull the most recent fips file 
-#if match_ag_df:
-#    ag_complete = max(match_ag_df, key=os.path.getmtime)
-#    print("Using:", ag_complete)
-#else:
-#    print("No matching file found.")
-    
-#ag_iterated = pd.read_csv(ag_complete)   # upload ag_complete iterated data
-#ag_iterated.columns.tolist()
+################### STAGE 2: BUILD CAFO SIZE STRUCTURE #####################
+# Input for Stage 2 is df_big from Stage 1 (iterated annual panel with FIPS merge).
 
-# remove files from cleaning / iterating ag data that take up a ton of space
-# del dup_counts, dup_counts_17, fips_sense, i, matches, n_forward, new_frames, new_rows
-# del year_col, y
+df_cafo = df_big.copy()
 
-################### OPTIONAL CODE COMPONENT #####################
-
-
-
-# ASSIGNMENT RULE (CAFO size classification)
-# 1) Map USDA inventory size classes (domaincat_desc) to numeric bins per species.
-# 2) For each species-specific bin, classify as small/medium/large using thresholds below.
-# 3) Final size_class is assigned per row based on the mapped bin and thresholds.
-# Note: No filtering by domain_desc; we rely on unit_desc in (HEAD, OPERATIONS).
-
-# CAFO size limits, and can adjust these values for the S/M/L CAFO development by inventory size
-broiler_cutoff_lrg = 5
-broiler_cutoff_med =  3
-layer_cutoff_lrg =  9
-layer_cutoff_med =  7
-cattle_cutoff_lrg =  7
-cattle_cutoff_med = 6
-hog_cutoff_lrg =  7
-hog_cutoff_med = 6
-
-
-### MAY DELETE THIS 
-# CAFO size limits - head counts - will need to use this once we get AVERAGE SIZE by COUNTY - otherwise not useful 
-h_dairy_cutoff_lrg = 700
-h_dairy_cutoff_med = 200
-h_all_cattle_cutoff_lrg = 1000
-h_all_cattle_cutoff_med = 300
-h_calf_cutoff_lrg = 1000
-h_calf_cutoff_med = 300
-h_hogs_cutoff_lrg = 2500
-h_hogs_cutoff_med = 750
-h_broilers_cutoff_lrg = 125000 # broilers fall in two categories - due to EPA categorization need to make a choice 
-h_broilers_cutoff_med = 37500
-h_layers_cutoff_lrg = 82000
-h_layers_cutoff_med = 25000
-
-thresholds = [
-    broiler_cutoff_lrg, broiler_cutoff_med, layer_cutoff_lrg, layer_cutoff_med,
-    cattle_cutoff_lrg, cattle_cutoff_med, hog_cutoff_lrg, hog_cutoff_med, 
-    h_dairy_cutoff_lrg, h_dairy_cutoff_med, h_all_cattle_cutoff_lrg, 
-    h_all_cattle_cutoff_med, h_calf_cutoff_lrg, h_calf_cutoff_med, h_hogs_cutoff_lrg, 
-    h_hogs_cutoff_med, h_broilers_cutoff_lrg, h_broilers_cutoff_med, h_layers_cutoff_lrg,
-    h_layers_cutoff_med]
-
-
-
-
-# ===== CLEAN + WRAPPERS + FILTER + QA =====
-
-# make a df copy
-df = ag_iterated.copy()
-
-# normalize all relevant string columns (strip + lowercase)
 for c in [
     "domaincat_desc", "unit_desc", "statisticcat_desc", "domain_desc",
     "commodity_desc", "group_desc", "class_desc"
 ]:
-    df[c] = df[c].astype("string").str.strip().str.lower()
-
-# wrappers
-def map_size(df, mapping, unit_match, out_col):
-    mask = df["unit_desc"] == unit_match
-    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
-
-def map_size_class(df, mapping, unit_match, class_match, out_col):
-    mask = (df["unit_desc"] == unit_match) & (df["class_desc"] == class_match)
-    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
-
-# ===== FILTER (class_desc-driven spec) =====
-# 1) commodity in cattle/chickens/hogs
-# 2) unit_desc in operations/head
-# 3) statisticcat_desc in inventory/operations
-# 4) domaincat_desc starts with inventory
-# 5) class_desc kept from commodity-specific lists (including optional classes)
+    if c in df_cafo.columns:
+        df_cafo[c] = df_cafo[c].astype("string").str.strip().str.lower()
 
 comms_of_interest = ["cattle", "chickens", "hogs"]
 
@@ -503,119 +423,122 @@ class_keep_map = {
     },
 }
 
-df_sub = df[
-    (df["commodity_desc"].isin(comms_of_interest)) &
-    (df["unit_desc"].isin(["operations", "head"])) &
-    (df["statisticcat_desc"].isin(["inventory", "operations"])) &
-    (df["domaincat_desc"].str.startswith("inventory", na=False))
+# Keep inventory-bin rows and both statistic categories requested.
+df_sub = df_cafo[
+    (df_cafo["commodity_desc"].isin(comms_of_interest))
+    & (df_cafo["unit_desc"].isin(["operations", "head"]))
+    & (df_cafo["statisticcat_desc"].isin(["inventory", "operations"]))
+    & (df_cafo["domaincat_desc"].str.startswith("inventory", na=False))
 ].copy()
 
-# class-based keep filter
 allowed_pairs = {
-    (commodity, class_desc)
+    (commodity, cls)
     for commodity, classes in class_keep_map.items()
-    for class_desc in classes
+    for cls in classes
 }
 pair_index = pd.MultiIndex.from_frame(df_sub[["commodity_desc", "class_desc"]])
 allowed_index = pd.MultiIndex.from_tuples(sorted(allowed_pairs))
 df_sub = df_sub[pair_index.isin(allowed_index)].copy()
 
-# ===== QA =====
-print("df_sub rows:", len(df_sub))
-print("commodity_desc:", df_sub["commodity_desc"].value_counts().head(10))
-print("group_desc:", df_sub["group_desc"].value_counts().head(10))
-print("class_desc:", df_sub["class_desc"].value_counts().head(20))
-print("statisticcat_desc:", df_sub["statisticcat_desc"].value_counts().head(10))
-print("unit_desc:", df_sub["unit_desc"].value_counts().head(10))
-print("domaincat_desc top 10:")
-print(df_sub["domaincat_desc"].value_counts().head(10))
+print("Stage 2 df_sub rows:", len(df_sub))
+print("Stage 2 commodity mix:")
+print(df_sub["commodity_desc"].value_counts(dropna=False))
+print("Stage 2 unit mix:")
+print(df_sub["unit_desc"].value_counts(dropna=False))
+print("Stage 2 statistic mix:")
+print(df_sub["statisticcat_desc"].value_counts(dropna=False))
 
 
+def map_size(df, mapping, unit_match, out_col):
+    mask = df["unit_desc"] == unit_match
+    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
 
 
-# ===== MAP INVENTORY BINS TO NUMERIC CODES =====
+def map_size_class(df, mapping, unit_match, class_match, out_col):
+    mask = (df["unit_desc"] == unit_match) & (df["class_desc"] == class_match)
+    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
 
-# mappings (same as before)
+
+# Inventory-bin mappings preserved from script0b-ag-raw-v2.
 layer_map = {
- "inventory: (1 to 49 head)":1,
- "inventory: (50 to 99 head)":2,
- "inventory: (100 to 399 head)":3,
- "inventory: (400 to 3,199 head)":4,
- "inventory: (3,200 to 9,999 head)":5,
- "inventory: (10,000 to 19,999 head)":6,
- "inventory: (20,000 to 49,999 head)":7,
- "inventory: (50,000 to 99,999 head)":8,
- "inventory: (100,000 or more head)":9
+    "inventory: (1 to 49 head)": 1,
+    "inventory: (50 to 99 head)": 2,
+    "inventory: (100 to 399 head)": 3,
+    "inventory: (400 to 3,199 head)": 4,
+    "inventory: (3,200 to 9,999 head)": 5,
+    "inventory: (10,000 to 19,999 head)": 6,
+    "inventory: (20,000 to 49,999 head)": 7,
+    "inventory: (50,000 to 99,999 head)": 8,
+    "inventory: (100,000 or more head)": 9,
 }
 
 cattle_inv_map = {
- "inventory of cattle, incl calves: (1 to 9 head)":1,
- "inventory of cattle, incl calves: (10 to 19 head)":2,
- "inventory of cattle, incl calves: (20 to 49 head)":3,
- "inventory of cattle, incl calves: (50 to 99 head)":4,
- "inventory of cattle, incl calves: (100 to 199 head)":5,
- "inventory of cattle, incl calves: (200 to 499 head)":6,
- "inventory of cattle, incl calves: (500 or more head)":7
+    "inventory of cattle, incl calves: (1 to 9 head)": 1,
+    "inventory of cattle, incl calves: (10 to 19 head)": 2,
+    "inventory of cattle, incl calves: (20 to 49 head)": 3,
+    "inventory of cattle, incl calves: (50 to 99 head)": 4,
+    "inventory of cattle, incl calves: (100 to 199 head)": 5,
+    "inventory of cattle, incl calves: (200 to 499 head)": 6,
+    "inventory of cattle, incl calves: (500 or more head)": 7,
 }
 
 hog_inv_map = {
- "inventory of hogs: (1 to 24 head)":1,
- "inventory of hogs: (25 to 49 head)":2,
- "inventory of hogs: (50 to 99 head)":3,
- "inventory of hogs: (100 to 199 head)":4,
- "inventory of hogs: (200 to 499 head)":5,
- "inventory of hogs: (500 to 999 head)":6,
- "inventory of hogs: (1,000 or more head)":7
+    "inventory of hogs: (1 to 24 head)": 1,
+    "inventory of hogs: (25 to 49 head)": 2,
+    "inventory of hogs: (50 to 99 head)": 3,
+    "inventory of hogs: (100 to 199 head)": 4,
+    "inventory of hogs: (200 to 499 head)": 5,
+    "inventory of hogs: (500 to 999 head)": 6,
+    "inventory of hogs: (1,000 or more head)": 7,
 }
 
 milk_cows_map = {
- "inventory of milk cows: (1 to 9 head)":1,
- "inventory of milk cows: (10 to 19 head)":2,
- "inventory of milk cows: (20 to 49 head)":3,
- "inventory of milk cows: (50 to 99 head)":4,
- "inventory of milk cows: (100 to 199 head)":5,
- "inventory of milk cows: (200 to 499 head)":6,
- "inventory of milk cows: (500 or more head)":7
+    "inventory of milk cows: (1 to 9 head)": 1,
+    "inventory of milk cows: (10 to 19 head)": 2,
+    "inventory of milk cows: (20 to 49 head)": 3,
+    "inventory of milk cows: (50 to 99 head)": 4,
+    "inventory of milk cows: (100 to 199 head)": 5,
+    "inventory of milk cows: (200 to 499 head)": 6,
+    "inventory of milk cows: (500 or more head)": 7,
 }
 
 breeding_hogs_map = {
- "inventory of breeding hogs: (1 to 24 head)": 1,
- "inventory of breeding hogs: (25 to 49 head)": 2,
- "inventory of breeding hogs: (50 to 99 head)": 3,
- "inventory of breeding hogs: (100 or more head)": 4
+    "inventory of breeding hogs: (1 to 24 head)": 1,
+    "inventory of breeding hogs: (25 to 49 head)": 2,
+    "inventory of breeding hogs: (50 to 99 head)": 3,
+    "inventory of breeding hogs: (100 or more head)": 4,
 }
 
 cattle_inv_map_no_cows = {
- "inventory of cattle, (excl cows): (1 to 9 head)": 1,
- "inventory of cattle, (excl cows): (10 to 19 head)": 2,
- "inventory of cattle, (excl cows): (100 to 199 head)": 3,
- "inventory of cattle, (excl cows): (20 to 49 head)": 4,
- "inventory of cattle, (excl cows): (200 to 499 head)": 5,
- "inventory of cattle, (excl cows): (50 to 99 head)": 6
+    "inventory of cattle, (excl cows): (1 to 9 head)": 1,
+    "inventory of cattle, (excl cows): (10 to 19 head)": 2,
+    "inventory of cattle, (excl cows): (100 to 199 head)": 3,
+    "inventory of cattle, (excl cows): (20 to 49 head)": 4,
+    "inventory of cattle, (excl cows): (200 to 499 head)": 5,
+    "inventory of cattle, (excl cows): (50 to 99 head)": 6,
 }
 
 cattle_feed_map = {
- "inventory of cattle on feed: (1 to 19 head)":1,
- "inventory of cattle on feed: (1 to 9 head)":2,
- "inventory of cattle on feed: (10 to 19 head)":3,
- "inventory of cattle on feed: (100 to 199 head)":4,
- "inventory of cattle on feed: (20 to 49 head)":5,
- "inventory of cattle on feed: (200 to 499 head)":6,
- "inventory of cattle on feed: (50 to 99 head)":7,
- "inventory of cattle on feed: (500 or more head)":8
+    "inventory of cattle on feed: (1 to 19 head)": 1,
+    "inventory of cattle on feed: (1 to 9 head)": 2,
+    "inventory of cattle on feed: (10 to 19 head)": 3,
+    "inventory of cattle on feed: (100 to 199 head)": 4,
+    "inventory of cattle on feed: (20 to 49 head)": 5,
+    "inventory of cattle on feed: (200 to 499 head)": 6,
+    "inventory of cattle on feed: (50 to 99 head)": 7,
+    "inventory of cattle on feed: (500 or more head)": 8,
 }
 
 beef_cows_map = {
- "inventory of beef cows: (1 to 9 head)":1,
- "inventory of beef cows: (10 to 19 head)":2,
- "inventory of beef cows: (20 to 49 head)":3,
- "inventory of beef cows: (50 to 99 head)":4,
- "inventory of beef cows: (100 to 199 head)":5,
- "inventory of beef cows: (200 to 499 head)":6,
- "inventory of beef cows: (500 or more head)":7
+    "inventory of beef cows: (1 to 9 head)": 1,
+    "inventory of beef cows: (10 to 19 head)": 2,
+    "inventory of beef cows: (20 to 49 head)": 3,
+    "inventory of beef cows: (50 to 99 head)": 4,
+    "inventory of beef cows: (100 to 199 head)": 5,
+    "inventory of beef cows: (200 to 499 head)": 6,
+    "inventory of beef cows: (500 or more head)": 7,
 }
 
-# apply mappings (operations rows)
 map_size_class(df_sub, layer_map, unit_match="operations", class_match="layers", out_col="layer_ops_size")
 map_size_class(df_sub, layer_map, unit_match="operations", class_match="broilers", out_col="broiler_ops_size")
 
@@ -627,7 +550,7 @@ map_size(df_sub, cattle_inv_map_no_cows, unit_match="operations", out_col="cattl
 map_size(df_sub, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
 map_size(df_sub, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
 
-# ===== THRESHOLDS -> SIZE CLASS =====
+# Numeric-bin thresholds for S/M/L assignment (preserved).
 broiler_cutoff_lrg = 5
 broiler_cutoff_med = 3
 layer_cutoff_lrg = 9
@@ -649,474 +572,103 @@ col_thresholds = {
     "breed_hog_ops_size_inv": (hog_cutoff_med, hog_cutoff_lrg),
 }
 
+
 def categorize_code(v, med, lrg):
-    if pd.isna(v): return pd.NA
-    if v < med: return "small"
-    if v < lrg: return "medium"
+    if pd.isna(v):
+        return pd.NA
+    if v < med:
+        return "small"
+    if v < lrg:
+        return "medium"
     return "large"
+
 
 df2 = df_sub.copy()
 df2["size_class"] = pd.Series(pd.NA, index=df2.index, dtype="string")
-
-### FIPS 
-from functions import generate_fips
-
-if "fips_generated" not in df2.columns:
-    df2 = generate_fips(df2, state_col="state_fips_code", city_col="county_code")
-    if "FIPS_generated" in df2.columns and "fips_generated" not in df2.columns:
-        df2 = df2.rename(columns={"FIPS_generated": "fips_generated"})
-
+df2["size_source"] = pd.Series(pd.NA, index=df2.index, dtype="string")
 
 for col, (med, lrg) in col_thresholds.items():
     codes = df2[col]
-    mask = codes.notna()
-    df2.loc[mask, "size_class"] = codes[mask].apply(categorize_code, args=(med, lrg))
+    take = codes.notna() & df2["size_source"].isna()
+    df2.loc[take, "size_class"] = codes[take].apply(categorize_code, args=(med, lrg))
+    df2.loc[take, "size_source"] = col
 
-# numeric ops
-df2["ops_in_bin"] = pd.to_numeric(df2["value"].astype(str).str.replace(",", ""), errors="coerce")
+# Keep operations counts in each inventory bin.
+df2["ops_in_bin"] = pd.to_numeric(
+    df2["value"]
+    .astype("string")
+    .str.replace(",", "", regex=False)
+    .str.strip()
+    .replace({"(d)": pd.NA, "(z)": pd.NA, "": pd.NA}),
+    errors="coerce",
+)
 
-# aggregate operations by size class
-group_cols = ["year", "fips_generated", "size_class", "unit_desc", "commodity_desc"]
-df2["sum_ops"] = df2.groupby(group_cols)["ops_in_bin"].transform("sum")
+# Row-level CAFO flags (mapped rows only).
+df2["is_large_cafo_row"] = ((df2["size_class"] == "large") & df2["size_source"].notna()).astype("Int8")
+df2["is_medium_or_large_cafo_row"] = (
+    df2["size_class"].isin(["medium", "large"]) & df2["size_source"].notna()
+).astype("Int8")
 
-df2["sum_ops"].isna().mean()
-df2["size_class"].value_counts(dropna=False)
-
-
-# compact summary
+# Compact long summary: county-year-commodity-class-size.
 summary = (
-    df2.groupby(
-        ["year", "fips_generated", "size_class", "commodity_desc"], 
-        as_index=False
+    df2[df2["size_source"].notna()]
+    .groupby(
+        [
+            "year",
+            "fips_generated",
+            "county_fips_name",
+            "commodity_desc",
+            "class_desc",
+            "statisticcat_desc",
+            "size_source",
+            "size_class",
+        ],
+        as_index=False,
     )["ops_in_bin"]
-    .sum()
+    .sum(min_count=1)
     .rename(columns={"ops_in_bin": "sum_ops"})
 )
 
-# export
-from datetime import date
-today_str = date.today().strftime("%Y-%m-%d")
-outpath = f"/Users/allegrasaggese/Dropbox/Mental/Data/clean/{today_str}_cafo_ops_by_size.csv"
-summary.to_csv(outpath, index=False)
-outpath
-
-
-
-
-
-# put all mappings together first 
-# TO QA: do some of these mappings double count through different statistical items - i.e. ops and heads
-layer_map = {
- "inventory: (1 to 49 head)":1,
- "inventory: (50 to 99 head)":2,
- "inventory: (100 to 399 head)":3,
- "inventory: (400 to 3,199 head)":4,
- "inventory: (3,200 to 9,999 head)":5,
- "inventory: (10,000 to 19,999 head)":6,
- "inventory: (20,000 to 49,999 head)":7,
- "inventory: (50,000 to 99,999 head)":8,
- "inventory: (100,000 or more head)":9
-}
-
-
-cattle_inv_map = {
- "inventory of cattle, incl calves: (1 to 9 head)":1,
- "inventory of cattle, incl calves: (10 to 19 head)":2,
- "inventory of cattle, incl calves: (20 to 49 head)":3,
- "inventory of cattle, incl calves: (50 to 99 head)":4,
- "inventory of cattle, incl calves: (100 to 199 head)":5,
- "inventory of cattle, incl calves: (200 to 499 head)":6,
- "inventory of cattle, incl calves: (500 or more head)":7
-}
-
-
-hog_inv_map = {
- "inventory of hogs: (1 to 24 head)":1,
- "inventory of hogs: (25 to 49 head)":2,
- "inventory of hogs: (50 to 99 head)":3,
- "inventory of hogs: (100 to 199 head)":4,
- "inventory of hogs: (200 to 499 head)":5,
- "inventory of hogs: (500 to 999 head)":6,
- "inventory of hogs: (1,000 or more head)":7
-}
-
-
-# ADDITIONAL MAPPINGS CREATED TO INCREASE number of data points in 2025
-beef_cows_map = {
- "inventory of beef cows: (1 to 9 head)":1,
- "inventory of beef cows: (10 to 19 head)":2,
- "inventory of beef cows: (20 to 49 head)":3,
- "inventory of beef cows: (50 to 99 head)":4,
- "inventory of beef cows: (100 to 199 head)":5,
- "inventory of beef cows: (200 to 499 head)":6,
- "inventory of beef cows: (500 or more head)":7
-}
-
-cattle_inv_map_no_cows = {
-"inventory of cattle, (excl cows): (1 to 9 head)": 1,
-"inventory of cattle, (excl cows): (10 to 19 head)": 2,
-"inventory of cattle, (excl cows): (100 to 199 head)": 3,
-"inventory of cattle, (excl cows): (20 to 49 head)": 4,
-"inventory of cattle, (excl cows): (200 to 499 head)": 5,
-"inventory of cattle, (excl cows): (50 to 99 head)": 6
-}
-
-
-cattle_feed_map ={"inventory of cattle on feed: (1 to 19 head)":1,
-"inventory of cattle on feed: (1 to 9 head)":2,
-"inventory of cattle on feed: (10 to 19 head)":3,
-"inventory of cattle on feed: (100 to 199 head)":4,
-"inventory of cattle on feed: (20 to 49 head)":5,
-"inventory of cattle on feed: (200 to 499 head)":6,
-"inventory of cattle on feed: (50 to 99 head)":7,
-"inventory of cattle on feed: (500 or more head)":8}
-
-milk_cows_map = {
- "inventory of milk cows: (1 to 9 head)":1,
- "inventory of milk cows: (10 to 19 head)":2,
- "inventory of milk cows: (20 to 49 head)":3,
- "inventory of milk cows: (50 to 99 head)":4,
- "inventory of milk cows: (100 to 199 head)":5,
- "inventory of milk cows: (200 to 499 head)":6,
- "inventory of milk cows: (500 or more head)":7
-}
-
-
-breeding_hogs_map = {
- "inventory of breeding hogs: (1 to 24 head)": 1,
- "inventory of breeding hogs: (25 to 49 head)": 2,
- "inventory of breeding hogs: (50 to 99 head)": 3,
- "inventory of breeding hogs: (100 or more head)": 4
-}
-
-
-# b/f adding in mappings - check that unit_match and domaincat_desc are comprehensive 
-mask = df_sub["domaincat_desc"].isin(cattle_inv_map.keys())
-df_sub.loc[mask, "unit_desc"].value_counts()
-
-
-# apply mappings (operations only)
-# chickens: split layers vs broilers using class_desc
-map_size_class(df_sub, layer_map, unit_match="operations", class_match="layers", out_col="layer_ops_size")
-map_size_class(df_sub, layer_map, unit_match="operations", class_match="broilers", out_col="broiler_ops_size")
-
-map_size(df_sub, cattle_inv_map, unit_match="operations", out_col="cattle_ops_size_inv")
-map_size(df_sub, hog_inv_map, unit_match="operations", out_col="hog_ops_size_inv")
-map_size(df_sub, milk_cows_map, unit_match="operations", out_col="dairy_ops_size_inv")
-map_size(df_sub, breeding_hogs_map, unit_match="operations", out_col="breed_hog_ops_size_inv")
-map_size(df_sub, cattle_inv_map_no_cows, unit_match="operations", out_col="cattle_senzcow_ops_size_inv")
-map_size(df_sub, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
-map_size(df_sub, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
-
-
-# note we're excluding sales in this round - no mapping possible 
-#map_size(df_sub, cattle_incl_calves_sales_map, unit_match="operations", out_col="cattle_calves_ops_size_sales")
-#map_size(df_sub, cattle_feed_sales_map, unit_match="operations", out_col="cattle_feed_ops_size_sales")
-#map_size(df_sub, cattle_500lbs_sales_map, unit_match="operations", out_col="cattle_500lbs_ops_size_sales")
-#map_size(df_sub, calves_sales_map, unit_match="operations", out_col="calves_ops_size_sales")
-
-
-# inspect after mapping
-df_small = df_sub.sample(n=500, random_state=1)
-df_sub.shape
-df_sub.head()
-
-print(type(df_sub))
-print(df_sub.shape)
-print(df_sub.head())
-print(df_sub.columns.tolist())
-
-# drop unneccessary rows (total or unspecified)
-df_sub = df_sub[df_sub['domaincat_desc'] != 'unspecified']
-
-
-### DEEPER DIVE MAPPING - for ambiguous domaincat_desc - try to assign based on short_desc 
-#### IN FINAL CODE - WE CAN IGNORE THIS --- USING JUST INVENTORY FOR NOW 
-df["short_desc"] = df["short_desc"].astype("string")
-
-def map_ambiguous(df, mapping, keywords, unit_label):
-    """
-    df: dataframe
-    mapping: mapping dict (e.g., sales_map)
-    keywords: list of substrings to look for in short_desc related to the type of animal 
-    unit_label: suffix for the output column (e.g., 'sales_size')
-    """
-    for kw in keywords:
-        mask = (
-            df['domaincat_desc'].isin(mapping.keys()) &
-            df['short_desc'].str.contains(kw, case=False, na=False)
-        )
-        out_col = f"{kw.lower().replace(',', '').replace(' ', '_')}_{unit_label}"
-        df[out_col] = df.loc[mask, 'domaincat_desc'].map(mapping).astype('Int64')
-        
-keywords = ['poultry', 'chickens, layers', 'chickens, broilers', 'cattle', 'hogs']
-
-
-# mappings 
-sales_map = {"sales: (1 to 1,999 head)":1,
- "sales: (100,000 to 199,999 head)":2,
- "sales: (2,000 to 59,999 head)":3,
- "sales: (200,000 to 499,999 head)":4,
- "sales: (500,000 or more head)":5,
- "sales: (60,000 to 99,999 head)":6}
-
-
-inv_map = {"inventory: (1 to 49 head)": 1,
- "inventory: (50 to 99 head)": 2,
- "inventory: (100 to 399 head)": 3,
- "inventory: (400 to 3,199 head)": 4,
- "inventory: (3,200 to 9,999 head)": 5,
- "inventory: (10,000 to 19,999 head)": 6,
- "inventory: (20,000 to 49,999 head)": 7,
- "inventory: (50,000 to 99,999 head)": 8,
- "inventory: (100,000 or more head)": 9}
-
-
-# apply mappings for ambiguous categorization
-map_ambiguous(df, sales_map, keywords, unit_label='sales_size') # picking up broilers - good 
-map_ambiguous(df, inv_map, keywords, unit_label='ops_size') # same number of layers as from other mapping
-
-
-# quick QA - ambiguous mapping yielded no matches within the sales 
-cols = [c for c in df_sub.columns if c.endswith(("_sales_size", "_ops_size"))]
-df_sub[cols].describe(include="all")
-df_sub[cols].isna().mean().sort_values(ascending=False)  # percent missing
-df_sub[cols].notna().sum()
-
-
-
-##################### -- QA POST MAPPING --  #########################
-df_sub.columns.tolist()
-
-# check outcol fill rate --- if the mapping is working 
-out_cols = [
-    "layer_ops_size",
-    "broiler_ops_size",
-    "cattle_ops_size_inv",
-    "hog_ops_size_inv",
-    "dairy_ops_size_inv",
-    "breed_hog_ops_size_inv",
-    "cattle_senzcow_ops_size_inv",
-    "cattle_feed_ops_size_inv",
-    "beef_ops_size_inv"
-]
-
-
-# other qa - check the set of the domaincat_desc 
-cols_to_create_mapping_for = set(df_sub["domaincat_desc"].unique()) - set(layer_map.keys())
-# other qa - check mean of missing of a few of the cols 
-for c in out_cols:
-    print(c, df_sub[c].isna().mean() * 100)
-
-# count and percent of missing for each
-na_summary = df_sub[out_cols].isna().agg(['sum', 'mean']).T
-na_summary['mean'] = na_summary['mean'] * 100  # convert to percent
-na_summary.columns = ['n_missing', 'pct_missing']
-print(na_summary) # VERY LOW b/c each row should only match on ONE COLUMN - so its not really telling us anything
-
-
-# check count of each matching --- see you still get plenty of obs for chickens (i.e. neary 170K county observations)
-mask = df_sub['domaincat_desc'].isin(layer_map.keys())
-print(mask.sum(), "rows match layer_map keys")
-print(df_sub.loc[mask, 'domaincat_desc'].unique()[:10])
-
-unmatched = set(df_sub['domaincat_desc'].unique()) - set(layer_map.keys())
-print(sorted([x for x in unmatched if "inventory" in x.lower()][:10])) # smaller set of unmatched rows - still need if mapping is not picking up as many operations as we would like 
-
-
-test_key = "inventory: (1 to 49 head)"
-print(test_key in df_sub['domaincat_desc'].unique())
-df_sub['mapped_layer'] = df_sub['domaincat_desc'].map(layer_map)
-print(df_sub['mapped_layer'].notna().mean()) #1.2% of total df  
-
-# going to compare raw data numbers on those two cols with the mapping output - should be the same count of rows 
-matching = df_sub[
-    (df_sub['unit_desc'].str.lower() == 'operations')
-    & (df_sub['domaincat_desc'].isin(layer_map.keys()))
-]
-print(len(matching))
-print(matching['domaincat_desc'].unique()) # same amount 
-
-
-
-
-
-###### ###### ###### ###### QA of the threshold development ######### ###### ###### ###### ###### 
-
-# review the interim dataset to understand what the value column is - value is the numeric value assoc. with the unit (inventory, sales, etc)
-subset = df_sub.iloc[:500].copy()
-subset.to_csv("first_500_rows.csv", index=False)
-
-# set value to numeric 
-df_sub["value"] = (
-    df_sub["value"]
-    .astype(str)                     # ensure string
-    .str.strip()                     # remove spaces
-    .str.replace(",", "", regex=False)  # remove commas
-    .replace({"(D)": pd.NA, "": pd.NA}) # turn (D) and empty to NA
-    .pipe(pd.to_numeric, errors="coerce")  # convert to numbers
-)
-
-# count of operations in each inventory bin (per row)
-df_sub["ops_in_bin"] = df_sub["value"]
-
-
-
-# group by year
-group_cols = ['FIPS_generated','year']
-# add in QA to raise error in the case that these essential columns are not found 
-for c in group_cols:
-    if c not in df_sub.columns:
-        raise KeyError(f"required column '{c}' not found in df")
-
-
-
-###### ###### From threshold - now we can sum the columns to get the counts of the total inventory at size level and the count of operations
-
-# test on subset 
-temp = (
-    df_sub.dropna(subset=['hog_ops_size_inv'])
-          .groupby(['FIPS_generated','year','hog_ops_size_inv','unit_desc'], as_index=False)['value']
-          .sum()
-          .rename(columns={'value': 'hog_ops_size_inv_sum'})
-)
-
-tempsmall = temp.head(500) # shows max is 20 farms per fips which seems about right - of a sample recall
-
-# run across all cols 
-size_cols = out_cols # already created a vector of cols to sum over
-
-# run loop to create SUMMED values for total count of operations and total 
-# count of inventory within all farms at a given size classification
-for col in size_cols:
-    temp = (
-        df_sub.dropna(subset=[col])
-              .groupby(['FIPS_generated','year', col, 'unit_desc'], as_index=False)['ops_in_bin']
-              .sum()
-              .rename(columns={'ops_in_bin': f'{col}_sum'})
+# County-year compact table with small/medium/large columns.
+summary_compact = (
+    summary.pivot_table(
+        index=["year", "fips_generated", "county_fips_name", "commodity_desc", "class_desc"],
+        columns="size_class",
+        values="sum_ops",
+        aggfunc="sum",
+        fill_value=0,
     )
+    .reset_index()
+)
+summary_compact.columns.name = None
+for size_col in ["small", "medium", "large"]:
+    if size_col not in summary_compact.columns:
+        summary_compact[size_col] = 0
+summary_compact["any_large_cafo"] = (summary_compact["large"] > 0).astype("Int8")
+summary_compact["any_medium_or_large_cafo"] = (
+    (summary_compact["medium"] + summary_compact["large"]) > 0
+).astype("Int8")
 
-    df_sub = df_sub.merge(
-        temp,
-        on=['FIPS_generated','year', col, 'unit_desc'],
-        how='left'
-    )
-
-# Now we have summation by each INVENTORY CLASS but we need to use the CAFO thresholds to group those inventory classes 
-df_sub.columns.tolist() # list of cols 
-df2 = df_sub.copy() # make a copy 
-inv_cols = [c for c in df2.columns if c.endswith('_inv')] # all threshold cols 
-
-# ensure size_class column exists even if no mappings were applied
-if "size_class" not in df2.columns:
-    df2["size_class"] = pd.Series(pd.NA, index=df2.index, dtype="string")
-
-# recall our mapping from above (simplified into a mapping) 
-cutoffs = {
-    'hog':     {'med': 6, 'lrg': 7},
-    'cattle':  {'med': 6, 'lrg': 7},
-    'layer':   {'med': 7, 'lrg': 9},
-    'broiler': {'med': 3, 'lrg': 5}
-}
-
-# create mapping from hogs to cutoff values 
-col_thresholds = {
-    # layers
-    'layer_ops_size':                 (layer_cutoff_med,  layer_cutoff_lrg),
-    'broiler_ops_size':               (broiler_cutoff_med, broiler_cutoff_lrg),
-
-    # cattle family (incl. dairy, beef, feedlots, etc.)
-    'cattle_ops_size_inv':            (cattle_cutoff_med, cattle_cutoff_lrg),
-    'dairy_ops_size_inv':             (cattle_cutoff_med, cattle_cutoff_lrg),
-    'cattle_senzcow_ops_size_inv':    (cattle_cutoff_med, cattle_cutoff_lrg),
-    'cattle_feed_ops_size_inv':       (cattle_cutoff_med, cattle_cutoff_lrg),
-    'beef_ops_size_inv':              (cattle_cutoff_med, cattle_cutoff_lrg),
-
-    # hog family
-    'hog_ops_size_inv':               (hog_cutoff_med,    hog_cutoff_lrg),
-    'breed_hog_ops_size_inv':         (hog_cutoff_med,    hog_cutoff_lrg),
-}
+print("Stage 2 mapped rows:", int(df2["size_source"].notna().sum()))
+print("Stage 2 size class counts:")
+print(df2["size_class"].value_counts(dropna=False))
+print("Stage 2 compact rows:", len(summary_compact))
 
 
-# create function to categorize into text size for labelling 
-def categorize_code(v, med, lrg):
-    if pd.isna(v): return pd.NA
-    if v < med:   return "small"
-    if v < lrg:   return "medium"
-    return "large"
+################### STAGE 3: EXPORT CAFO OUTPUTS #####################
 
-df2['size_class'] = pd.Series(pd.NA, index=df2.index, dtype='string')
-df2['size_class'].isna().sum() # getting .3855 match rate ---- ok 
+clean_cafo_row = f"{today_str}_cafo_annual_df.csv"
+clean_cafo_long = f"{today_str}_cafo_ops_by_size_long.csv"
+clean_cafo_compact = f"{today_str}_cafo_ops_by_size_compact.csv"
 
-# create labels in one column
-for col, (med, lrg) in col_thresholds.items():
-    codes = df2[col]
-    mask  = codes.notna()
-    df2.loc[mask, 'size_class'] = codes[mask].apply(categorize_code, args=(med, lrg))
+cafo_row_path = os.path.join(outf, clean_cafo_row)
+cafo_long_path = os.path.join(outf, clean_cafo_long)
+cafo_compact_path = os.path.join(outf, clean_cafo_compact)
 
+df2.to_csv(cafo_row_path, index=False)
+summary.to_csv(cafo_long_path, index=False)
+summary_compact.to_csv(cafo_compact_path, index=False)
 
-
-# now sum the value cols - total operations by size class x animal classification
-group_cols = ['year', 'FIPS_generated', 'size_class', 'unit_desc', 'commodity_desc']
-df2['sum_ops'] = df2.groupby(group_cols)['ops_in_bin'].transform('sum')
-
-# QA the range of values for the sums
-df2.groupby('unit_desc')['sum_ops'].describe() # reasonable 
-
-
-# export the CAFO data 
-clean_cafo = f"{today_str}_cafo_annual_df.csv"
-ag_path2 = os.path.join(outf, clean_cafo)
-df2.to_csv(ag_path2, index=False)
-
-
-
-### PLOT SUMMARY STATS  
-
-
-outdir = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/figs"
-os.makedirs(outdir, exist_ok=True)
-
-# 1) Total ops over time by commodity (line)
-ts = (summary
-      .groupby(["year","commodity_desc"], as_index=False)["sum_ops"]
-      .sum())
-
-plt.figure(figsize=(10,6))
-sns.lineplot(data=ts, x="year", y="sum_ops", hue="commodity_desc", marker="o")
-plt.title("Total Operations Over Time by Commodity")
-plt.ylabel("Operations (sum)")
-plt.xlabel("Year")
-plt.tight_layout()
-plt.savefig(os.path.join(outdir, "ops_over_time_by_commodity.png"), dpi=200)
-plt.close()
-
-# 2) Stacked ops by size_class over time (all commodities combined)
-ts_size = (summary
-           .groupby(["year","size_class"], as_index=False)["sum_ops"]
-           .sum())
-
-pivot = ts_size.pivot(index="year", columns="size_class", values="sum_ops").fillna(0)
-pivot = pivot[["small","medium","large"]]  # consistent order
-
-pivot.plot(kind="bar", stacked=True, figsize=(10,6))
-plt.title("Operations by Size Class Over Time (All Commodities)")
-plt.ylabel("Operations (sum)")
-plt.xlabel("Year")
-plt.tight_layout()
-plt.savefig(os.path.join(outdir, "ops_by_size_over_time_stacked.png"), dpi=200)
-plt.close()
-
-# 3) Latest year snapshot: ops by size_class × commodity
-latest_year = summary["year"].max()
-snap = summary[summary["year"] == latest_year]
-snap_g = (snap.groupby(["commodity_desc","size_class"], as_index=False)["sum_ops"].sum())
-
-plt.figure(figsize=(10,6))
-sns.barplot(data=snap_g, x="commodity_desc", y="sum_ops", hue="size_class")
-plt.title(f"Operations by Size Class (Year {latest_year})")
-plt.ylabel("Operations (sum)")
-plt.xlabel("Commodity")
-plt.tight_layout()
-plt.savefig(os.path.join(outdir, f"ops_by_size_{latest_year}.png"), dpi=200)
-plt.close()
+print("Saved CAFO row-level panel:", cafo_row_path)
+print("Saved CAFO long summary:", cafo_long_path)
+print("Saved CAFO compact summary:", cafo_compact_path)
