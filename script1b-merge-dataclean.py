@@ -163,16 +163,21 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
 
     # Hard guard: do not merge outdated mortality panel with partial state coverage.
     if descriptor == "mh_mortality_fips_yr":
-        if "state" not in df.columns:
-            print(f"Skip {descriptor}: missing 'state' column for coverage QA")
-            return None
-        n_states = _state_count(df["state"])
-        if n_states < MIN_MORTALITY_STATES:
-            print(
-                f"Skip {descriptor}: state coverage {n_states} < {MIN_MORTALITY_STATES} "
-                "(likely outdated mortality build)"
-            )
-            return None
+        state_col = None
+        for c in ["mortality_state", "state"]:
+            if c in df.columns:
+                state_col = c
+                break
+        if state_col is None:
+            print(f"{descriptor}: no mortality state column found, skipping coverage guard")
+        else:
+            n_states = _state_count(df[state_col])
+            if n_states < MIN_MORTALITY_STATES:
+                print(
+                    f"Skip {descriptor}: state coverage {n_states} < {MIN_MORTALITY_STATES} "
+                    "(likely outdated mortality build)"
+                )
+                return None
 
     # runtime reduction: filter to rural key immediately
     df = df.merge(allowed_keys, on=["fips", "year"], how="inner")

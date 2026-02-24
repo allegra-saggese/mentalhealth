@@ -369,6 +369,14 @@ mort_totals["mortality_crude_rate_per_100k"] = np.where(
     np.nan,
 )
 
+mort_geo = (
+    mort_disagg.groupby(["fips", "year"], as_index=False)
+    .agg(
+        mortality_state=("state", _first_notna),
+        mortality_county=("county", _first_notna),
+    )
+)
+
 mort_disagg["race_sex_key"] = (
     mort_disagg["race"].astype("string").str.lower().str.replace(r"[^a-z0-9]+", "_", regex=True).str.strip("_")
     + "_"
@@ -385,7 +393,12 @@ pop_wide = mort_disagg.pivot_table(
 ).reset_index()
 pop_wide = pop_wide.rename(columns={c: f"mort_pop_{c}" for c in pop_wide.columns if c not in ["fips", "year"]})
 
-mort_panel = mort_totals.merge(deaths_wide, on=["fips", "year"], how="left").merge(pop_wide, on=["fips", "year"], how="left")
+mort_panel = (
+    mort_geo
+    .merge(mort_totals, on=["fips", "year"], how="left")
+    .merge(deaths_wide, on=["fips", "year"], how="left")
+    .merge(pop_wide, on=["fips", "year"], how="left")
+)
 _add_fill("mort_county_year_panel", mort_panel)
 _add_key_qa("mort_county_year_panel", mort_panel, ["fips", "year"])
 
