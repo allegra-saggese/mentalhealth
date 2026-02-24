@@ -25,6 +25,7 @@ MERGE_DESCRIPTORS = {
     "population_full",
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
+MIN_MORTALITY_STATES = 50
 
 
 def _split_descriptor(path):
@@ -89,6 +90,13 @@ def _safe_descriptor_name(descriptor):
     return re.sub(r"[^a-z0-9]+", "_", descriptor.lower()).strip("_")
 
 
+def _state_count(series):
+    s = series.astype("string").str.strip()
+    s = s[~s.isna()]
+    s = s[~s.str.lower().isin({"", "nan", "none", "null"})]
+    return int(s.nunique())
+
+
 def _reduce_to_county_year(df, descriptor):
     """
     Collapse to one row per (fips, year):
@@ -125,7 +133,8 @@ def _reduce_to_county_year(df, descriptor):
                 work[c] = s.astype("string")
                 text_cols.append(c)
 
-        agg = {c: "sum" for c in numeric_cols}
+        # Preserve all-missing groups as NA instead of coercing to 0.
+        agg = {c: (lambda s: s.sum(min_count=1)) for c in numeric_cols}
         agg.update({c: "first" for c in text_cols})
         out = (
             work.groupby(["fips", "year"], as_index=False)
@@ -151,6 +160,19 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
     if df is None:
         print(f"Skip {descriptor}: no fips/year key columns")
         return None
+
+    # Hard guard: do not merge outdated mortality panel with partial state coverage.
+    if descriptor == "mh_mortality_fips_yr":
+        if "state" not in df.columns:
+            print(f"Skip {descriptor}: missing 'state' column for coverage QA")
+            return None
+        n_states = _state_count(df["state"])
+        if n_states < MIN_MORTALITY_STATES:
+            print(
+                f"Skip {descriptor}: state coverage {n_states} < {MIN_MORTALITY_STATES} "
+                "(likely outdated mortality build)"
+            )
+            return None
 
     # runtime reduction: filter to rural key immediately
     df = df.merge(allowed_keys, on=["fips", "year"], how="inner")
@@ -257,4 +279,3 @@ slice_census_years.to_csv(slice_census_path, index=False)
 print("Saved:", slice_2005_2010_path, "| rows:", len(slice_2005_2010))
 print("Saved:", slice_2010_2020_path, "| rows:", len(slice_2010_2020))
 print("Saved:", slice_census_path, "| rows:", len(slice_census_years))
-
