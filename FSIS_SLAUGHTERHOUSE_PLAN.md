@@ -5,7 +5,7 @@ Build a defensible county-year slaughterhouse presence dataset where:
 - a county-year is flagged as `1` if at least one slaughterhouse establishment is present in any monthly file that year, and
 - location is attached from MPI directory data, with backward fallback when geography is missing in a given year.
 
-Primary first output is an `establishment_id x year` dataset.
+Primary first output is an `establishment_id x year` dataset that keeps all establishments and adds operation categorization.
 
 ---
 
@@ -59,24 +59,37 @@ This table is a hard requirement and is saved even if downstream steps fail.
   - `establishment_name`
   - slaughter-related fields (`slaughter`, `meat_slaughter`, `poultry_slaughter`, species-level slaughter flags, volume categories)
 
-### 3) Define slaughterhouse-presence at file row level
-- For each establishment-row in a monthly demographic file, create `is_slaughterhouse_row`.
+### 3) Define row-level operation signals and categories
+- For each establishment-row in a monthly demographic file, create:
+  - `is_slaughterhouse_row`
+  - `is_processing_row`
+  - `operation_category_row`
 - Default rule:
   - `1` if any slaughter indicator is positive/present (`slaughter == yes`, `meat_slaughter == yes`, `poultry_slaughter == yes`, species slaughter flag present, or non-null slaughter volume category).
   - `0` otherwise.
-- Keep a QA flag showing which rule triggered the `1`.
+- Processing is also detected from processing indicator fields, activities text (contains `process*`), and processing volume category.
+- Row categories:
+  - `both_slaughter_and_processing`
+  - `slaughter_only`
+  - `processing_only`
+  - `other_or_unclear` (has operation context but not cleanly classifiable by string flags)
+  - `neither_signal`
 
 ### 4) Collapse monthly demographic records to establishment-year
 - Group by `establishment_id` + `year` (fallback key: `establishment_number` when ID missing).
 - Annual presence rule:
   - `is_slaughterhouse_year = 1` if any monthly record in that year has `is_slaughterhouse_row = 1`.
+- Also keep annual processing + category fields:
+  - `processing_present_year`
+  - `operation_category_year`
 - Keep diagnostics:
   - `n_files_seen_in_year`
   - `first_snapshot_date`
   - `last_snapshot_date`
   - `source_file_count`
 
-Primary output from this stage:
+Primary outputs from this stage:
+- `YYYY-MM-DD_fsis_establishment_year_all.csv`
 - `YYYY-MM-DD_fsis_establishment_year_slaughterhouse.csv`
 
 ### 5) Parse MPI files for geography
@@ -101,18 +114,23 @@ Primary output from this stage:
   - `geo_source = "prior_year_fallback"`
   - `geo_fallback_from_year`
 
-### 8) Merge slaughterhouse establishment-year with geography
+### 8) Additional "from wherever possible" geography fallback
+- After same-year and prior-year fallback, fill remaining geography gaps from undated/reference location files (for example, directory files without a reliable year token).
+- This step fills only still-missing fields and is tracked as:
+  - `geo_source = "undated_reference"`
+
+### 9) Merge slaughterhouse establishment-year with geography
 - Merge annual slaughterhouse panel to annual geography panel by `establishment_id` + `year`.
 - Fallback to `establishment_number` only when `establishment_id` is unavailable.
 - Keep only establishments with `is_slaughterhouse_year = 1` for county presence outputs.
 - Preserve unmatched rows in a QA file.
 
-### 9) Build county-year presence panel
+### 10) Build county-year presence panel
 - Group establishment-year rows by `fips_code` + `year`.
 - Output:
   - `slaughterhouse_present = 1` if `n_establishments > 0`
   - `n_establishments`
-  - optional counts by slaughter subtype (meat/poultry)
+  - counts by subtype/category (meat/poultry/both/slaughter-only)
 
 Output:
 - `YYYY-MM-DD_fsis_county_year_slaughterhouse_presence.csv`
@@ -137,8 +155,11 @@ Output:
 - Primary key is `establishment_id`; `establishment_number` is fallback only.
 - Year comes from file metadata (filename/path date parsing), not spreadsheet content.
 - Annual slaughterhouse presence uses "any-month-in-year" logic.
+- All establishment-year rows are kept in the `..._establishment_year_all.csv` output; slaughterhouse subsets are derived views, not destructive filters.
 - Geography fallback is backward-only (prior appearance of same establishment ID).
+- If same-year/prior-year geography is still missing, undated reference files are used as last fallback.
 - If geography still missing after backward fallback, establishment-year stays in QA unmatched file and is excluded from county-year panel.
+- Size and volume classifiers are retained in the establishment-year output (`size_classifier_mode`, `processing_volume_category_mode`, `slaughter_volume_category_mode`).
 - No deletion of raw files; all transforms are reproducible and documented by inventory + QA artifacts.
 
 ---
