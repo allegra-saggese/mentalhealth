@@ -6,6 +6,7 @@ Build FSIS slaughterhouse panels from raw demographic + MPI files.
 Outputs:
 - file inventory (required)
 - establishment-year panel (all + slaughterhouse subset)
+- county-year slaughterhouse presence panel
 - QA artifacts (unmatched geography, geo conflicts, summary metrics)
 """
 
