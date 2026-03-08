@@ -364,6 +364,20 @@ def _read_tabular(path: str, family: str) -> Tuple[Optional[pd.DataFrame], Dict]
         else:
             raise ValueError(f"Unsupported file extension: {ext}")
     except Exception as e:
+        # Some legacy files are tab-delimited text mislabeled as .xls.
+        if ext == ".xls":
+            for sep, label in [("\t", "text_tab_fallback"), (",", "text_csv_fallback"), ("|", "text_pipe_fallback")]:
+                try:
+                    df = pd.read_csv(path, dtype=str, sep=sep, engine="python")
+                    if df.shape[1] <= 1:
+                        continue
+                    meta["header_row_used"] = 0
+                    meta["sheet_name_used"] = label
+                    meta["n_rows_read"] = int(df.shape[0])
+                    meta["n_cols_read"] = int(df.shape[1])
+                    return df, meta
+                except Exception:
+                    continue
         meta["read_status"] = "error"
         meta["error_msg"] = str(e)[:500]
         return None, meta
