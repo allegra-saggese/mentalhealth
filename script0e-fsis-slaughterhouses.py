@@ -24,7 +24,7 @@ db_base = os.path.expanduser("~/Dropbox/Mental")
 db_data = os.path.join(db_base, "Data")
 raw_dir = os.path.join(db_data, "raw", "fsis")
 clean_dir = os.path.join(db_data, "clean")
-qa_dir = os.path.join(clean_dir, "qa-fsis")
+qa_dir = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
 
 os.makedirs(clean_dir, exist_ok=True)
 os.makedirs(qa_dir, exist_ok=True)
@@ -719,6 +719,10 @@ def _build_file_list(root: str) -> List[str]:
 
 
 def main():
+    # Re-ensure output dirs in case cloud sync deletes/recreates during long runs.
+    os.makedirs(clean_dir, exist_ok=True)
+    os.makedirs(qa_dir, exist_ok=True)
+
     if not os.path.isdir(raw_dir):
         raise FileNotFoundError(f"Missing FSIS raw directory: {raw_dir}")
 
