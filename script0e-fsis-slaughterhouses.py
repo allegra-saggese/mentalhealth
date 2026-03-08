@@ -616,6 +616,9 @@ def _fill_same_year_geo(panel: pd.DataFrame, geo_best: pd.DataFrame, key_col: st
         before_null = panel[c].isna()
         panel.loc[:, c] = panel[c].where(panel[c].notna(), m[c])
         filled = before_null & panel[c].notna()
+        if c == "fips_code" and "fips_fill_method" in panel.columns:
+            fips_method_mask = filled & panel["fips_fill_method"].isna()
+            panel.loc[fips_method_mask, "fips_fill_method"] = f"{label}_same_year"
         mask_primary = filled & panel["geo_source_primary"].isna()
         mask_file = filled & panel["geo_source_file"].isna()
         mask_family = filled & panel["geo_source_family"].isna()
@@ -658,14 +661,19 @@ def _fill_prior_year_geo(panel: pd.DataFrame, geo_best: pd.DataFrame, key_col: s
         best = prior.iloc[-1]
 
         filled_any = False
+        filled_fips = False
         for c in GEO_COLS:
             if c not in panel.columns or c not in best.index:
                 continue
             if pd.isna(panel.at[i, c]) and pd.notna(best[c]):
                 panel.at[i, c] = best[c]
                 filled_any = True
+                if c == "fips_code":
+                    filled_fips = True
 
         if filled_any:
+            if filled_fips and "fips_fill_method" in panel.columns and pd.isna(panel.at[i, "fips_fill_method"]):
+                panel.at[i, "fips_fill_method"] = f"{label}_prior_year_fallback"
             if pd.isna(panel.at[i, "geo_fallback_from_year"]):
                 panel.at[i, "geo_fallback_from_year"] = int(best["year"])
             if pd.isna(panel.at[i, "geo_source_primary"]):
@@ -694,14 +702,64 @@ def _fill_undated_geo(panel: pd.DataFrame, geo_undated: pd.DataFrame, key_col: s
             continue
         best = g.loc[key]
         filled_any = False
+        filled_fips = False
         for c in GEO_COLS:
             if c in panel.columns and c in best.index and pd.isna(panel.at[i, c]) and pd.notna(best[c]):
                 panel.at[i, c] = best[c]
                 filled_any = True
+                if c == "fips_code":
+                    filled_fips = True
+        if filled_fips and "fips_fill_method" in panel.columns and pd.isna(panel.at[i, "fips_fill_method"]):
+            panel.at[i, "fips_fill_method"] = f"{label}_undated_reference"
         if filled_any and pd.isna(panel.at[i, "geo_source_primary"]):
             panel.at[i, "geo_source_primary"] = f"{label}_undated_reference"
             panel.at[i, "geo_source_file"] = best.get("source_file", pd.NA)
             panel.at[i, "geo_source_family"] = best.get("source_family", pd.NA)
+
+    return panel
+
+
+def _fill_future_year_fips_by_id(panel: pd.DataFrame, geo_best_id: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fill only fips_code using nearest future-year value for the same establishment_id.
+    Leaves county/state/city/etc untouched.
+    """
+    if panel.empty or geo_best_id.empty:
+        return panel
+    if "establishment_id" not in panel.columns or "establishment_id" not in geo_best_id.columns:
+        return panel
+
+    d = geo_best_id[["establishment_id", "year", "fips_code", "source_file", "source_family"]].copy()
+    d = d.loc[d["establishment_id"].notna() & d["year"].notna() & d["fips_code"].notna()].copy()
+    if d.empty:
+        return panel
+
+    d["year"] = pd.to_numeric(d["year"], errors="coerce").astype("Int64")
+    d = d.sort_values(["establishment_id", "year"])
+    lookup = {k: g.reset_index(drop=True) for k, g in d.groupby("establishment_id", sort=False)}
+
+    for i, row in panel.loc[
+        panel["establishment_id"].notna() & panel["year"].notna() & panel["fips_code"].isna()
+    ].iterrows():
+        key = row["establishment_id"]
+        y = row["year"]
+        if key not in lookup:
+            continue
+        g = lookup[key]
+        fut = g.loc[g["year"] > y]
+        if fut.empty:
+            continue
+        best = fut.iloc[0]  # nearest future year
+        panel.at[i, "fips_code"] = best["fips_code"]
+        if "geo_forward_from_year" in panel.columns and pd.isna(panel.at[i, "geo_forward_from_year"]):
+            panel.at[i, "geo_forward_from_year"] = int(best["year"])
+        if "fips_fill_method" in panel.columns and pd.isna(panel.at[i, "fips_fill_method"]):
+            panel.at[i, "fips_fill_method"] = "id_future_year_fips_only"
+        if pd.isna(panel.at[i, "geo_source_file"]):
+            panel.at[i, "geo_source_file"] = best.get("source_file", pd.NA)
+        if pd.isna(panel.at[i, "geo_source_family"]):
+            panel.at[i, "geo_source_family"] = best.get("source_family", pd.NA)
+        # keep geo_source_primary as-is because other geography may already be same-year.
 
     return panel
 
@@ -868,6 +926,8 @@ def main():
         est_year["geo_source_family"] = pd.NA
         est_year["geo_source_file"] = pd.NA
         est_year["geo_fallback_from_year"] = pd.NA
+        est_year["geo_forward_from_year"] = pd.NA
+        est_year["fips_fill_method"] = pd.NA
     else:
         geo_df["year"] = pd.to_numeric(geo_df["year"], errors="coerce").astype("Int64")
         geo_df["snapshot_date"] = pd.to_datetime(geo_df["snapshot_date"], errors="coerce")
@@ -912,6 +972,8 @@ def main():
         est_geo["geo_source_family"] = pd.NA
         est_geo["geo_source_file"] = pd.NA
         est_geo["geo_fallback_from_year"] = pd.NA
+        est_geo["geo_forward_from_year"] = pd.NA
+        est_geo["fips_fill_method"] = pd.NA
 
         # Same-year fills
         est_geo = _fill_same_year_geo(est_geo, geo_best_id, key_col="establishment_id", label="id")
@@ -920,6 +982,9 @@ def main():
         # Prior-year fallback
         est_geo = _fill_prior_year_geo(est_geo, geo_best_id, key_col="establishment_id", label="id")
         est_geo = _fill_prior_year_geo(est_geo, geo_best_num, key_col="establishment_number", label="number")
+
+        # Future-year carry for FIPS only (ID-based only)
+        est_geo = _fill_future_year_fips_by_id(est_geo, geo_best_id=geo_best_id)
 
         # Undated reference fallback (from wherever available)
         est_geo = _fill_undated_geo(est_geo, geo_undated_id, key_col="establishment_id", label="id")
@@ -1004,6 +1069,9 @@ def main():
     same_year_geo = est_slaughter["geo_source_primary"].astype("string").str.contains("same_year", na=False).sum()
     fallback_geo = est_slaughter["geo_source_primary"].astype("string").str.contains("prior_year_fallback", na=False).sum()
     undated_geo = est_slaughter["geo_source_primary"].astype("string").str.contains("undated_reference", na=False).sum()
+    future_fips_geo = est_slaughter["fips_fill_method"].astype("string").str.contains(
+        "future_year_fips_only", na=False
+    ).sum()
     missing_geo = int(
         (
             est_slaughter["fips_code"].isna()
@@ -1027,6 +1095,7 @@ def main():
                 "n_est_year_same_year_geo",
                 "n_est_year_prior_fallback_geo",
                 "n_est_year_undated_geo",
+                "n_est_year_future_year_fips_only",
                 "n_est_year_missing_geo",
                 "n_county_year_rows",
             ],
@@ -1043,6 +1112,7 @@ def main():
                 int(same_year_geo),
                 int(fallback_geo),
                 int(undated_geo),
+                int(future_fips_geo),
                 missing_geo,
                 len(county_year),
             ],
