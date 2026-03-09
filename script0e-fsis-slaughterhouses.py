@@ -1072,6 +1072,15 @@ def main():
     future_fips_geo = est_slaughter["fips_fill_method"].astype("string").str.contains(
         "future_year_fips_only", na=False
     ).sum()
+    missing_fips_all = int(est_year["fips_code"].isna().sum())
+    missing_core_geo_all = int(
+        (
+            est_year["fips_code"].isna()
+            & est_year["county"].isna()
+            & est_year["state"].isna()
+        ).sum()
+    )
+    missing_fips_sl = int(est_slaughter["fips_code"].isna().sum())
     missing_geo = int(
         (
             est_slaughter["fips_code"].isna()
@@ -1096,6 +1105,9 @@ def main():
                 "n_est_year_prior_fallback_geo",
                 "n_est_year_undated_geo",
                 "n_est_year_future_year_fips_only",
+                "n_est_year_all_missing_fips",
+                "n_est_year_all_missing_core_geo",
+                "n_est_year_slaughter_missing_fips",
                 "n_est_year_missing_geo",
                 "n_county_year_rows",
             ],
@@ -1113,6 +1125,9 @@ def main():
                 int(fallback_geo),
                 int(undated_geo),
                 int(future_fips_geo),
+                missing_fips_all,
+                missing_core_geo_all,
+                missing_fips_sl,
                 missing_geo,
                 len(county_year),
             ],

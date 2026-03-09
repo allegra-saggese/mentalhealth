@@ -28,7 +28,19 @@ os.makedirs(clean_dir, exist_ok=True)
 os.makedirs(qa_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
-src = os.path.join(clean_dir, "2026-03-07_fsis_establishment_year_all.csv")
+
+
+def _latest_est_year_all_path() -> str:
+    pat = re.compile(r"^(\d{4}-\d{2}-\d{2})_fsis_establishment_year_all\.csv$")
+    candidates = []
+    for fn in os.listdir(clean_dir):
+        m = pat.match(fn)
+        if m:
+            candidates.append((m.group(1), os.path.join(clean_dir, fn)))
+    if not candidates:
+        raise FileNotFoundError(f"No *_fsis_establishment_year_all.csv files found in {clean_dir}")
+    candidates.sort(key=lambda t: t[0])
+    return candidates[-1][1]
 
 
 def _norm_text(s: pd.Series) -> pd.Series:
@@ -43,8 +55,8 @@ def _first_non_null(series: pd.Series):
 
 
 def main():
-    if not os.path.exists(src):
-        raise FileNotFoundError(f"Missing source file: {src}")
+    src = _latest_est_year_all_path()
+    print("Using source:", src)
 
     df = pd.read_csv(src, low_memory=False)
     if "est_key" not in df.columns or "year" not in df.columns:
