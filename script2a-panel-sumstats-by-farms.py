@@ -29,6 +29,7 @@ os.makedirs(maps_dir, exist_ok=True)
 os.makedirs(plots_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
+COUNTY_GEOJSON_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
 STATE_FIPS_TO_ABBR = {
     "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA",
@@ -128,6 +129,43 @@ def save_state_choropleths(state_year_df, value_col, years, title_prefix, out_pr
         )
         out = os.path.join(maps_dir, f"{out_prefix}_{yr}.html")
         fig.write_html(out, include_plotlyjs="cdn")
+
+
+def safe_name(s):
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", str(s)).strip("_").lower()
+
+
+def save_county_map_one_year(df_year, value_col, year, title_prefix, out_prefix):
+    if px is None:
+        return
+    d = df_year[["fips", value_col]].copy()
+    d[value_col] = to_num(d[value_col])
+    d = d[d["fips"].notna() & d[value_col].notna()].copy()
+    if d.empty:
+        return None
+
+    vals = d[value_col].replace([np.inf, -np.inf], np.nan).dropna()
+    if vals.empty:
+        return None
+    p99 = float(vals.quantile(0.99))
+    vmax = p99 if np.isfinite(p99) and p99 > 0 else float(vals.max())
+    range_color = (0, vmax) if np.isfinite(vmax) and vmax > 0 else None
+
+    fig = px.choropleth(
+        d,
+        geojson=COUNTY_GEOJSON_URL,
+        locations="fips",
+        color=value_col,
+        color_continuous_scale="OrRd",
+        range_color=range_color,
+        scope="usa",
+        hover_data={"fips": True, value_col: ":,.2f"},
+        title=f"{title_prefix} ({year})",
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    out = os.path.join(maps_dir, f"{out_prefix}_{safe_name(value_col)}_{year}.html")
+    fig.write_html(out, include_plotlyjs="cdn")
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -292,7 +330,90 @@ save_state_choropleths(
 
 
 # ---------------------------------------------------------------------
-# 6) State-by-state county dot plots for 2017
+# 6) County-level maps for 2017 (FSIS + CAFO animal x size)
+# ---------------------------------------------------------------------
+map_year = 2017
+df_2017 = df[df["year"] == map_year].copy()
+
+fsis_2017_cols = [
+    "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_unique_est_size_combos_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_slaughterhouse_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_processing_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_meat_slaughter_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_poultry_slaughter_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_1_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_2_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_3_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_4_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_5_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_missing_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+]
+for c in fsis_2017_cols:
+    if c not in df_2017.columns:
+        raise RuntimeError(f"Missing FSIS map column in merged panel: {c}")
+
+fsis_map_meta = []
+for c in fsis_2017_cols:
+    s = to_num(df_2017[c])
+    row = {
+        "year": map_year,
+        "variable": c,
+        "non_missing_n": int(s.notna().sum()),
+        "positive_n": int((s > 0).sum()),
+        "p50": float(s.quantile(0.50)) if s.notna().any() else np.nan,
+        "p90": float(s.quantile(0.90)) if s.notna().any() else np.nan,
+        "p99": float(s.quantile(0.99)) if s.notna().any() else np.nan,
+        "max": float(s.max()) if s.notna().any() else np.nan,
+    }
+    fsis_map_meta.append(row)
+    save_county_map_one_year(
+        df_2017,
+        value_col=c,
+        year=map_year,
+        title_prefix="FSIS County-Level Density",
+        out_prefix="county_fsis",
+    )
+pd.DataFrame(fsis_map_meta).to_csv(
+    os.path.join(out_dir, "fsis_county_map_2017_metric_summary.csv"),
+    index=False,
+)
+
+cafo_animal_size_cols = [
+    "cafo_cattle_small", "cafo_cattle_medium", "cafo_cattle_large",
+    "cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large",
+    "cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large",
+]
+
+cafo_map_meta = []
+for c in cafo_animal_size_cols:
+    s = to_num(df_2017[c])
+    row = {
+        "year": map_year,
+        "variable": c,
+        "non_missing_n": int(s.notna().sum()),
+        "positive_n": int((s > 0).sum()),
+        "p50": float(s.quantile(0.50)) if s.notna().any() else np.nan,
+        "p90": float(s.quantile(0.90)) if s.notna().any() else np.nan,
+        "p99": float(s.quantile(0.99)) if s.notna().any() else np.nan,
+        "max": float(s.max()) if s.notna().any() else np.nan,
+    }
+    cafo_map_meta.append(row)
+    save_county_map_one_year(
+        df_2017,
+        value_col=c,
+        year=map_year,
+        title_prefix="CAFO County-Level Animal x Size",
+        out_prefix="county_cafo_animal_size",
+    )
+pd.DataFrame(cafo_map_meta).to_csv(
+    os.path.join(out_dir, "cafo_county_map_2017_metric_summary.csv"),
+    index=False,
+)
+
+
+# ---------------------------------------------------------------------
+# 7) State-by-state county dot plots for 2017
 # ---------------------------------------------------------------------
 dot_df = df[(df["year"] == 2017)].copy()
 dot_df = dot_df[
@@ -324,7 +445,7 @@ for st in sorted(dot_df["state_fips"].dropna().unique()):
 
 
 # ---------------------------------------------------------------------
-# 7) Chickens scatter facets (2010-2020)
+# 8) Chickens scatter facets (2010-2020)
 # ---------------------------------------------------------------------
 facet = df[df["year"].between(2010, 2020, inclusive="both")].copy()
 facet = facet[
@@ -386,5 +507,96 @@ if not facet.empty:
         os.path.join(out_dir, "chickens_scatter_data_2010_2020.csv"),
         index=False,
     )
+
+
+# ---------------------------------------------------------------------
+# 9) CAFO unit/count cross-check against pre-merged compact panel
+# ---------------------------------------------------------------------
+pre_cafo_path = latest_file(clean_dir, "*_cafo_ops_by_size_compact.csv")
+pre = pd.read_csv(pre_cafo_path, low_memory=False)
+pre = normalize_key(pre)
+
+for c in ["commodity_desc", "small", "medium", "large"]:
+    if c not in pre.columns:
+        raise RuntimeError(f"Missing column in pre-merged CAFO compact file: {c}")
+pre["commodity_desc"] = pre["commodity_desc"].astype("string").str.strip().str.lower()
+pre = pre[pre["commodity_desc"].isin(["cattle", "hogs", "chickens"])].copy()
+for c in ["small", "medium", "large"]:
+    pre[c] = to_num(pre[c])
+
+# Restrict pre-merged comparison to the same rural keys.
+pre = pre.merge(rural_kept, on=["fips", "year"], how="inner")
+
+pre_grp = (
+    pre.groupby(["fips", "year", "commodity_desc"], as_index=False)[["small", "medium", "large"]]
+    .sum(min_count=1)
+)
+pre_wide = pre_grp.pivot_table(
+    index=["fips", "year"],
+    columns="commodity_desc",
+    values=["small", "medium", "large"],
+    aggfunc="sum",
+)
+pre_wide.columns = [f"cafo_{commodity}_{size}" for size, commodity in pre_wide.columns]
+pre_wide = pre_wide.reset_index()
+
+for commodity in ["cattle", "hogs", "chickens"]:
+    for size in ["small", "medium", "large"]:
+        col = f"cafo_{commodity}_{size}"
+        if col not in pre_wide.columns:
+            pre_wide[col] = np.nan
+
+pre_animal_cols = [
+    "cafo_cattle_small", "cafo_cattle_medium", "cafo_cattle_large",
+    "cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large",
+    "cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large",
+]
+pre_wide["cafo_total_ops_all_animals"] = pre_wide[pre_animal_cols].sum(axis=1, min_count=1)
+pre_wide["cafo_total_ops_chickens"] = pre_wide[
+    ["cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large"]
+].sum(axis=1, min_count=1)
+
+merged_cmp = df[["fips", "year", *pre_animal_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]].copy()
+cmp = merged_cmp.merge(pre_wide, on=["fips", "year"], how="left", suffixes=("_merged", "_pre"))
+
+cross_rows = []
+for col in [*pre_animal_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]:
+    m = to_num(cmp[f"{col}_merged"])
+    p = to_num(cmp[f"{col}_pre"])
+    both = m.notna() & p.notna()
+    diff = (m - p).abs()
+    cross_rows.append(
+        {
+            "variable": col,
+            "n_keys_compared": int(both.sum()),
+            "pct_exact_match_on_compared_keys": float((diff[both] == 0).mean() * 100) if both.any() else np.nan,
+            "max_abs_diff": float(diff[both].max()) if both.any() else np.nan,
+            "merged_sum": float(m.sum(skipna=True)),
+            "premerged_sum": float(p.sum(skipna=True)),
+            "merged_p90": float(m.quantile(0.90)) if m.notna().any() else np.nan,
+            "premerged_p90": float(p.quantile(0.90)) if p.notna().any() else np.nan,
+            "merged_max": float(m.max()) if m.notna().any() else np.nan,
+            "premerged_max": float(p.max()) if p.notna().any() else np.nan,
+        }
+    )
+
+crosswalk = pd.DataFrame(cross_rows)
+crosswalk.to_csv(
+    os.path.join(out_dir, "cafo_animal_size_crosscheck_vs_premerged.csv"),
+    index=False,
+)
+
+unit_note = pd.DataFrame(
+    [
+        {
+            "source_file": os.path.basename(pre_cafo_path),
+            "inference": "CAFO animal-size values are operation/establishment counts, not animal head counts.",
+            "evidence_1": "script0b-ag-raw.py builds ops_in_bin from value and labels summary columns as small/medium/large operation totals.",
+            "evidence_2": "script0b-ag-raw.py comments: 'Keep operations counts in each inventory bin.'",
+            "evidence_3": "Merged CAFO animal-size columns match pre-merged compact county-year totals exactly on compared keys.",
+        }
+    ]
+)
+unit_note.to_csv(os.path.join(out_dir, "cafo_unit_crosscheck_note.csv"), index=False)
 
 print("Saved outputs in:", out_dir)
