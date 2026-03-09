@@ -27,6 +27,7 @@ MERGE_DESCRIPTORS = {
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
 MIN_MORTALITY_STATES = 50
+CAFO_COMMODITIES = ("cattle", "hogs", "chickens")
 
 
 def _split_descriptor(path):
@@ -191,6 +192,86 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
     return out
 
 
+def _build_cafo_animal_size_panel(path, allowed_keys):
+    """
+    Build county-year CAFO animal x size columns from the compact CAFO file.
+    Keeps existing CAFO total-size columns intact by adding a separate block.
+    """
+    try:
+        df = read_and_prepare(path)
+    except Exception as e:
+        print(f"Skip CAFO animal-size block: failed to read base file ({e})")
+        return None
+
+    df = _ensure_key(df)
+    if df is None:
+        print("Skip CAFO animal-size block: missing fips/year")
+        return None
+
+    needed = {"commodity_desc", "small", "medium", "large"}
+    missing_needed = sorted(list(needed - set(df.columns)))
+    if missing_needed:
+        print(f"Skip CAFO animal-size block: missing required columns {missing_needed}")
+        return None
+
+    df["commodity_desc"] = (
+        df["commodity_desc"]
+        .astype("string")
+        .str.strip()
+        .str.lower()
+    )
+    df = df[df["commodity_desc"].isin(CAFO_COMMODITIES)].copy()
+    if df.empty:
+        print("Skip CAFO animal-size block: no rows after commodity filter")
+        return None
+
+    for size_col in ("small", "medium", "large"):
+        df[size_col] = pd.to_numeric(df[size_col], errors="coerce")
+
+    # Restrict to rural keys used in merged panel.
+    df = df.merge(allowed_keys, on=["fips", "year"], how="inner")
+    if df.empty:
+        print("Skip CAFO animal-size block: no rows after rural-key filter")
+        return None
+
+    grouped = (
+        df.groupby(["fips", "year", "commodity_desc"], as_index=False)[["small", "medium", "large"]]
+        .sum(min_count=1)
+    )
+
+    wide = grouped.pivot_table(
+        index=["fips", "year"],
+        columns="commodity_desc",
+        values=["small", "medium", "large"],
+        aggfunc="sum",
+    )
+
+    # Flatten pivot columns -> cafo_{commodity}_{size}
+    wide.columns = [
+        f"cafo_{commodity}_{size}" for size, commodity in wide.columns
+    ]
+    wide = wide.reset_index()
+
+    # Ensure stable set of output columns even if some commodity is absent.
+    animal_size_cols = []
+    for commodity in CAFO_COMMODITIES:
+        for size in ("small", "medium", "large"):
+            col = f"cafo_{commodity}_{size}"
+            animal_size_cols.append(col)
+            if col not in wide.columns:
+                wide[col] = pd.NA
+
+    wide[animal_size_cols] = wide[animal_size_cols].apply(pd.to_numeric, errors="coerce")
+    wide["cafo_total_ops_all_animals"] = wide[animal_size_cols].sum(axis=1, min_count=1)
+    chickens_cols = [f"cafo_chickens_{s}" for s in ("small", "medium", "large")]
+    wide["cafo_total_ops_chickens"] = wide[chickens_cols].sum(axis=1, min_count=1)
+
+    keep_cols = ["fips", "year", *animal_size_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]
+    wide = wide[keep_cols].copy()
+    print(f"Use CAFO animal-size block: {wide.shape}")
+    return wide
+
+
 latest = _latest_files_by_descriptor(clean_dir)
 if not latest:
     raise RuntimeError(f"No supported files found in {clean_dir}")
@@ -244,6 +325,11 @@ if base is None or base.empty:
 merged_all = allowed_keys.copy()
 merged_all["non_large_metro"] = 1
 merged_all = merged_all.merge(base, on=["fips", "year"], how="left")
+
+# Add CAFO animal x size block (in addition to legacy total-size columns).
+cafo_animal_size = _build_cafo_animal_size_panel(latest[BASE_DESCRIPTOR], allowed_keys)
+if cafo_animal_size is not None and not cafo_animal_size.empty:
+    merged_all = merged_all.merge(cafo_animal_size, on=["fips", "year"], how="left")
 
 
 # Merge remaining selected datasets on top of base keys
