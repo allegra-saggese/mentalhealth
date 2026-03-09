@@ -63,6 +63,24 @@ def _build_county_year(df: pd.DataFrame) -> pd.DataFrame:
     src["year"] = src["year"].astype(int)
     src["est_size_combo_key"] = src["est_key"].astype("string") + "::" + src["size_bucket_final"].astype("string")
 
+    # Ensure binary indicators are numeric before aggregation.
+    indicator_cols = [
+        "slaughterhouse_present_year",
+        "processing_present_year",
+        "meat_slaughter_present_year",
+        "poultry_slaughter_present_year",
+        "type_both_slaughter_and_processing",
+        "type_slaughter_only",
+        "type_processing_only",
+        "type_other_or_unclear",
+        "type_neither_signal",
+    ]
+    for c in indicator_cols:
+        if c in src.columns:
+            src[c] = pd.to_numeric(src[c], errors="coerce").fillna(0).astype("Int64")
+        else:
+            src[c] = 0
+
     for b in ["1", "2", "3", "4", "5", "missing"]:
         src[f"size_bucket_{b}"] = (src["size_bucket_final"].astype("string") == b).astype("Int64")
 
