@@ -6,6 +6,10 @@ Created on Mon Aug 11 15:19:00 2025
 @author: allegrasaggese
 """
 
+# CANONICAL AG/CAFO BUILD SCRIPT:
+# This script writes `*_cafo_ops_by_size_compact.csv`, which is consumed downstream
+# by merge and analysis scripts.
+
 # load packages and workspaces
 import sys, importlib.util
 from collections import Counter

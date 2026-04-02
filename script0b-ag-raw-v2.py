@@ -6,6 +6,10 @@ Created on Mon Feb  9 01:55:11 2026
 @author: allegrasaggese
 """
 
+# EXPERIMENTAL AG SCRIPT:
+# This version currently does not write clean outputs (`to_csv`) used downstream.
+# Keep for development/reference unless promoted to replace script0b-ag-raw.py.
+
 
 # load packages and workspaces
 import sys, importlib.util
@@ -321,4 +325,3 @@ df2["ops_in_bin"] = pd.to_numeric(df2["value"].astype(str).str.replace(",", ""),
 
 group_cols = ["year", "fips_generated", "size_class", "unit_desc", "commodity_desc"]
 df2["sum_ops"] = df2.groupby(group_cols)["ops_in_bin"].transform("sum")
-
