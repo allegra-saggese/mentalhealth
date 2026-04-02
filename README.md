@@ -36,12 +36,13 @@ Raw inputs live in a separate `Data/` directory (not tracked in this GitHub repo
 Data/
 
     └── raw/
-      ├── cdc/              # CDC / health outcome files
-      ├── crime/            # crime and social-outcome files
-      ├── fips/             # FIPS / geographic crosswalks
-      ├── mental/           # mental-health specific inputs
-      ├── population/       # population and demographics
-      └── usda/             # USDA / slaughterhouse / ag data
+      ├── cdc/              # CDC mortalitity statistics (deaths of despair) files, annual CSVs
+      ├── crime/            # crime data, original precinct spatial data, CSV representation at county level
+      ├── fips/             # FIPS / geographic crosswalks for all county <> year for 10-year blocks 
+      ├── mental/           # mental-health specific outcomes per 100k pop at fips level  as long form CSV file 
+      ├── population/       # population and demographic data stored as long form CSV file 
+      └── usda/             # USDA farm census data, stored as .dta, available via API 
+      └── fsis/             # USDA FSIS slaughter and processing facility data from original FOIA request as annual CSvs 
 
 The Python scripts `script0a`–`script0d` read one or more files from each of these folders.  
 To see exactly which input filenames are required, search the scripts for `read_csv`, `read_parquet`, etc.
