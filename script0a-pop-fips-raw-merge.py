@@ -6,6 +6,9 @@ Created on Wed Jul 30 10:03:00 2025
 @author: allegrasaggese
 """
 
+# ----------------------- SET UP : set repos / outputs  -------------------- -#
+
+
 # load packages and workspaces
 from collections import Counter
 import sys
@@ -24,14 +27,6 @@ print("packages file:",  packages.__file__)
 from functions import *     
 from packages import *
 
-# 50 states + DC (exclude territories for US county panels).
-US_STATE_CODES = {
-    "01", "02", "04", "05", "06", "08", "09", "10", "11", "12", "13", "15",
-    "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27",
-    "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
-    "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "53",
-    "54", "55", "56"
-}
 
 # Census 2024 agesex file uses year codes; this mapping fills 2021-2024.
 YEAR_CODE_2024_MAP = {3: 2021, 4: 2022, 5: 2023, 6: 2024}
@@ -40,8 +35,9 @@ YEAR_CODE_2024_MAP = {3: 2021, 4: 2022, 5: 2023, 6: 2024}
 inf = os.path.join(db_data, "raw") # input 
 outf = os.path.join(db_data, "clean") #outpit
 
-# ----------------------- DATA PART 1 : CREATE FIPS KEY  -------------------- -#
 
+
+# ----------------------- DATA PART 1 : LOAD FIPS DATA  -------------------- -#
 
 ## UPLOAD ALL CENSUS DATA - ALL YEARS, RAW 
 rawpop = os.path.join(inf, "population")
@@ -67,6 +63,7 @@ for file in file_list:
     pop_sources[os.path.basename(file).lower()] = df
 
 
+# helper in the case taht we cannot find the county name 
 def _pick_pop_source(name_fragment):
     matches = [k for k in pop_sources.keys() if name_fragment in k]
     if not matches:
@@ -75,13 +72,13 @@ def _pick_pop_source(name_fragment):
         print(f"Multiple files matched '{name_fragment}', using first: {matches[0]}")
     return pop_sources[matches[0]].copy()
 
-
+# apply 
 df_pop_2024 = _pick_pop_source("cc-est2024-agesex-all")
 df_pop_2000s = _pick_pop_source("cc-est00int-tot")
 df_pop_2010s = _pick_pop_source("cc-est2010-2020")
 df_pop_1990s = _pick_pop_source("cc-est-1990-2000")
     
-## UPLOAD ALL FIPS DATA - FOR MATCHING LATER
+## UPLOAD ALL FIPS DATA 
 rawfips = os.path.join(inf, "fips")
 fipsfiles = glob.glob(os.path.join(rawfips, "foruse_*.txt"))
 
@@ -110,6 +107,7 @@ for p in fipsfiles:
     else:
         ws_files.append(p)
 
+
 # load each bucket (three separate lines/loops)
 # whitespace (or fixed-width) files (2000)
 ws_dfs = []
@@ -123,12 +121,15 @@ for p in ws_files:
     df["source_file"] = os.path.basename(p)
     ws_dfs.append(df)
 
-# need to break out one col with FIPS / county into two cols 
+# manually check each panel within the fips compendium
 fips_00 = ws_dfs[0]
 fips_00.columns.tolist()
 fips_00[["fips", "county"]] = fips_00["FIPS\t\t countyname"].str.strip().str.split(r"\s+", n=1, expand=True)
 
-# drop uneccessary columns + split fips cols for more ID 
+
+
+# ----------------------- DATA PART 2 : CLEAN UP FIPS DATAFRAMES  -------------------- -#
+
 fips_00 = fips_00.drop(columns=["FIPS\t\t countyname", "Unnamed: 1", "source_file"])    
 fips_00["state_code"] = fips_00["fips"].astype(str).str[:2]
 fips_00["county_code"] = fips_00["fips"].astype(str).str[-3:]
@@ -141,10 +142,14 @@ fips_00_expanded = fips_00_expanded.reset_index(drop=True)
 
 # manual creation of the 1990 codes given the states similarities 
 fips_90 = fips_00
+
+
 # manual changes, REASON: see source data for differences from 1990 to 2000 census
 fips_90["fips"] = fips_90["fips"].replace(12025, 12086)
 fips_90["county_code"] = fips_90["county_code"].replace(25, 86)
 fips_90["county"] = fips_90["county"].replace("Miami-Dade County", "Dade County")
+
+
 # add in counties that were merged/lost for the 2000 census 
 new_row1 = {
     "FIPS": 30113,
@@ -174,14 +179,17 @@ if not comma_files:
 comma_2010 = [p for p in comma_files if "2010" in os.path.basename(p).lower()]
 comma_target = comma_2010[0] if comma_2010 else comma_files[0]
 fips_10 = pd.read_table(comma_target, sep=",", engine="python", encoding="latin1", on_bad_lines="warn")
-# create full FIPS
+
+
+# GET ALL FIPS <> CTY <> YEAR CODES FROM RAW DATA 
 generate_fips(fips_10, state_col="STATEFP", city_col="COUNTYFP")
 
-# collapse on subfips because we don't need them 
+# collapse on subfips because I want to eliminate this categorization
 fips_10 = fips_10.drop(columns=['COUSUBFP', 'COUSUBNAME', 'FUNCSTAT'], errors='ignore')
 fips_10 = fips_10.drop_duplicates(subset='FIPS_generated', keep='first')
 
-# add years
+
+# add years into the dataframe with empty columns
 yrs2 = list(range(2010, 2020))
 yrs2df = pd.DataFrame({"year": yrs2})
 fips_10_expanded = fips_10.merge(yrs2df, how="cross")
@@ -207,7 +215,7 @@ fips_20 = fips_20.drop(columns=['COUSUBFP', 'COUSUBNAME', 'FUNCSTAT'], errors='i
 fips_20 = fips_20.drop_duplicates(subset='FIPS_generated', keep='first')
 
   
-# add years
+# add years into the dataframe with empty columns
 yrs3 = list(range(2020, 2025))
 yrs3df = pd.DataFrame({"year": yrs3})
 fips_20_expanded = fips_20.merge(yrs3df, how="cross")
@@ -216,15 +224,15 @@ fips_20_expanded = fips_20_expanded.reset_index(drop=True)
 # change county, state code colnames to ensure merge works 
 fips_90_expanded.columns.tolist()
 fips_90_expanded.drop(columns=["FIPS"], inplace=True) # empty col to drop
-
 fips_00_expanded.columns.tolist()
 fips_10_expanded.columns.tolist()
 fips_20_expanded.columns.tolist()
 
-# make lower case
+# standard cleaning - make lower case
 fips_10_expanded.columns = fips_10_expanded.columns.str.lower()
 fips_20_expanded.columns = fips_20_expanded.columns.str.lower()
 
+# rename columns with underscore - for standardization in the future 
 fips_10_expanded = fips_10_expanded.rename(columns={
     "statefp": "state_code",
     "countyfp": "county_code",
@@ -252,19 +260,26 @@ for df in [fips_90_expanded, fips_00_expanded, fips_10_expanded, fips_20_expande
     df['county'] = df['county'].astype(str)
 
 
-# combine all FIPS data 
+# combine all FIPS YEAR DATA FRAMES INTO ONE PANEL
 fips_annual_full = pd.concat([fips_90_expanded, fips_00_expanded, 
                               fips_10_expanded, fips_20_expanded],
                              axis=0, join="outer", ignore_index=True)
 
 
-#### QA before further cleaning 
+
+
+# ----------------------- DATA PART 3 : QUALITY ASSURANCE  -------------------- -#
+# QA: find out which year <> county/state combos were missing 
+
+
+# quick sense check on fill rate 
 missing_pct = fips_annual_full.isna().mean() * 100
 print(missing_pct)
 
 rows_with_missing = fips_annual_full.isna().any(axis=1).sum()
 print(rows_with_missing) # 20 are missing at least one value 
 df_missing = fips_annual_full[fips_annual_full.isna().any(axis=1)]
+
 
 # manually add in the missing fips --- its given by census.gov file 
 # https://www2.census.gov/programs-surveys/popest/geographies/1990-2000/90s-fips.txt
@@ -286,14 +301,16 @@ fips_annual_full.loc[
     fips_annual_full['county'].str.contains('Boston', case=False, na=False),
     'fips'
 ] = boston_fips
-
 # recheck missing percentage and its zero! move on 
+
+
 
 # remove state level values (keeping DC), based on county_code
 fips_annual_full_v2 = fips_annual_full[
     ~((fips_annual_full['county_code'] == "000") &
       (fips_annual_full['county'] != "District of Columbia"))
 ].copy()
+
 
 # standardize identifier columns
 fips_annual_full_v2["state_code"] = (
@@ -304,14 +321,17 @@ fips_annual_full_v2["county_code"] = (
 )
 fips_annual_full_v2["fips"] = pd.to_numeric(fips_annual_full_v2["fips"], errors="coerce").astype("Int64")
 
+
 # normalize DC to county-equivalent FIPS 11001 across all years
 dc_mask = fips_annual_full_v2["county"].astype(str).str.contains("District of Columbia", case=False, na=False)
 fips_annual_full_v2.loc[dc_mask, "state_code"] = "11"
 fips_annual_full_v2.loc[dc_mask, "county_code"] = "001"
 fips_annual_full_v2.loc[dc_mask, "fips"] = 11001
 
+
 # keep US counties + DC only
 fips_annual_full_v2 = fips_annual_full_v2[fips_annual_full_v2["state_code"].isin(US_STATE_CODES)].copy()
+
 
 # drop historical state-level DC key if present
 fips_annual_full_v2 = fips_annual_full_v2[fips_annual_full_v2["fips"] != 11000].copy()
@@ -344,7 +364,8 @@ del fips_annual_full_v2, missing_pct, mt_fips, new_row1, new_row2, rawfips
 del rows_with_missing, boston_fips
 
 
-# ----------------------- DATA PART 2: POPULATION  -------------------- -#
+# ----------------------- DATA PART 4 : ADD POPULATION IN  -------------------- -#
+# Now we add the population data into the fips data for the final key 
 
 
 ## INVESTIGATE COLUMNS ACROSS DISAGGREGATED DFs for patterns 
@@ -388,6 +409,7 @@ common_cols = set.intersection(*colsets) # print common cols
 print(f"Columns common to all dfs: {len(common_cols)}")
 print(common_cols)
 
+# manual review of the columns 
 all_cols = set.union(*colsets) # get all unique cols 
 print("Total unique columns across all:", len(all_cols)) # 291 total unique 
 
@@ -403,14 +425,13 @@ print(col_presence)
 # 2000-2020 (dfs[1] = 2010, dfs[2] = 2020, dfs[0] = 2000, data is in wide format, need to convert to long 
 
 
-## CLEAN UP ENVIRO 
+# clean up enviro for coding  
 del all_cols, all_columns, col_counts, col_lists, col_presence,     
 del ws_dfs, ws_files
 del yrs0, yrs2, yrs0df, yrs2df, yrs3, yrs3df
 
 
-######### ------- DATA CLEANING - POPULATION ------ ####### ####### ####### 
-##------- MAKE THE SAME DATAFRAME FOR ALL FOUR SETS OF POPULATION DATA 
+# ----------------------- DATA PART 5 : REPEAT POP DATA  -------------------- -#
 
 ##1990-2000 DATA:
 df1990s = df_pop_1990s.copy()
@@ -510,7 +531,6 @@ print("Rows dropped:", dropped)
 df2000s_full = df2000s_cleannames
 
 
-
 ##2010-2020 DATA:
 df2010 = df_pop_2010s.copy()
 
@@ -566,6 +586,8 @@ df2024 = df2024.dropna(subset=["year"]).copy()
 df2024["year"] = df2024["year"].astype(int)
 generate_fips(df2024, state_col="state", city_col="county")
 
+
+# standardize var names for hte merge 
 df2024_full = df2024.rename(columns={
     "stname": "state",
     "ctyname": "county",
@@ -576,6 +598,7 @@ df2024_full = df2024.rename(columns={
     "popestimate": "population"
 })
 
+# fill strings 
 df2024_full["state_code"] = df2024_full["state_code"].astype(str).str.zfill(2)
 df2024_full["county_code"] = df2024_full["county_code"].astype(str).str.zfill(3)
 df2024_full = df2024_full[df2024_full["state_code"].isin(US_STATE_CODES)].copy()
@@ -585,7 +608,10 @@ df2024_full = df2024_full[df2024_full["fips"].astype(str).str.len() == 5].copy()
 keep_2024 = [c for c in df2010_full_v2.columns if c in df2024_full.columns]
 df2024_full = df2024_full[keep_2024].copy()
 
-###### MERGING ALL TOGETHER ######
+
+
+# ----------------------- DATA PART 5: MERGE FIPS / POPS  -------------------- -#
+
 
 # sort columns (alphabetical) for easier comparison
 df1990s_full = df1990s_full[sorted(df1990s_full.columns)]
@@ -611,6 +637,8 @@ df1990s_full.columns.tolist()
 df2000s_full.columns.tolist()
 df2010_full_v2.columns.tolist()
 
+
+# concanate all population data 
 full_pop_df = pd.concat([df1990s_full, df2000s_full, df2010_full_v2, df2024_full], ignore_index=True, sort=False)
 
 full_pop_df["state_code"] = (
@@ -638,7 +666,7 @@ full_pop_df = full_pop_df[full_pop_df["fips"] != "11000"].copy()
 full_pop_df = full_pop_df.dropna(subset=["fips", "year"]).copy()
 full_pop_df = full_pop_df.sort_values(["fips", "year"]).drop_duplicates(["fips", "year"], keep="last")
 
-# QA MERGE 
+# quick QA to see if we have any loss at the year - level 
 numeric_cols = full_pop_df.select_dtypes(include=[np.number])
 ranges = numeric_cols.agg(['min', 'max']).T
 
@@ -648,7 +676,7 @@ unique_counts = {
     "county_code_unique": full_pop_df["county_code"].nunique()
 }
 
-# missing stats
+# missing stats, i.e. did the merge break down 
 missing_pct = full_pop_df.isna().mean() * 100
 rows_with_3plus_missing = (full_pop_df.isna().sum(axis=1) >= 3).sum()
 
@@ -662,11 +690,16 @@ print(f"\nRows with ≥3 missing: {rows_with_3plus_missing}")
 print(full_pop_df["state_code"].unique()[:50])  # sample of unique entries - beginning 
 print(full_pop_df["state_code"].unique()[50:])  # sample of unique entries - end 
 print("\nData types:", full_pop_df["state_code"].dtype)
-
-
 # re-ran QA and now we should have 51 unique codes (50 states + DC)
 
-# export to CSV 
+
+
+
+# Final step: EXPORT TO CSV IN THE CLEAN FOLDER 
 clean_pop_df = f"{today_str}_population_full.csv"
 poppath = os.path.join(clean_dir, clean_pop_df)
 full_pop_df.to_csv(poppath, index=False)
+
+
+
+
