@@ -21,6 +21,10 @@ from urllib.request import urlopen, Request
 
 ##################### STANDARD DEFINITIONS ####################
 
+# set today's date for exported materials 
+today_str = date.today().strftime("%Y-%m-%d")
+
+
 # 50 states + DC (exclude territories for US county panels) - use in script0a
 US_STATE_CODES = {
     "01", "02", "04", "05", "06", "08", "09", "10", "11", "12", "13", "15",
