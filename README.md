@@ -3,8 +3,7 @@
 ## Purpose
 This project combines US health, crime, population and agriculture data into one large, unbalanced panel. 
 Data extends from 1999-2022 with different ranges depending on source year. 
-The purpose of this project is to develop a comprehensive, repeated cross-section of data. 
-We are interested in identifying causal relationships between large scale livestock, particularly slaughterhouse work, and mental health among US agriculture workers. 
+The purpose of this project is to develop a comprehensive, repeated cross-section of data at the spatial unit level for the US. Data comprises county-level crime, health, agriculture, survey, and income data. We are interested in identifying causal relationships between large scale livestock, particularly slaughterhouse work, and mental health among US agriculture workers. 
 ## Requirements
 
 - Python 3.x  
