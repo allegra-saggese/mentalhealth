@@ -127,9 +127,7 @@ def _dedupe_columns_keep_most_complete(df):
     return out
 
 
-def _first_notna(s):
-    idx = s.first_valid_index()
-    return s.loc[idx] if idx is not None else pd.NA
+_first_notna = first_non_null
 
 
 def _normalize_fips(series):
@@ -154,7 +152,7 @@ mh_dfs = []
 year_re = re.compile(r"(19|20)\d{2}(?=\.[A-Za-z0-9]+$)")
 
 for p in mh_files:
-    d = pd.read_csv(p, low_memory=False)
+    d = read_csv_with_fallback(p, low_memory=False)
     base = os.path.basename(p)
     m = year_re.search(base)
     if not m:
@@ -255,10 +253,7 @@ if not cdc_csv_files:
 
 mort_raw_parts = []
 for p in cdc_csv_files:
-    try:
-        d = pd.read_csv(p, low_memory=False, encoding="utf-8")
-    except UnicodeDecodeError:
-        d = pd.read_csv(p, low_memory=False, encoding="latin1")
+    d = read_csv_with_fallback(p, low_memory=False)
 
     d.columns = (
         pd.Index(d.columns)

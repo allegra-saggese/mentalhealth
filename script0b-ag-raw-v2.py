@@ -50,29 +50,6 @@ if USE_API and not NASS_API_KEY:
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
 
 
-def _nass_request(endpoint, params):
-    query = urlencode(params)
-    url = f"{NASS_BASE}{endpoint}/?{query}"
-    req = Request(url, headers={"User-Agent": "mentalhealth-ag-script/1.0"})
-    try:
-        with urlopen(req) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"NASS API HTTP {e.code} for {url} :: {body}") from e
-
-
-def nass_get_counts(params):
-    payload = _nass_request("get_counts", params)
-    return int(payload.get("count", 0))
-
-
-def nass_get_data(params):
-    payload = _nass_request("api_GET", params)
-    data = payload.get("data", [])
-    return pd.DataFrame(data)
-
-
 # Filters (user-specified)
 source_desc = "CENSUS"
 agg_level_desc = "COUNTY"
@@ -113,7 +90,7 @@ def fetch_ag_data():
                     }
 
                     try:
-                        count = nass_get_counts(base_params)
+                        count = functions.nass_get_counts(NASS_BASE, base_params)
                     except RuntimeError as e:
                         # skip parameter combos that the API rejects (often 403)
                         print("Skipping combo due to API error:", e)
@@ -129,7 +106,7 @@ def fetch_ag_data():
                             st_params = dict(base_params)
                             st_params["state_alpha"] = st
                             try:
-                                st_count = nass_get_counts(st_params)
+                                st_count = functions.nass_get_counts(NASS_BASE, st_params)
                             except RuntimeError as e:
                                 print("Skipping state combo due to API error:", e)
                                 continue
@@ -140,11 +117,11 @@ def fetch_ag_data():
                                     f"Request still >50k rows after state split: "
                                     f"year={yr}, group={grp}, commodity={cmd}, unit={unit}, state={st}, count={st_count}"
                                 )
-                            df_st = nass_get_data(st_params)
+                            df_st = functions.nass_get_data(NASS_BASE, st_params)
                             if not df_st.empty:
                                 frames.append(df_st)
                     else:
-                        df = nass_get_data(base_params)
+                        df = functions.nass_get_data(NASS_BASE, base_params)
                         if not df.empty:
                             frames.append(df)
 
@@ -290,11 +267,6 @@ beef_cows_map = {
  "inventory of beef cows: (200 to 499 head)":6,
  "inventory of beef cows: (500 or more head)":7
 }
-
-def map_size_class(df, mapping, unit_match, class_match, out_col):
-    mask = (df['unit_desc'] == unit_match) & (df['class_desc'] == class_match)
-    df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
-
 # operations only
 map_size_class(df_sub, layer_map, unit_match="operations", class_match="layers", out_col="layer_ops_size")
 map_size_class(df_sub, layer_map, unit_match="operations", class_match="broilers", out_col="broiler_ops_size")
@@ -349,6 +321,4 @@ df2["ops_in_bin"] = pd.to_numeric(df2["value"].astype(str).str.replace(",", ""),
 
 group_cols = ["year", "fips_generated", "size_class", "unit_desc", "commodity_desc"]
 df2["sum_ops"] = df2.groupby(group_cols)["ops_in_bin"].transform("sum")
-
-
 

@@ -34,44 +34,6 @@ STATE_PLOT_LIMIT = int(os.environ.get("STATE_PLOT_LIMIT", "12"))
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
-def latest_file(folder, pattern):
-    hits = glob.glob(os.path.join(folder, pattern))
-    if not hits:
-        raise RuntimeError(f"No files found for pattern: {pattern} in {folder}")
-    return max(hits, key=os.path.getmtime)
-
-
-def normalize_key(df):
-    df = clean_cols(df.copy())
-    if "fips" not in df.columns and "fips_generated" in df.columns:
-        df = df.rename(columns={"fips_generated": "fips"})
-    if "year" not in df.columns and "yr" in df.columns:
-        df = df.rename(columns={"yr": "year"})
-    if "fips" not in df.columns or "year" not in df.columns:
-        raise KeyError("Required key columns fips/year are missing.")
-
-    df["fips"] = (
-        df["fips"]
-        .astype("string")
-        .str.replace(r"\.0$", "", regex=True)
-        .str.zfill(5)
-    )
-    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
-    return df
-
-
-def to_numeric_series(s):
-    if pd.api.types.is_numeric_dtype(s):
-        return pd.to_numeric(s, errors="coerce")
-    s2 = (
-        s.astype("string")
-        .str.replace(",", "", regex=False)
-        .str.strip()
-        .replace({"": pd.NA, "(d)": pd.NA, "(z)": pd.NA, "na": pd.NA, "n/a": pd.NA})
-    )
-    return pd.to_numeric(s2, errors="coerce")
-
-
 def numeric_candidates(df, cols, min_parse_rate=0.8):
     out = {}
     rows = []
@@ -175,11 +137,11 @@ STATE_FIPS_TO_NAME = {
 # ---------------------------------------------------------------------
 # 1) Load merged panel
 # ---------------------------------------------------------------------
-merged_path = latest_file(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
 print("Using merged file:", merged_path)
 
 df = pd.read_csv(merged_path, low_memory=False)
-df = normalize_key(df)
+df = normalize_panel_key(df, dropna=False)
 df = df.loc[:, ~df.columns.duplicated()].copy()
 df = df.dropna(subset=["fips", "year"]).copy()
 df = df.sort_values(["fips", "year"]).reset_index(drop=True)
@@ -492,7 +454,7 @@ for var in high_cov_vars:
 # ---------------------------------------------------------------------
 # 5) CAFO data for commodity/class/size analyses
 # ---------------------------------------------------------------------
-cafo_path = latest_file(clean_dir, "*_cafo_ops_by_size_compact.csv")
+cafo_path = latest_file_glob(clean_dir, "*_cafo_ops_by_size_compact.csv")
 print("Using CAFO compact file:", cafo_path)
 cafo = pd.read_csv(cafo_path, low_memory=False)
 cafo = normalize_key(cafo)

@@ -49,40 +49,9 @@ STATE_FIPS_TO_ABBR = {
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
-def latest_file(folder, pattern):
-    hits = glob.glob(os.path.join(folder, pattern))
-    if not hits:
-        raise RuntimeError(f"No files found for pattern {pattern} in {folder}")
-    return max(hits, key=os.path.getmtime)
-
-
-def normalize_key(df):
-    df = clean_cols(df.copy())
-    if "fips" not in df.columns and "fips_generated" in df.columns:
-        df = df.rename(columns={"fips_generated": "fips"})
-    if "year" not in df.columns and "yr" in df.columns:
-        df = df.rename(columns={"yr": "year"})
-    if "fips" not in df.columns or "year" not in df.columns:
-        raise KeyError("Missing key columns fips/year")
-
-    df["fips"] = (
-        df["fips"]
-        .astype("string")
-        .str.replace(r"\.0$", "", regex=True)
-        .str.zfill(5)
-    )
-    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
-    df = df.dropna(subset=["fips", "year"]).copy()
-    return df
-
-
-def to_num(s):
-    if pd.api.types.is_numeric_dtype(s):
-        return pd.to_numeric(s, errors="coerce")
-    return pd.to_numeric(
-        s.astype("string").str.replace(",", "", regex=False).str.strip(),
-        errors="coerce",
-    )
+latest_file = latest_file_glob
+to_num = to_numeric_series
+normalize_key = normalize_panel_key
 
 
 def summarize_numeric(df, columns):

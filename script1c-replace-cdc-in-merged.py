@@ -6,9 +6,9 @@ cdc_county_year_deathsofdespair descriptor block.
 """
 
 import os
-import glob
 import pandas as pd
 from datetime import date
+from functions import latest_file_glob, normalize_panel_key
 
 
 MERGED_DIR = "/Users/allegrasaggese/Dropbox/Mental/Data/merged"
@@ -16,39 +16,14 @@ CLEAN_DIR = "/Users/allegrasaggese/Dropbox/Mental/Data/clean"
 CDC_SUFFIX = "_cdc_county_year_deathsofdespair"
 OLD_SUFFIX = "_mh_mortality_fips_yr"
 
-
-def latest_file(folder, pattern):
-    hits = glob.glob(os.path.join(folder, pattern))
-    if not hits:
-        raise FileNotFoundError(f"No files for pattern {pattern} in {folder}")
-    return max(hits, key=os.path.getmtime)
-
-
-def norm_key(df):
-    if "fips" not in df.columns and "fips_generated" in df.columns:
-        df = df.rename(columns={"fips_generated": "fips"})
-    if "year" not in df.columns and "yr" in df.columns:
-        df = df.rename(columns={"yr": "year"})
-    if "fips" not in df.columns or "year" not in df.columns:
-        raise KeyError("Missing fips/year")
-    df["fips"] = (
-        df["fips"]
-        .astype("string")
-        .str.replace(r"\.0$", "", regex=True)
-        .str.zfill(5)
-    )
-    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
-    return df.dropna(subset=["fips", "year"]).copy()
-
-
-merged_path = latest_file(MERGED_DIR, "*_full_merged.csv")
-cdc_path = latest_file(CLEAN_DIR, "*_cdc_county_year_deathsofdespair.csv")
+merged_path = latest_file_glob(MERGED_DIR, "*_full_merged.csv")
+cdc_path = latest_file_glob(CLEAN_DIR, "*_cdc_county_year_deathsofdespair.csv")
 
 print("Using merged:", os.path.basename(merged_path))
 print("Using CDC panel:", os.path.basename(cdc_path))
 
 m = pd.read_csv(merged_path, low_memory=False)
-m = norm_key(m)
+m = normalize_panel_key(m)
 
 old_cols = [c for c in m.columns if c.endswith(OLD_SUFFIX)]
 if old_cols:
@@ -61,7 +36,7 @@ if existing_new:
 print("Dropped pre-existing CDC replacement columns:", len(existing_new))
 
 c = pd.read_csv(cdc_path, low_memory=False)
-c = norm_key(c)
+c = normalize_panel_key(c)
 
 if c.duplicated(["fips", "year"]).any():
     num_cols = [x for x in c.columns if x not in ("fips", "year") and pd.api.types.is_numeric_dtype(c[x])]

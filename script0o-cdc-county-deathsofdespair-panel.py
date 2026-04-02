@@ -38,15 +38,11 @@ def _extract_year_from_filename(path):
     return int(m.group(0))
 
 
-def _to_num(series):
-    if pd.api.types.is_numeric_dtype(series):
-        return pd.to_numeric(series, errors="coerce")
-    return pd.to_numeric(series.astype("string").str.replace(",", "", regex=False).str.strip(), errors="coerce")
+_to_num = to_numeric_series
 
 
 def _first_notna(s):
-    idx = s.first_valid_index()
-    return s.loc[idx] if idx is not None else pd.NA
+    return first_non_null(s)
 
 
 files = sorted(glob.glob(os.path.join(raw_dir, "cty-level-deathsofdespair-*.csv")))
@@ -59,7 +55,7 @@ inventory_rows = []
 
 for path in files:
     src_year = _extract_year_from_filename(path)
-    d = pd.read_csv(path, low_memory=False)
+    d = read_csv_with_fallback(path, low_memory=False)
     d = clean_cols(d.copy())
     d.columns = d.columns.str.replace(r"\s+", "_", regex=True).str.strip("_")
 

@@ -43,7 +43,7 @@ print(f"Found {len(csv_files)} CSV files")
 dfs = []
 for file in csv_files:
     try:
-        df = pd.read_csv(file, encoding="utf-8")
+        df = read_csv_with_fallback(file)
         df["source_file"] = os.path.basename(file)   # optional: keep filename
         dfs.append(df)
         print(f"Loaded: {os.path.basename(file)}  shape={df.shape}")
@@ -244,7 +244,6 @@ combined_df.to_csv(cdpath, index=False)
 crime_flat= f"{today_str}_crime_fips_level_final.csv"
 cpath = os.path.join(outf, crime_flat)
 collapsed_fips_only.to_csv(cpath, index=False)
-
 
 
 

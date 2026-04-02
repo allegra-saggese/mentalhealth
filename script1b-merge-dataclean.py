@@ -30,61 +30,14 @@ MIN_MORTALITY_STATES = 50
 CAFO_COMMODITIES = ("cattle", "hogs", "chickens")
 
 
-def _split_descriptor(path):
-    """
-    Returns:
-      descriptor: file stem without YYYY-MM-DD_ or YYYY-MM-DD- prefix
-      date_key: datetime.date or date.min if no prefix
-    """
-    stem = os.path.splitext(os.path.basename(path))[0]
-    m = re.match(r"^(\d{4}-\d{2}-\d{2})[-_](.+)$", stem)
-    if m:
-        return m.group(2), date.fromisoformat(m.group(1))
-    return stem, date.min
-
-
-def _latest_files_by_descriptor(folder):
-    supported = ("*.csv", "*.parquet", "*.pq", "*.xlsx", "*.xls")
-    files = []
-    for pat in supported:
-        files.extend(glob.glob(os.path.join(folder, pat)))
-
-    latest = {}
-    for path in files:
-        descriptor, date_key = _split_descriptor(path)
-        mtime = os.path.getmtime(path)
-        score = (date_key, mtime)
-        if descriptor not in latest or score > latest[descriptor]["score"]:
-            latest[descriptor] = {"path": path, "score": score}
-
-    return {k: v["path"] for k, v in latest.items()}
-
-
 def _ensure_key(df):
     """
     Ensure df has normalized fips/year key columns.
     """
-    df = clean_cols(df.copy())
-    if "fips" not in df.columns:
-        if "fips_generated" in df.columns:
-            df = df.rename(columns={"fips_generated": "fips"})
-        elif "geoid" in df.columns:
-            df = df.rename(columns={"geoid": "fips"})
-
-    if "year" not in df.columns and "yr" in df.columns:
-        df = df.rename(columns={"yr": "year"})
-
-    if "fips" not in df.columns or "year" not in df.columns:
+    try:
+        df = normalize_panel_key(df, dropna=True)
+    except KeyError:
         return None
-
-    df["fips"] = (
-        df["fips"]
-        .astype("string")
-        .str.replace(r"\.0$", "", regex=True)
-        .str.zfill(5)
-    )
-    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
-    df = df.dropna(subset=["fips", "year"]).copy()
     return df
 
 
@@ -272,7 +225,7 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
     return wide
 
 
-latest = _latest_files_by_descriptor(clean_dir)
+latest = latest_files_by_descriptor(clean_dir)
 if not latest:
     raise RuntimeError(f"No supported files found in {clean_dir}")
 

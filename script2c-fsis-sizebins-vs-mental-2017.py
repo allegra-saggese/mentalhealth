@@ -16,22 +16,11 @@ from datetime import date
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from functions import latest_file_glob, to_numeric_series
 
 
-def _latest_file(folder: str, pattern: str) -> str:
-    hits = glob.glob(os.path.join(folder, pattern))
-    if not hits:
-        raise RuntimeError(f"No files found for pattern {pattern} in {folder}")
-    return max(hits, key=os.path.getmtime)
-
-
-def _to_num(s: pd.Series) -> pd.Series:
-    if pd.api.types.is_numeric_dtype(s):
-        return pd.to_numeric(s, errors="coerce")
-    return pd.to_numeric(
-        s.astype("string").str.replace(",", "", regex=False).str.strip(),
-        errors="coerce",
-    )
+_latest_file = latest_file_glob
+_to_num = to_numeric_series
 
 
 def main():

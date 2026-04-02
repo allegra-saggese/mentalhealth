@@ -49,29 +49,6 @@ if USE_API and not NASS_API_KEY:
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
 
 
-def _nass_request(endpoint, params):
-    query = urlencode(params)
-    url = f"{NASS_BASE}{endpoint}/?{query}"
-    req = Request(url, headers={"User-Agent": "mentalhealth-ag-script/1.0"})
-    try:
-        with urlopen(req) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"NASS API HTTP {e.code} for {url} :: {body}") from e
-
-
-def nass_get_counts(params):
-    payload = _nass_request("get_counts", params)
-    return int(payload.get("count", 0))
-
-
-def nass_get_data(params):
-    payload = _nass_request("api_GET", params)
-    data = payload.get("data", [])
-    return pd.DataFrame(data)
-
-
 # Filters (user-specified)
 source_desc = "CENSUS"
 agg_level_desc = "COUNTY"
@@ -117,14 +94,14 @@ def fetch_ag_data():
 
     def _safe_get_counts(params):
         try:
-            return nass_get_counts(params)
+            return functions.nass_get_counts(NASS_BASE, params)
         except RuntimeError as e:
             print("Skipping combo due to API error:", e)
             return None
 
     def _safe_get_data(params):
         try:
-            out = nass_get_data(params)
+            out = functions.nass_get_data(NASS_BASE, params)
         except RuntimeError as e:
             print("Skipping data pull due to API error:", e)
             return pd.DataFrame()
@@ -508,17 +485,6 @@ print("Stage 2 unit mix:")
 print(df_sub["unit_desc"].value_counts(dropna=False))
 print("Stage 2 statistic mix:")
 print(df_sub["statisticcat_desc"].value_counts(dropna=False))
-
-
-def map_size(df, mapping, unit_match, out_col):
-    mask = df["unit_desc"] == unit_match
-    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
-
-
-def map_size_class(df, mapping, unit_match, class_match, out_col):
-    mask = (df["unit_desc"] == unit_match) & (df["class_desc"] == class_match)
-    df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
-
 
 # Inventory-bin mappings preserved from script0b-ag-raw-v2.
 layer_map = {

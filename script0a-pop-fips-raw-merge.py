@@ -24,12 +24,8 @@ import packages
 print("functions file:", functions.__file__)
 print("packages file:",  packages.__file__) 
 
-from functions import *     
+from functions import *
 from packages import *
-
-
-# Census 2024 agesex file uses year codes; this mapping fills 2021-2024.
-YEAR_CODE_2024_MAP = {3: 2021, 4: 2022, 5: 2023, 6: 2024}
 
 # other folders
 inf = os.path.join(db_data, "raw") # input 
@@ -51,55 +47,28 @@ pop_sources = {}
 
 for file in file_list:
     try:
-        df = pd.read_csv(file, encoding="utf-8")
-    except UnicodeDecodeError:
-        try:
-            # Retry with fallback encoding
-            df = pd.read_csv(file, encoding="latin1")
-        except Exception as e:
-            print(f"Failed to read {file}: {e}")
-            continue
+        df = read_csv_with_fallback(file)
+    except Exception as e:
+        print(f"Failed to read {file}: {e}")
+        continue
     dfs.append(df)
     pop_sources[os.path.basename(file).lower()] = df
 
 
-# helper in the case taht we cannot find the county name 
-def _pick_pop_source(name_fragment):
-    matches = [k for k in pop_sources.keys() if name_fragment in k]
-    if not matches:
-        raise FileNotFoundError(f"Population source not found for pattern: {name_fragment}")
-    if len(matches) > 1:
-        print(f"Multiple files matched '{name_fragment}', using first: {matches[0]}")
-    return pop_sources[matches[0]].copy()
-
 # apply 
-df_pop_2024 = _pick_pop_source("cc-est2024-agesex-all")
-df_pop_2000s = _pick_pop_source("cc-est00int-tot")
-df_pop_2010s = _pick_pop_source("cc-est2010-2020")
-df_pop_1990s = _pick_pop_source("cc-est-1990-2000")
+df_pop_2024 = pick_source_by_fragment(pop_sources, "cc-est2024-agesex-all")
+df_pop_2000s = pick_source_by_fragment(pop_sources, "cc-est00int-tot")
+df_pop_2010s = pick_source_by_fragment(pop_sources, "cc-est2010-2020")
+df_pop_1990s = pick_source_by_fragment(pop_sources, "cc-est-1990-2000")
     
 ## UPLOAD ALL FIPS DATA 
 rawfips = os.path.join(inf, "fips")
 fipsfiles = glob.glob(os.path.join(rawfips, "foruse_*.txt"))
 
-def sniff_delim(path):
-    with open(path, "r", errors="ignore") as f:
-        for line in f:
-            if line.strip():
-                s = line
-                break
-    # count signals for each delimiter
-    scores = {
-        "pipe": s.count("|"),
-        "comma": s.count(","),
-        "ws": len(s.split()) - 1  # whitespace tokens
-    }
-    return max(scores, key=scores.get)
-
 # identify which type of separator exists for each file 
 pipe_files, comma_files, ws_files = [], [], []
 for p in fipsfiles:
-    d = sniff_delim(p)
+    d = sniff_delimiter(p)
     if d == "pipe":
         pipe_files.append(p)
     elif d == "comma":
@@ -135,10 +104,7 @@ fips_00["state_code"] = fips_00["fips"].astype(str).str[:2]
 fips_00["county_code"] = fips_00["fips"].astype(str).str[-3:]
 
 # create year col + dupe data for each year where its applicable 
-years = list(range(2000, 2010))
-year_df = pd.DataFrame({"year": years})
-fips_00_expanded = fips_00.merge(year_df, how="cross")
-fips_00_expanded = fips_00_expanded.reset_index(drop=True)
+fips_00_expanded = expand_years_cross(fips_00, range(2000, 2010))
 
 # manual creation of the 1990 codes given the states similarities 
 fips_90 = fips_00
@@ -167,10 +133,7 @@ new_row2 = {
 
 fips_90 = pd.concat([fips_90, pd.DataFrame([new_row1, new_row2])], ignore_index=True)
 # add the years
-yrs0 = list(range(1990, 2000))
-yrs0df = pd.DataFrame({"year": yrs0})
-fips_90_expanded = fips_90.merge(yrs0df, how="cross")
-fips_90_expanded = fips_90_expanded.reset_index(drop=True)
+fips_90_expanded = expand_years_cross(fips_90, range(1990, 2000))
 
 
 # comma file (2010)
@@ -190,19 +153,17 @@ fips_10 = fips_10.drop_duplicates(subset='FIPS_generated', keep='first')
 
 
 # add years into the dataframe with empty columns
-yrs2 = list(range(2010, 2020))
-yrs2df = pd.DataFrame({"year": yrs2})
-fips_10_expanded = fips_10.merge(yrs2df, how="cross")
-fips_10_expanded = fips_10_expanded.reset_index(drop=True)
+fips_10_expanded = expand_years_cross(fips_10, range(2010, 2020))
  
 
 # pipe-delimited files (2020)
 pipe_dfs = []
 for p in pipe_files:
     try:
-        df = pd.read_csv(p, sep="|", engine="python", encoding="utf-8")
-    except UnicodeDecodeError:
-        df = pd.read_csv(p, sep="|", engine="python", encoding="latin1")
+        df = read_csv_with_fallback(p, sep="|", engine="python")
+    except Exception as e:
+        print(f"Failed to read {p}: {e}")
+        continue
     df["source_file"] = os.path.basename(p)
     pipe_dfs.append(df)
     
@@ -216,10 +177,7 @@ fips_20 = fips_20.drop_duplicates(subset='FIPS_generated', keep='first')
 
   
 # add years into the dataframe with empty columns
-yrs3 = list(range(2020, 2025))
-yrs3df = pd.DataFrame({"year": yrs3})
-fips_20_expanded = fips_20.merge(yrs3df, how="cross")
-fips_20_expanded = fips_20_expanded.reset_index(drop=True)
+fips_20_expanded = expand_years_cross(fips_20, range(2020, 2025))
 
 # change county, state code colnames to ensure merge works 
 fips_90_expanded.columns.tolist()
@@ -305,32 +263,11 @@ fips_annual_full.loc[
 
 
 
-# remove state level values (keeping DC), based on county_code
-fips_annual_full_v2 = fips_annual_full[
-    ~((fips_annual_full['county_code'] == "000") &
-      (fips_annual_full['county'] != "District of Columbia"))
-].copy()
-
-
-# standardize identifier columns
-fips_annual_full_v2["state_code"] = (
-    fips_annual_full_v2["state_code"].astype(str).str.extract(r"(\d+)")[0].str.zfill(2)
-)
-fips_annual_full_v2["county_code"] = (
-    fips_annual_full_v2["county_code"].astype(str).str.extract(r"(\d+)")[0].str.zfill(3)
-)
-fips_annual_full_v2["fips"] = pd.to_numeric(fips_annual_full_v2["fips"], errors="coerce").astype("Int64")
-
-
-# normalize DC to county-equivalent FIPS 11001 across all years
-dc_mask = fips_annual_full_v2["county"].astype(str).str.contains("District of Columbia", case=False, na=False)
-fips_annual_full_v2.loc[dc_mask, "state_code"] = "11"
-fips_annual_full_v2.loc[dc_mask, "county_code"] = "001"
-fips_annual_full_v2.loc[dc_mask, "fips"] = 11001
-
-
-# keep US counties + DC only
-fips_annual_full_v2 = fips_annual_full_v2[fips_annual_full_v2["state_code"].isin(US_STATE_CODES)].copy()
+# remove state-level rows (keeping DC), standardize keys, and normalize DC FIPS
+fips_annual_full_v2 = drop_state_level_rows_except_dc(fips_annual_full)
+fips_annual_full_v2 = standardize_county_identifiers(fips_annual_full_v2, fips_as_string=False)
+fips_annual_full_v2 = normalize_dc_fips(fips_annual_full_v2, fips_value="11001")
+fips_annual_full_v2 = filter_to_us_state_codes(fips_annual_full_v2)
 
 
 # drop historical state-level DC key if present
@@ -428,7 +365,6 @@ print(col_presence)
 # clean up enviro for coding  
 del all_cols, all_columns, col_counts, col_lists, col_presence,     
 del ws_dfs, ws_files
-del yrs0, yrs2, yrs0df, yrs2df, yrs3, yrs3df
 
 
 # ----------------------- DATA PART 5 : REPEAT POP DATA  -------------------- -#
@@ -641,27 +577,12 @@ df2010_full_v2.columns.tolist()
 # concanate all population data 
 full_pop_df = pd.concat([df1990s_full, df2000s_full, df2010_full_v2, df2024_full], ignore_index=True, sort=False)
 
-full_pop_df["state_code"] = (
-    full_pop_df["state_code"].astype(str).str.extract(r"(\d+)")[0].str.zfill(2)
-)
-full_pop_df["county_code"] = (
-    full_pop_df["county_code"].astype(str).str.extract(r"(\d+)")[0].str.zfill(3)
-)
-full_pop_df["fips"] = (
-    pd.to_numeric(full_pop_df["fips"], errors="coerce")
-    .astype("Int64")
-    .astype("string")
-    .str.zfill(5)
-)
-full_pop_df["year"] = pd.to_numeric(full_pop_df["year"], errors="coerce").astype("Int64")
+full_pop_df = standardize_county_identifiers(full_pop_df, fips_as_string=True)
 full_pop_df["population"] = pd.to_numeric(full_pop_df["population"], errors="coerce")
 
 # normalize DC and keep US-only scope
-dc_mask2 = full_pop_df["county"].astype(str).str.contains("District of Columbia", case=False, na=False)
-full_pop_df.loc[dc_mask2, "state_code"] = "11"
-full_pop_df.loc[dc_mask2, "county_code"] = "001"
-full_pop_df.loc[dc_mask2, "fips"] = "11001"
-full_pop_df = full_pop_df[full_pop_df["state_code"].isin(US_STATE_CODES)].copy()
+full_pop_df = normalize_dc_fips(full_pop_df, fips_value="11001")
+full_pop_df = filter_to_us_state_codes(full_pop_df)
 full_pop_df = full_pop_df[full_pop_df["fips"] != "11000"].copy()
 full_pop_df = full_pop_df.dropna(subset=["fips", "year"]).copy()
 full_pop_df = full_pop_df.sort_values(["fips", "year"]).drop_duplicates(["fips", "year"], keep="last")
@@ -699,7 +620,3 @@ print("\nData types:", full_pop_df["state_code"].dtype)
 clean_pop_df = f"{today_str}_population_full.csv"
 poppath = os.path.join(clean_dir, clean_pop_df)
 full_pop_df.to_csv(poppath, index=False)
-
-
-
-

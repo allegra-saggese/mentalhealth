@@ -11,10 +11,10 @@ Rules:
 """
 
 import os
-import re
 from datetime import date
 
 import pandas as pd
+from functions import latest_file_by_regex, normalize_zip5, normalize_fips5, first_non_null
 
 
 db_base = os.path.expanduser("~/Dropbox/Mental")
@@ -26,34 +26,10 @@ os.makedirs(qa_dir, exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")
 
 
-def _latest_file(dirpath: str, pattern: str) -> str:
-    pat = re.compile(pattern)
-    candidates = []
-    for fn in os.listdir(dirpath):
-        m = pat.match(fn)
-        if m:
-            candidates.append((m.group(1), os.path.join(dirpath, fn)))
-    if not candidates:
-        raise FileNotFoundError(f"No file matching pattern in {dirpath}: {pattern}")
-    candidates.sort(key=lambda x: x[0])
-    return candidates[-1][1]
-
-
-def _normalize_zip(series: pd.Series) -> pd.Series:
-    s = series.astype("string").str.strip()
-    return s.str.extract(r"(\d{5})", expand=False)
-
-
-def _normalize_fips(series: pd.Series) -> pd.Series:
-    s = series.astype("string").str.strip().str.extract(r"(\d+)", expand=False)
-    s = s.where(s.str.len().isin([4, 5]), pd.NA)
-    s = s.where(s.str.len() != 4, "0" + s)
-    return s
-
-
-def _first_non_null(series: pd.Series):
-    s = series.dropna()
-    return s.iloc[0] if len(s) else pd.NA
+_latest_file = latest_file_by_regex
+_normalize_zip = normalize_zip5
+_normalize_fips = normalize_fips5
+_first_non_null = first_non_null
 
 
 def _build_county_year(df: pd.DataFrame) -> pd.DataFrame:

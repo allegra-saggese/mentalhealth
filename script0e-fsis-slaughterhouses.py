@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from functions import first_non_null, normalize_fips5
 
 
 # Paths (kept aligned with project conventions in packages.py)
@@ -179,9 +180,7 @@ def _mode_non_null(s: pd.Series):
     return vc.index[0] if len(vc) else pd.NA
 
 
-def _first_non_null(s: pd.Series):
-    s = s.dropna()
-    return s.iloc[0] if len(s) else pd.NA
+_first_non_null = first_non_null
 
 
 def _collapse_operation_category(s: pd.Series):
@@ -222,11 +221,7 @@ def _normalize_est_number(s: pd.Series) -> pd.Series:
     return out
 
 
-def _normalize_fips(s: pd.Series) -> pd.Series:
-    out = s.astype("string").str.replace(r"\.0$", "", regex=True)
-    out = out.str.replace(r"\D", "", regex=True).str.zfill(5)
-    out = out.where(out.str.len() == 5, pd.NA)
-    return out
+_normalize_fips = normalize_fips5
 
 
 def _family_from_path(path: str) -> str:

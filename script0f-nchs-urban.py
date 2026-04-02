@@ -17,8 +17,8 @@ outf = os.path.join(db_data, "clean")
 # input file
 csv_path = os.path.join(inf, "NCHSurb-rural-codes.csv")
 
-# read (latin1 encoding needed)
-df = pd.read_csv(csv_path, encoding="latin1")
+# read with encoding fallback
+df = read_csv_with_fallback(csv_path)
 
 # clean columns
 df.columns = df.columns.str.lower().str.strip()

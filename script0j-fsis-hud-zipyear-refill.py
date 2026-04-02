@@ -23,6 +23,7 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 import requests
+from functions import normalize_zip5, first_non_null, STATE_ABBR_TO_FIPS2
 
 
 db_base = os.path.expanduser("~/Dropbox/Mental")
@@ -34,28 +35,8 @@ os.makedirs(qa_dir, exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")
 HUD_URL = "https://www.huduser.gov/hudapi/public/usps"
 
-STATE_ABBR_TO_FIPS2 = {
-    "AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08",
-    "CT": "09", "DE": "10", "DC": "11", "FL": "12", "GA": "13", "HI": "15",
-    "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21",
-    "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27",
-    "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33",
-    "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39",
-    "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46",
-    "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53",
-    "WV": "54", "WI": "55", "WY": "56", "PR": "72", "VI": "78", "GU": "66",
-    "MP": "69", "AS": "60",
-}
-
-
-def _normalize_zip(series: pd.Series) -> pd.Series:
-    s = series.astype("string").str.strip()
-    return s.str.extract(r"(\d{5})", expand=False)
-
-
-def _first_non_null(series: pd.Series):
-    s = series.dropna()
-    return s.iloc[0] if len(s) else pd.NA
+_normalize_zip = normalize_zip5
+_first_non_null = first_non_null
 
 
 def _latest_source_path() -> str:

@@ -30,11 +30,7 @@ def _pop_cols(df):
     return [c for c in df.columns if pat.search(c)]
 
 
-def _to_num(s):
-    return pd.to_numeric(
-        s.astype("string").str.replace(",", "", regex=False).str.strip(),
-        errors="coerce",
-    )
+_to_num = to_numeric_series
 
 
 def _pick_reference(cols):

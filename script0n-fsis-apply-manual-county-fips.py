@@ -14,10 +14,16 @@ Rules:
 """
 
 import os
-import re
 from datetime import date
 
 import pandas as pd
+from functions import (
+    latest_file_by_regex,
+    normalize_fips5,
+    normalize_text_upper,
+    first_non_null,
+    STATE_ABBR_TO_FIPS2,
+)
 
 
 db_base = os.path.expanduser("~/Dropbox/Mental")
@@ -28,47 +34,10 @@ os.makedirs(qa_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
 
-STATE_ABBR_TO_FIPS2 = {
-    "AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08",
-    "CT": "09", "DE": "10", "DC": "11", "FL": "12", "GA": "13", "HI": "15",
-    "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21",
-    "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27",
-    "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33",
-    "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39",
-    "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46",
-    "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53",
-    "WV": "54", "WI": "55", "WY": "56", "PR": "72", "VI": "78", "GU": "66",
-    "MP": "69", "AS": "60",
-}
-
-
-def _latest_file(dirpath: str, pattern: str) -> str:
-    pat = re.compile(pattern)
-    candidates = []
-    for fn in os.listdir(dirpath):
-        m = pat.match(fn)
-        if m:
-            candidates.append((m.group(1), os.path.join(dirpath, fn)))
-    if not candidates:
-        raise FileNotFoundError(f"No file matching pattern in {dirpath}: {pattern}")
-    candidates.sort(key=lambda x: x[0])
-    return candidates[-1][1]
-
-
-def _normalize_fips(series: pd.Series) -> pd.Series:
-    s = series.astype("string").str.strip().str.extract(r"(\d+)", expand=False)
-    s = s.where(s.str.len().isin([4, 5]), pd.NA)
-    s = s.where(s.str.len() != 4, "0" + s)
-    return s
-
-
-def _normalize_text(series: pd.Series) -> pd.Series:
-    return series.astype("string").str.upper().str.strip()
-
-
-def _first_non_null(series: pd.Series):
-    s = series.dropna()
-    return s.iloc[0] if len(s) else pd.NA
+_latest_file = latest_file_by_regex
+_normalize_fips = normalize_fips5
+_normalize_text = normalize_text_upper
+_first_non_null = first_non_null
 
 
 def _build_county_year(df: pd.DataFrame) -> pd.DataFrame:

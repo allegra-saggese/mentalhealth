@@ -17,7 +17,7 @@ from functions import *
 # load data
 db_base = os.path.expanduser("~/Dropbox/Mental") # base for later
 rdfile = "~/Dropbox/Mental/Data/20250725_annual_CAIFO_df.csv"
-df = pd.read_csv(rdfile)
+df = read_csv_with_fallback(os.path.expanduser(rdfile))
 
 
 # purpose: Ridge regression trial 1
@@ -172,7 +172,6 @@ plt.close()
 
 
 # NEXT:  create loop over sets of y to just automate the ridge run 
-
 
 
 

@@ -17,6 +17,7 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+from functions import latest_file_by_regex, first_non_null
 
 
 db_base = os.path.expanduser("~/Dropbox/Mental")
@@ -31,16 +32,10 @@ today_str = date.today().strftime("%Y-%m-%d")
 
 
 def _latest_est_year_all_path() -> str:
-    pat = re.compile(r"^(\d{4}-\d{2}-\d{2})_fsis_establishment_year_all\.csv$")
-    candidates = []
-    for fn in os.listdir(clean_dir):
-        m = pat.match(fn)
-        if m:
-            candidates.append((m.group(1), os.path.join(clean_dir, fn)))
-    if not candidates:
-        raise FileNotFoundError(f"No *_fsis_establishment_year_all.csv files found in {clean_dir}")
-    candidates.sort(key=lambda t: t[0])
-    return candidates[-1][1]
+    return latest_file_by_regex(
+        clean_dir,
+        r"^(\d{4}-\d{2}-\d{2})_fsis_establishment_year_all\.csv$",
+    )
 
 
 def _norm_text(s: pd.Series) -> pd.Series:
@@ -49,9 +44,7 @@ def _norm_text(s: pd.Series) -> pd.Series:
     return out
 
 
-def _first_non_null(series: pd.Series):
-    s = series.dropna()
-    return s.iloc[0] if len(s) else pd.NA
+_first_non_null = first_non_null
 
 
 def main():
