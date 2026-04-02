@@ -19,10 +19,10 @@ merged_dir = os.path.join(db_data, "merged")
 # Merge configuration
 BASE_DESCRIPTOR = "cafo_ops_by_size_compact"
 MERGE_DESCRIPTORS = {
+    "cdc_county_year_deathsofdespair",
     "crime_fips_level_final",
     "fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
     "mentalhealthrank_full",
-    "mh_mortality_fips_yr",
     "population_full",
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
