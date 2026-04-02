@@ -385,34 +385,6 @@ def nass_get_data(base_url: str, params: dict):
     return pd.DataFrame(data)
 
 
-# data cleaning - checking missing percentages 
-# used in: currently none
-def percent_missing_vs_filled(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Returns a DataFrame with, for each column in `df`:
-      - missing_pct:    percentage of NA values
-      - filled_pct:     percentage of non-NA (numeric) values
-    """
-    # total rows
-    total = len(df)
-
-    # count missing per column
-    missing_count = df.isna().sum()
-
-    # compute percentages
-    missing_pct = missing_count / total * 100
-    filled_pct = 100 - missing_pct
-
-    # assemble summary
-    summary = pd.DataFrame({
-        'missing_pct': missing_pct,
-        'filled_pct':  filled_pct
-    })
-
-    return summary
-
-
-
 # FIPS code generator from individual city - state cols 
 
 # used in: script0a-pop-fips-raw-merge.py, script0b-ag-raw.py, script0b-ag-raw-v2.py, script0f-nchs-urban.py
@@ -436,27 +408,6 @@ def generate_fips(df, state_col="state", city_col="city"):
     df.drop(columns=["state_padded", "city_padded"], inplace=True)
 
     return df
-
-
-
-# Appending lists of column names for sorting
-
-# used in: currently none
-def append_cols(existing_list, new_cols):
-    """Append new columns to existing list, avoiding duplicates."""
-    for col in new_cols:
-        if col not in existing_list:
-            existing_list.append(col)
-    return existing_list
-
-
-# Sorting lists of dataframes 
-
-# used in: currently none
-def keep_only_cols(dfs, cols_to_keep):
-    """Return new list of DataFrames with only specified columns (keep order)."""
-    return [df[[col for col in cols_to_keep if col in df.columns]] for df in dfs]
-
 
 # simple / standard colname cleaning
 
@@ -511,27 +462,6 @@ def read_and_prepare(path):
 
 ##### CAFO MAPPING FUNCTIONS ##### 
 
-# wrapper for ambiguous descriptions 
-# used in: currently none
-def map_ambiguous(df, mapping, keywords, unit_label):
-    """
-    df: dataframe
-    mapping: mapping dict (e.g., sales_map)
-    keywords: list of substrings to look for in short_desc related to the type of animal 
-    unit_label: suffix for the output column (e.g., 'sales_size')
-    """
-    for kw in keywords:
-        mask = (
-            df['domaincat_desc'].isin(mapping.keys()) &
-            df['short_desc'].str.contains(kw, case=False, na=False)
-        )
-        out_col = f"{kw.lower().replace(',', '').replace(' ', '_')}_{unit_label}"
-        df[out_col] = df.loc[mask, 'domaincat_desc'].map(mapping).astype('Int64')
-        
-keywords = ['poultry', 'chickens, layers', 'chickens, broilers', 'cattle', 'hogs']
-
-
-
 # make a wrapper to map the inventory the same way in all of them 
 # used in: script0b-ag-raw.py
 def map_size(df, mapping, unit_match, out_col):
@@ -548,25 +478,3 @@ def map_size_class(df, mapping, unit_match, class_match, out_col):
     if class_match is not None:
         mask = mask & (df["class_desc"] == class_match)
     df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
-
-
-
-# creating CAFO thresholds 
-# used in: currently none
-def assign_size(df, col, med_thresh, lrg_thresh):
-    df = df.copy()
-    # keep Int64Dtype and use nullable comparisons
-    cond_large  = df[col].ge(lrg_thresh)
-    cond_medium = df[col].ge(med_thresh) & df[col].lt(lrg_thresh)
-    cond_small  = df[col].lt(med_thresh)
-
-    df['size'] = pd.Series(pd.NA, index=df.index, dtype="string")
-    df.loc[cond_large.fillna(False), 'size']  = 'large'
-    df.loc[cond_medium.fillna(False), 'size'] = 'medium'
-    df.loc[cond_small.fillna(False), 'size']  = 'small'
-
-    df['size_col'] = col
-    return df
-
-
-
