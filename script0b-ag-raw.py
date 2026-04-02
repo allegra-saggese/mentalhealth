@@ -6,9 +6,8 @@ Created on Mon Aug 11 15:19:00 2025
 @author: allegrasaggese
 """
 
-# CANONICAL AG/CAFO BUILD SCRIPT:
-# This script writes `*_cafo_ops_by_size_compact.csv`, which is consumed downstream
-# by merge and analysis scripts.
+# ----------------------- SET UP PART 1 : set repos / outputs / purpose  -------------------- -#
+# output: This script writes `*_cafo_ops_by_size_compact.csv`, which is consumed downstream
 
 # load packages and workspaces
 import sys, importlib.util
@@ -42,9 +41,13 @@ inf = os.path.join(db_data, "raw") # input
 outf = os.path.join(db_data, "clean") #output
 
 
-# API setup
+# ----------------------- SET UP PART 2 : PULL USDA FROM API  -------------------- -#
+# Purpose: pull the data directly from the API (avoiding the existind .dta files)
+
+# set KEY for API 
 os.environ["USDA_NASS_API_KEY"] = "30643212-7739-359A-B451-0EAD3D345DB9" # will have to change for user
-# Pull USDA NASS Quick Stats data directly instead of reading .dta files.
+
+# pull USDA NASS Quick Stats data directly instead of reading .dta files 
 USE_API = True
 NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY") 
 if USE_API and not NASS_API_KEY:
@@ -53,7 +56,7 @@ if USE_API and not NASS_API_KEY:
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
 
 
-# Filters (user-specified)
+# set filters (user-specified)
 source_desc = "CENSUS"
 agg_level_desc = "COUNTY"
 sector_desc = "ANIMALS & PRODUCTS"
@@ -62,10 +65,10 @@ commodity_desc_allow = ["CATTLE", "CHICKENS", "HOGS"]
 unit_desc_allow = ["HEAD", "OPERATIONS"]
 statisticcat_desc_allow = ["INVENTORY", "OPERATIONS"]
 
-# Census years only
+# take the census years only - where data is actually recorded 
 census_years = [2002, 2007, 2012, 2017]
 
-# Commodity-specific domain splits used only when a query exceeds 50k rows.
+# take cmmodity-specific domain splits used only when a query exceeds 50k rows (otherwise its too intensive)
 commodity_domain_splits = {
     "CATTLE": [
         "INVENTORY",
@@ -85,6 +88,7 @@ commodity_domain_splits = {
 }
 
 
+# create function to define a call in the API for the ag data 
 def fetch_ag_data():
     def _keep_inventory_domaincat(df):
         """Keep only rows where domaincat_desc starts with 'inventory' (case-insensitive)."""
@@ -117,7 +121,7 @@ def fetch_ag_data():
     for yr in census_years:
         for cmd in commodity_desc_allow:
             for unit in unit_desc_allow:
-                for stat in statisticcat_desc_allow:
+                for stat in statisticcat_desc_allow: # call the units we want to pull
                     time.sleep(rate_sleep)
                     base_params = {
                         "key": NASS_API_KEY,
@@ -140,7 +144,7 @@ def fetch_ag_data():
                             frames.append(df_pull)
                         continue
 
-                    # Still too large: split by commodity-specific domain_desc values.
+                    # Still too large: split by commodity-specific domain_desc values
                     for dd in commodity_domain_splits.get(cmd, []):
                         time.sleep(rate_sleep)
                         dd_params = dict(base_params)
@@ -174,6 +178,7 @@ if USE_API:
         print("API fetch failed; falling back to local .dta files.")
         print("Reason:", e)
 
+# if it fails to output 
 if combined.empty:
     agfolder = os.path.join(inf, "usda")
     agfiles = glob.glob(os.path.join(agfolder, "*.dta"))
@@ -183,27 +188,29 @@ if combined.empty:
     combined = pd.concat(agdfs, ignore_index=True)
     print(f"Loaded {len(combined):,} rows from local .dta files")
     
- # ---------- Secondary API backfill for 2012 + 2017 (relaxed) ----------
-# due to API failures with 2012, 2017 data - backfilling with old ag data 
+    
+    
+# ----------------------- SET UP PART 3 : PULL USDA FROM API / BACKFILL SETTING   -------------------- -#
 
+# due to API failures with 2012, 2017 data - backfilling with old ag data (made with han earlier version of the script - will have to fork it from GitHub to use) 
 donor_path = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/2026-02-09_ag_annual_df.csv"
 
-# 1) standardize both dataframes
+# standardize both dataframes
 combined_c = clean_cols(combined).copy()
 donor = clean_cols(pd.read_csv(donor_path, low_memory=False)).copy()
 
-# 2) drop duplicate column names (critical for concat)
+# drop duplicate column names (critical for concat)
 combined_c = combined_c.loc[:, ~combined_c.columns.duplicated()].copy()
 donor = donor.loc[:, ~donor.columns.duplicated()].copy()
 
-# 3) normalize donor filter columns
+# normalize donor filter columns
 for c in ["commodity_desc", "unit_desc", "statisticcat_desc"]:
     if c in donor.columns:
         donor[c] = donor[c].astype("string").str.strip().str.lower()
 
 donor["year"] = pd.to_numeric(donor["year"], errors="coerce").astype("Int64")
 
-# 4) keep only 2012 + 2017 and core commodities
+# keep only 2012 + 2017 and core commodities
 backfill = donor[
     donor["year"].isin([2012, 2017]) &
     donor["commodity_desc"].isin(["cattle", "chickens", "hogs"])
@@ -212,12 +219,12 @@ backfill = donor[
 print("backfill rows:", len(backfill))
 print(backfill.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
 
-# 5) align schemas safely (union of columns)
+# align schemas safely (union of columns)
 all_cols = sorted(set(combined_c.columns) | set(backfill.columns))
 combined_c = combined_c.reindex(columns=all_cols)
 backfill = backfill.reindex(columns=all_cols)
 
-# 6) append; do not overwrite existing rows
+# concenate data 
 before = len(combined_c)
 combined = pd.concat([combined_c, backfill], ignore_index=True)
 combined = combined.drop_duplicates(ignore_index=True)
@@ -227,7 +234,7 @@ print("combined before:", before)
 print("combined after :", after)
 print("rows added     :", after - before)
 
-# 7) quick confirmation of 2012/2017 operations presence
+# check we have ops in presence 
 chk = combined.copy()
 for c in ["commodity_desc", "unit_desc"]:
     chk[c] = chk[c].astype("string").str.strip().str.lower()
@@ -236,8 +243,9 @@ chk = chk[
     chk["commodity_desc"].isin(["cattle", "chickens", "hogs"]) &
     chk["year"].isin([2012, 2017])
 ]
-print(chk.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
 
+# quick eye-ball QA 
+print(chk.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
 print(df_big["year"].min(), df_big["year"].max())                      # expect max up to 2021
 print(df2[df2["size_source"].notna()]["year"].max())                   # should be > 2011 now
 print(summary_compact["year"].min(), summary_compact["year"].max())    # should extend beyond 2011
@@ -245,7 +253,8 @@ print(summary_compact["year"].min(), summary_compact["year"].max())    # should 
 print(combined["year"].value_counts().sort_index().tail(10))
 
 
-################## DATA CLEANING FOR ALL AG DATA ######################
+
+# ----------------------- DATA PART 1 : QUALITY ASSURANCE  -------------------- -#
 
 # basic QA
 print("Columns:", sorted(combined.columns))
@@ -268,6 +277,7 @@ class_keep_map = {
     "hogs": {"all classes","breeding"},
 }
 
+# check subset of the dataframe, checkc to see we have the necessary values in each column 
 df_sub = df[
     (df["commodity_desc"].isin(comms_of_interest)) &
     (df["unit_desc"].isin(["operations", "head"])) &
@@ -294,8 +304,9 @@ df_sub["statisticcat_desc"].value_counts()
 
 
 
-########### DATA CLEANING FOR ALL FIPS / AG -- ENSURE MATCH ####################
 
+
+# ----------------------- DATA PART 2 : MATCH FIPS to AG DATA   -------------------- -#
 
 matches = glob.glob(os.path.join(outf, "*fips_full*.csv")) # pull the most recent fips file 
 if matches:
@@ -324,7 +335,8 @@ if dupe_key:
 
 
 
-########### DATA CLEANING FOR ALL AG DATA - ITERATING OVER MISSING YRS ####################
+
+# ----------------------- DATA PART 3 : FORWARD FILL MISSING AG DATA   -------------------- -#
 
 # prep ag raw df for iteration, then export and saving
 ag_raw_df = clean_cols(combined)
@@ -387,7 +399,7 @@ df_big = df_big.merge(
     indicator=True,
 )
 
-print("FIPS merge status:")
+print("FIPS merge status:") # check merge status 
 print(df_big["_merge"].value_counts(dropna=False))
 
 def _norm_county_name(s):
@@ -397,6 +409,7 @@ def _norm_county_name(s):
     s = s.str.replace(r"\s+", " ", regex=True).str.strip()
     return s
 
+# reset names in the variables 
 df_big["county_name_norm"] = _norm_county_name(df_big["county_name"])
 df_big["county_fips_name_norm"] = _norm_county_name(df_big["county_fips_name"])
 
@@ -409,12 +422,13 @@ name_mismatch = df_big[
 missing_fips_key = df_big[df_big["_merge"] != "both"].copy()
 
 
-today_str = date.today().strftime("%Y-%m-%d")
 
 clean_ag_census = f"{today_str}_ag_annual_df.csv"
 ag_path = os.path.join(outf, clean_ag_census)
-df_big.to_csv(ag_path, index=False)
+df_big.to_csv(ag_path, index=False) # save a version of the clean, large agriculture census data set as an interim output 
 print("Saved iterated AG panel:", ag_path)
+
+
 
 review_outf = "/Users/allegrasaggese/Dropbox/Mental/allegra-dropbox-copy/interim-data"
 os.makedirs(review_outf, exist_ok=True)
@@ -422,16 +436,19 @@ mismatch_path = os.path.join(review_outf, f"{today_str}_ag_fips_name_mismatch.cs
 missing_key_path = os.path.join(review_outf, f"{today_str}_ag_fips_missing_key.csv")
 name_mismatch.to_csv(mismatch_path, index=False)
 missing_fips_key.to_csv(missing_key_path, index=False)
+# print out a QA to see if we need to manually check any fips codes 
 print("Saved county-name mismatch rows for manual review:", mismatch_path)
 print("Saved missing fips-year key rows for manual review:", missing_key_path)
 
 
 
-################### STAGE 2: BUILD CAFO SIZE STRUCTURE #####################
+# ----------------------- ANALYSIS PART 1 : DEFINE CAFO VARIABLES   -------------------- -#
 # Input for Stage 2 is df_big from Stage 1 (iterated annual panel with FIPS merge).
 
+# new copy - this way we don't mess up the data cleaning stage 
 df_cafo = df_big.copy()
 
+# these are just the vars we need to keep that contain the info relevant for our analysis
 for c in [
     "domaincat_desc", "unit_desc", "statisticcat_desc", "domain_desc",
     "commodity_desc", "group_desc", "class_desc"
@@ -439,8 +456,11 @@ for c in [
     if c in df_cafo.columns:
         df_cafo[c] = df_cafo[c].astype("string").str.strip().str.lower()
 
+# picking commodities of interest
 comms_of_interest = ["cattle", "chickens", "hogs"]
 
+
+# within each of the commodities, there are sub-categories, so we map these classes 
 class_keep_map = {
     "cattle": {
         "incl calves",
@@ -465,7 +485,7 @@ class_keep_map = {
     },
 }
 
-# Keep inventory-bin rows and both statistic categories requested.
+# keeping inventory bins most crucially, and the the other vars within the dataframe
 df_sub = df_cafo[
     (df_cafo["commodity_desc"].isin(comms_of_interest))
     & (df_cafo["unit_desc"].isin(["operations", "head"]))
@@ -482,6 +502,7 @@ pair_index = pd.MultiIndex.from_frame(df_sub[["commodity_desc", "class_desc"]])
 allowed_index = pd.MultiIndex.from_tuples(sorted(allowed_pairs))
 df_sub = df_sub[pair_index.isin(allowed_index)].copy()
 
+# print the QA so we can see how many of each var remain 
 print("Stage 2 df_sub rows:", len(df_sub))
 print("Stage 2 commodity mix:")
 print(df_sub["commodity_desc"].value_counts(dropna=False))
@@ -490,7 +511,9 @@ print(df_sub["unit_desc"].value_counts(dropna=False))
 print("Stage 2 statistic mix:")
 print(df_sub["statisticcat_desc"].value_counts(dropna=False))
 
-# Inventory-bin mappings preserved from script0b-ag-raw-v2.
+
+
+# Inventory-bin mappings (preserved from script0b-ag-raw-v2) which just label the text descriptions numerically for ease 
 layer_map = {
     "inventory: (1 to 49 head)": 1,
     "inventory: (50 to 99 head)": 2,
@@ -570,6 +593,8 @@ beef_cows_map = {
     "inventory of beef cows: (500 or more head)": 7,
 }
 
+
+# apply mapping to the data 
 map_size_class(df_sub, layer_map, unit_match="operations", class_match="layers", out_col="layer_ops_size")
 map_size_class(df_sub, layer_map, unit_match="operations", class_match="broilers", out_col="broiler_ops_size")
 
@@ -581,7 +606,7 @@ map_size(df_sub, cattle_inv_map_no_cows, unit_match="operations", out_col="cattl
 map_size(df_sub, cattle_feed_map, unit_match="operations", out_col="cattle_feed_ops_size_inv")
 map_size(df_sub, beef_cows_map, unit_match="operations", out_col="beef_ops_size_inv")
 
-# Numeric-bin thresholds for S/M/L assignment (preserved).
+# Create a numeric-bin thresholds for S/M/L assignment (preserved from CAFO - USDA definition, roughly) 
 broiler_cutoff_lrg = 5
 broiler_cutoff_med = 3
 layer_cutoff_lrg = 9
@@ -591,6 +616,7 @@ cattle_cutoff_med = 6
 hog_cutoff_lrg = 7
 hog_cutoff_med = 6
 
+# define them as thresholds 
 col_thresholds = {
     "layer_ops_size": (layer_cutoff_med, layer_cutoff_lrg),
     "broiler_ops_size": (broiler_cutoff_med, broiler_cutoff_lrg),
@@ -603,7 +629,7 @@ col_thresholds = {
     "breed_hog_ops_size_inv": (hog_cutoff_med, hog_cutoff_lrg),
 }
 
-
+# create a way to categorize them 
 def categorize_code(v, med, lrg):
     if pd.isna(v):
         return pd.NA
@@ -614,17 +640,19 @@ def categorize_code(v, med, lrg):
     return "large"
 
 
-df2 = df_sub.copy()
+# ----------------------- ANALYSIS PART 2 : CREATE CAFO VARIABLES   -------------------- -#
+df2 = df_sub.copy() # make another copy after the classification and before the development of new variables 
 df2["size_class"] = pd.Series(pd.NA, index=df2.index, dtype="string")
 df2["size_source"] = pd.Series(pd.NA, index=df2.index, dtype="string")
 
+# create categorization
 for col, (med, lrg) in col_thresholds.items():
     codes = df2[col]
     take = codes.notna() & df2["size_source"].isna()
     df2.loc[take, "size_class"] = codes[take].apply(categorize_code, args=(med, lrg))
     df2.loc[take, "size_source"] = col
 
-# Keep operations counts in each inventory bin.
+# Keep operations counts in each inventory bin 
 df2["ops_in_bin"] = pd.to_numeric(
     df2["value"]
     .astype("string")
@@ -634,13 +662,13 @@ df2["ops_in_bin"] = pd.to_numeric(
     errors="coerce",
 )
 
-# Row-level CAFO flags (mapped rows only).
+# Row-level CAFO flags (mapped rows only) 
 df2["is_large_cafo_row"] = ((df2["size_class"] == "large") & df2["size_source"].notna()).astype("Int8")
 df2["is_medium_or_large_cafo_row"] = (
     df2["size_class"].isin(["medium", "large"]) & df2["size_source"].notna()
 ).astype("Int8")
 
-# Compact long summary: county-year-commodity-class-size.
+# Compact long summary: county-year-commodity-class-size 
 summary = (
     df2[df2["size_source"].notna()]
     .groupby(
@@ -660,7 +688,7 @@ summary = (
     .rename(columns={"ops_in_bin": "sum_ops"})
 )
 
-# County-year compact table with small/medium/large columns.
+# County-year compact table with small/medium/large columns
 summary_compact = (
     summary.pivot_table(
         index=["year", "fips_generated", "county_fips_name", "commodity_desc", "class_desc"],
@@ -680,6 +708,8 @@ summary_compact["any_medium_or_large_cafo"] = (
     (summary_compact["medium"] + summary_compact["large"]) > 0
 ).astype("Int8")
 
+
+# QA - print on the missing values, and the total values of the vars for manual inspection
 print("Stage 2 mapped rows:", int(df2["size_source"].notna().sum()))
 print("Stage 2 size class counts:")
 print(df2["size_class"].value_counts(dropna=False))
@@ -690,8 +720,10 @@ print(df2[df2["size_source"].notna()]["year"].value_counts().sort_index().tail(1
 print(summary["year"].min(), summary["year"].max())
 print(summary_compact["year"].min(), summary_compact["year"].max())
 
-################### STAGE 3: EXPORT CAFO OUTPUTS #####################
 
+# ----------------------- ANALYSIS PART 3: EXPORT   -------------------- -#
+
+# create different versions of the CAFO data, we will use the cafo_ops given ops categorization is most important 
 clean_cafo_row = f"{today_str}_cafo_annual_df.csv"
 clean_cafo_long = f"{today_str}_cafo_ops_by_size_long.csv"
 clean_cafo_compact = f"{today_str}_cafo_ops_by_size_compact.csv"
