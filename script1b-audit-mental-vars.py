@@ -3,6 +3,12 @@
 """
 Mental-health coverage and panel-integrity audit for the merged county-year panel.
 Outputs to: Dropbox/Mental/Data/merged/figs/panel-sumstats-by-farms
+
+Quick purpose:
+- Audits panel key integrity (`fips, year`) and source-duplication markers.
+- Inventories mental-health variables and their year-by-year coverage.
+- Checks cross-source duplication consistency for key mental outcomes.
+- Writes QA tables used for summary-stat and data-readiness review.
 """
 
 from packages import *
@@ -34,12 +40,11 @@ CORE_MENTAL_OUTCOMES = [
     "frequent_mental_distress_raw_value_mentalhealthrank_full",
     "mental_health_providers_raw_value_mentalhealthrank_full",
     "excessive_drinking_raw_value_mentalhealthrank_full",
-    "poor_mental_health_days_raw_value_mh_mortality_fips_yr",
-    "frequent_mental_distress_raw_value_mh_mortality_fips_yr",
 ]
 
 CORE_CONTEXT_COLS = [
-    "mortality_total_deaths_mh_mortality_fips_yr",
+    "deaths_cdc_county_year_deathsofdespair",
+    "crude_rate_cdc_county_year_deathsofdespair",
     "population_population_full",
     "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
 ]
@@ -111,14 +116,6 @@ mh_focus_cols = []
 for c in mh_rank_cols:
     base = c[: -len("_mentalhealthrank_full")]
     if any(k in base for k in MENTAL_KEYWORDS):
-        mh_focus_cols.append(c)
-
-# Include mh_mortality copies of key mental outcomes for explicit audit.
-for c in [
-    "poor_mental_health_days_raw_value_mh_mortality_fips_yr",
-    "frequent_mental_distress_raw_value_mh_mortality_fips_yr",
-]:
-    if c in df.columns:
         mh_focus_cols.append(c)
 
 mh_focus_cols = sorted(set(mh_focus_cols))
@@ -248,9 +245,24 @@ for a, b in pairs:
             "median_abs_diff_on_overlap": float(diff.median()),
             "p90_abs_diff_on_overlap": float(diff.quantile(0.90)),
         }
-    )
+        )
 
 dupe_df = pd.DataFrame(dupe_rows)
+if dupe_df.empty:
+    dupe_df = pd.DataFrame(
+        [
+            {
+                "var_a": pd.NA,
+                "var_b": pd.NA,
+                "n_overlap": 0,
+                "corr_on_overlap": np.nan,
+                "exact_match_pct_on_overlap": np.nan,
+                "median_abs_diff_on_overlap": np.nan,
+                "p90_abs_diff_on_overlap": np.nan,
+                "note": "No duplicated mental-outcome sources present in merged panel (expected with direct CDC merge path).",
+            }
+        ]
+    )
 dupe_df.to_csv(os.path.join(out_dir, "qa_mental_crosssource_duplicate_check.csv"), index=False)
 
 

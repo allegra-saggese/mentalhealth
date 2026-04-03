@@ -6,6 +6,11 @@ CDC crude-rate sense check:
 - Compare to CDC crude rate from deaths-of-despair county-year file
 - Add comparison columns to merged panel
 - Export QA summaries (overall, by-year, outliers)
+
+Quick purpose:
+- Verifies that CDC mortality crude rates align with rates recomputed from
+  merged deaths + census population.
+- Appends diagnostic columns to the merged panel and exports QA diagnostics.
 """
 
 import glob

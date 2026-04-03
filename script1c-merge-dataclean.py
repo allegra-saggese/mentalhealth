@@ -5,6 +5,14 @@ Created on Tue Oct 21 01:10:00 2025
 
 Builds one county-year merged panel from the latest version of each clean file.
 Filtering rule: keep only (fips, year) where rural-key non_large_metro == 1.
+
+Quick purpose:
+- Finds the latest clean outputs by descriptor.
+- Normalizes each source to county-year (`fips, year`) and merges them.
+- Applies the rural-key filter used in the project’s main analysis panel.
+- Pulls county CDC mortality directly from script0c output
+  (`*_cdc_county_year_deathsofdespair.csv`) via descriptor matching.
+- Writes full merged panel + standard year-range slices.
 """
 
 from packages import *
@@ -26,7 +34,6 @@ MERGE_DESCRIPTORS = {
     "population_full",
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
-MIN_MORTALITY_STATES = 50
 CAFO_COMMODITIES = ("cattle", "hogs", "chickens")
 
 
@@ -43,13 +50,6 @@ def _ensure_key(df):
 
 def _safe_descriptor_name(descriptor):
     return re.sub(r"[^a-z0-9]+", "_", descriptor.lower()).strip("_")
-
-
-def _state_count(series):
-    s = series.astype("string").str.strip()
-    s = s[~s.isna()]
-    s = s[~s.str.lower().isin({"", "nan", "none", "null"})]
-    return int(s.nunique())
 
 
 def _reduce_to_county_year(df, descriptor):
@@ -115,24 +115,6 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
     if df is None:
         print(f"Skip {descriptor}: no fips/year key columns")
         return None
-
-    # Hard guard: do not merge outdated mortality panel with partial state coverage.
-    if descriptor == "mh_mortality_fips_yr":
-        state_col = None
-        for c in ["mortality_state", "state"]:
-            if c in df.columns:
-                state_col = c
-                break
-        if state_col is None:
-            print(f"{descriptor}: no mortality state column found, skipping coverage guard")
-        else:
-            n_states = _state_count(df[state_col])
-            if n_states < MIN_MORTALITY_STATES:
-                print(
-                    f"Skip {descriptor}: state coverage {n_states} < {MIN_MORTALITY_STATES} "
-                    "(likely outdated mortality build)"
-                )
-                return None
 
     # runtime reduction: filter to rural key immediately
     df = df.merge(allowed_keys, on=["fips", "year"], how="inner")

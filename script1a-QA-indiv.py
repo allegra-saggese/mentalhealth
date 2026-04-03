@@ -3,7 +3,11 @@
 """
 Created on Mon Jun 30 18:55:21 2025
 
-Conduct QA across merged outputs - the merged output is the FULL PANEL 
+Quick purpose:
+- Scans each `*_full_merged*.csv` file in `Data/merged`
+- Finds population-related columns and summarizes fill/zeros/range
+- Compares alternate population columns to a reference column within each file
+- Writes three QA outputs (summary, pairwise comparison, and catalog) to interim-data
 """
 
 
