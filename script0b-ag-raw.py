@@ -193,7 +193,7 @@ if combined.empty:
 # ----------------------- SET UP PART 3 : PULL USDA FROM API / BACKFILL SETTING   -------------------- -#
 
 # due to API failures with 2012, 2017 data - backfilling with old ag data (made with han earlier version of the script - will have to fork it from GitHub to use) 
-donor_path = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/2026-02-09_ag_annual_df.csv"
+donor_path = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/2026-02-23_ag_annual_df.csv" # note that we may 
 
 # standardize both dataframes
 combined_c = clean_cols(combined).copy()
