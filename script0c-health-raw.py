@@ -3,11 +3,29 @@
 """
 Created on Wed Aug 13 10:13:23 2025
 
-Health pipeline:
-1) County Health Rankings (mental health) consolidation
-2) CDC mortality (demographic tranche CSVs) consolidation
-3) Merge on fips-year
-4) Stage-by-stage QA artifacts for missingness and key (fips-fips) integrity
+Health pipeline (current behavior):
+1) Load all raw County Health Rankings mental-health CSVs from raw/mental.
+2) Infer year from each filename, normalize column names, dedupe duplicate
+   columns by keeping the most complete version, and normalize FIPS.
+3) Build MH variable-presence QA, then select MH columns using thresholds:
+   - majority columns: present in >= 11 files
+   - high-fill columns: present in >= 8 files and avg fill >= 80%
+4) Concatenate selected MH columns into a single fips-year panel, collapse
+   any duplicate keys with first non-null values, and save clean MH output.
+5) Load county-level CDC annual files matching:
+   cty-level-deathsofdespair-YYYY.csv
+   Parse and keep county-year fields (deaths, population, crude rate,
+   reliability flags, optional percent-of-total-deaths), then save clean CDC panel.
+6) Produce CDC QA outputs (file inventory, by-year coverage, key integrity).
+7) Outer-merge MH + CDC county-year panels on (fips, year), create overlap QA
+   by year, and save merged health+mortality output (legacy filename retained).
+8) Optional extension (off by default): parse disaggregated CDC tranche files
+   and write local extension outputs for future fips-year-race-sex panel work.
+
+Notes:
+- Optional extension is controlled by env var RUN_CDC_DISAGG_EXTENSION
+  (set to 1/true/yes/y to enable).
+- Disaggregated extension outputs are NOT used in the main county-year panel.
 """
 
 # ----------------------- SET UP PART 1 : IMPORT KEY PATHS  -------------------- -#
@@ -21,7 +39,12 @@ from packages import *
 inf = os.path.join(db_data, "raw")
 outf = os.path.join(db_data, "clean")
 qa_dir = os.path.join(interim, "qa-health")
+local_ext_dir = os.path.join(interim, "health-disagg-extension")
 os.makedirs(qa_dir, exist_ok=True)
+os.makedirs(local_ext_dir, exist_ok=True)
+
+today_str = date.today().strftime("%Y-%m-%d")
+RUN_CDC_DISAGG_EXTENSION = os.getenv("RUN_CDC_DISAGG_EXTENSION", "0").strip().lower() in {"1", "true", "yes", "y"}
 
 
 
@@ -276,181 +299,174 @@ mh_combined.to_csv(mh_out, index=False)
 print("Saved:", mh_out)
 
 
-# ----------------------- DATA PART 2 : CLEAN CDC data  -------------------- -#
+# ----------------------- DATA PART 2 : CLEAN CDC COUNTY-YEAR AGG DATA -------------------- -#
 raw_cdc = os.path.join(inf, "cdc")
-cdc_csv_files = sorted(glob.glob(os.path.join(raw_cdc, "*.csv")))
-if not cdc_csv_files:
-    raise FileNotFoundError(f"No CDC tranche CSV files found in {raw_cdc}")
+county_files = sorted(glob.glob(os.path.join(raw_cdc, "cty-level-deathsofdespair-*.csv")))
+if not county_files:
+    raise FileNotFoundError(
+        f"No county-level deaths-of-despair files found in {raw_cdc}. "
+        "Expected pattern: cty-level-deathsofdespair-YYYY.csv"
+    )
 
-mort_raw_parts = []
-for p in cdc_csv_files:
+cdc_parts = []
+cdc_inventory_rows = []
+
+for p in county_files:
+    base = os.path.basename(p)
+    m = re.search(r"(19|20)\d{2}(?=\.csv$)", base)
+    if not m:
+        raise ValueError(f"Could not infer year from filename: {base}")
+    src_year = int(m.group(0))
+
     d = read_csv_with_fallback(p, low_memory=False)
+    d = clean_cols(d.copy())
+    d.columns = d.columns.str.replace(r"\s+", "_", regex=True).str.strip("_")
 
-    d.columns = (
-        pd.Index(d.columns)
-        .astype(str)
-        .str.lower()
-        .str.strip()
-        .str.replace(r"\s+", "_", regex=True)
-    )
-
-    req = ["state", "county", "county_code", "year", "deaths", "population", "race"]
-    missing = [c for c in req if c not in d.columns]
+    req = {"county", "county_code", "deaths", "population", "crude_rate"}
+    missing = sorted(req - set(d.columns))
     if missing:
-        raise KeyError(f"Missing required mortality columns in {os.path.basename(p)}: {missing}")
+        raise KeyError(f"{base} missing required columns: {missing}")
 
-    if "sex" not in d.columns:
-        lower_name = os.path.basename(p).lower()
-        d["sex"] = "male" if "male" in lower_name else ("female" if "female" in lower_name else pd.NA)
+    # Keep only true data rows (drop footer metadata lines)
+    d["county_code_num"] = to_numeric_series(d["county_code"])
+    d = d[d["county_code_num"].notna()].copy()
 
-    d["source_file"] = os.path.basename(p)
-    d["state"] = d["state"].astype("string").str.strip()
-    d["county"] = d["county"].astype("string").str.replace(r",\s*[A-Z]{2}$", "", regex=True).str.strip()
-    d["race"] = d["race"].astype("string").str.strip()
-    d["sex"] = d["sex"].astype("string").str.strip().str.title()
-    d["year"] = pd.to_numeric(d["year"], errors="coerce").astype("Int64")
-    d["deaths"] = pd.to_numeric(d["deaths"], errors="coerce")
-    d["population"] = pd.to_numeric(d["population"], errors="coerce")
-    d["county_code"] = pd.to_numeric(d["county_code"], errors="coerce").astype("Int64")
-    d["fips"] = d["county_code"].astype("string").str.zfill(5)
+    d["fips"] = d["county_code_num"].round().astype("Int64").astype("string").str.zfill(5)
+    d["year"] = src_year
+    d["county"] = d["county"].astype("string").str.strip()
+    d["state_abbrev"] = d["county"].str.extract(r",\s*([A-Z]{2})$", expand=False)
+    d["county_name"] = d["county"].str.replace(r",\s*[A-Z]{2}$", "", regex=True).str.strip()
 
-    if "crude_rate" in d.columns:
-        crude = (
-            d["crude_rate"]
-            .astype("string")
-            .str.replace("%", "", regex=False)
-            .str.replace(r"\(.*?\)", "", regex=True)
-            .str.strip()
+    d["deaths"] = to_numeric_series(d["deaths"]).astype("Int64")
+    d["population"] = to_numeric_series(d["population"]).astype("Int64")
+    d["crude_rate_raw"] = d["crude_rate"].astype("string").str.strip()
+    d["crude_rate"] = to_numeric_series(d["crude_rate_raw"].str.replace(r"\(.*?\)", "", regex=True))
+    d["is_unreliable"] = d["crude_rate_raw"].str.contains("unreliable", case=False, na=False).astype("Int64")
+
+    if "%_of_total_deaths" in d.columns:
+        d["pct_of_total_deaths_raw"] = d["%_of_total_deaths"].astype("string").str.strip()
+        d["pct_of_total_deaths"] = to_numeric_series(d["pct_of_total_deaths_raw"].str.replace("%", "", regex=False))
+    else:
+        d["pct_of_total_deaths_raw"] = pd.NA
+        d["pct_of_total_deaths"] = pd.NA
+
+    keep = [
+        "fips",
+        "year",
+        "state_abbrev",
+        "county_name",
+        "county",
+        "deaths",
+        "population",
+        "crude_rate",
+        "crude_rate_raw",
+        "is_unreliable",
+        "pct_of_total_deaths",
+        "pct_of_total_deaths_raw",
+    ]
+    out = d[keep].copy()
+    out["source_file"] = base
+    cdc_parts.append(out)
+
+    cdc_inventory_rows.append(
+        {
+            "file": base,
+            "year_from_filename": src_year,
+            "rows_raw": int(len(read_csv_with_fallback(p, low_memory=False))),
+            "rows_kept_with_county_code": int(len(out)),
+            "n_unique_fips_kept": int(out["fips"].nunique()),
+            "n_missing_deaths": int(out["deaths"].isna().sum()),
+            "n_missing_population": int(out["population"].isna().sum()),
+        }
+    )
+
+cdc_panel = pd.concat(cdc_parts, ignore_index=True, sort=False)
+
+if cdc_panel.duplicated(["fips", "year"]).any():
+    cdc_panel = (
+        cdc_panel.groupby(["fips", "year"], as_index=False)
+        .agg(
+            state_abbrev=("state_abbrev", _first_notna),
+            county_name=("county_name", _first_notna),
+            county=("county", _first_notna),
+            deaths=("deaths", "sum"),
+            population=("population", "sum"),
+            crude_rate=("crude_rate", _first_notna),
+            crude_rate_raw=("crude_rate_raw", _first_notna),
+            is_unreliable=("is_unreliable", "sum"),
+            pct_of_total_deaths=("pct_of_total_deaths", _first_notna),
+            pct_of_total_deaths_raw=("pct_of_total_deaths_raw", _first_notna),
+            source_file=("source_file", _first_notna),
         )
-        d["crude_rate_raw"] = pd.to_numeric(crude, errors="coerce")
-    else:
-        d["crude_rate_raw"] = pd.NA
-
-    note_cols = [c for c in ["notes", "crude_rate"] if c in d.columns]
-    if note_cols:
-        note_str = d[note_cols].astype("string").fillna("").agg(" ".join, axis=1).str.lower()
-        d["is_unreliable"] = note_str.str.contains("unreliable|suppressed").astype("Int64")
-    else:
-        d["is_unreliable"] = 0
-
-    mort_raw_parts.append(
-        d[
-            [
-                "year",
-                "state",
-                "county",
-                "fips",
-                "race",
-                "sex",
-                "deaths",
-                "population",
-                "crude_rate_raw",
-                "is_unreliable",
-                "source_file",
-            ]
-        ].copy()
     )
 
-mort_raw = pd.concat(mort_raw_parts, ignore_index=True, sort=False)
-_add_fill("mort_raw_concat", mort_raw)
-_add_key_qa("mort_raw_concat", mort_raw, ["fips", "year", "race", "sex"])
+cdc_panel = cdc_panel.sort_values(["year", "fips"]).reset_index(drop=True)
+_add_fill("cdc_county_panel_final", cdc_panel)
+_add_key_qa("cdc_county_panel_final", cdc_panel, ["fips", "year"])
 
-# collapse to demographic panel
-mort_keys = ["fips", "year", "state", "county", "race", "sex"]
-mort_disagg = (
-    mort_raw.groupby(mort_keys, as_index=False)
+cdc_clean_out = os.path.join(outf, f"{today_str}_cdc_county_year_deathsofdespair.csv")
+cdc_panel.to_csv(cdc_clean_out, index=False)
+print("Saved:", cdc_clean_out)
+
+cdc_inv = pd.DataFrame(cdc_inventory_rows).sort_values("year_from_filename")
+cdc_inv_out = os.path.join(qa_dir, f"{today_str}_qa_cdc_deathsofdespair_file_inventory.csv")
+cdc_inv.to_csv(cdc_inv_out, index=False)
+print("Saved QA:", cdc_inv_out)
+
+cdc_by_year = (
+    cdc_panel.groupby("year", as_index=False)
     .agg(
-        deaths=("deaths", "sum"),
-        population=("population", "sum"),
-        unreliable_n=("is_unreliable", "sum"),
+        n_rows=("fips", "size"),
+        n_unique_fips=("fips", "nunique"),
+        n_nonmissing_deaths=("deaths", lambda s: int(s.notna().sum())),
+        n_nonmissing_population=("population", lambda s: int(s.notna().sum())),
+        n_unreliable=("is_unreliable", lambda s: int((s > 0).sum())),
     )
+    .sort_values("year")
 )
-mort_disagg["crude_rate_per_100k"] = np.where(
-    mort_disagg["population"] > 0,
-    mort_disagg["deaths"] / mort_disagg["population"] * 100000,
-    np.nan,
+cdc_by_year_out = os.path.join(qa_dir, f"{today_str}_qa_cdc_deathsofdespair_by_year.csv")
+cdc_by_year.to_csv(cdc_by_year_out, index=False)
+print("Saved QA:", cdc_by_year_out)
+
+cdc_key_check = pd.DataFrame(
+    [
+        {
+            "n_rows": int(len(cdc_panel)),
+            "n_unique_fips_year": int(cdc_panel[["fips", "year"]].drop_duplicates().shape[0]),
+            "n_duplicate_fips_year_rows": int(cdc_panel.duplicated(["fips", "year"]).sum()),
+            "year_min": int(cdc_panel["year"].min()),
+            "year_max": int(cdc_panel["year"].max()),
+            "n_unique_years": int(cdc_panel["year"].nunique()),
+            "n_unique_fips": int(cdc_panel["fips"].nunique()),
+        }
+    ]
 )
-totals = mort_disagg.groupby(["fips", "year"])["deaths"].transform("sum")
-mort_disagg["pct_of_county_year_deaths"] = np.where(totals > 0, mort_disagg["deaths"] / totals * 100, np.nan)
-
-_add_fill("mort_disagg_final", mort_disagg)
-_add_key_qa("mort_disagg_final", mort_disagg, ["fips", "year", "race", "sex"])
-
-mort_disagg_out = os.path.join(outf, f"{today_str}_mortality_sex_race_disagg.csv")
-mort_disagg.to_csv(mort_disagg_out, index=False)
-print("Saved:", mort_disagg_out)
-
-# county-year mortality panel
-mort_totals = (
-    mort_disagg.groupby(["fips", "year"], as_index=False)
-    .agg(
-        mortality_total_deaths=("deaths", "sum"),
-        mortality_total_population=("population", "sum"),
-        mortality_unreliable_count=("unreliable_n", "sum"),
-    )
-)
-mort_totals["mortality_crude_rate_per_100k"] = np.where(
-    mort_totals["mortality_total_population"] > 0,
-    mort_totals["mortality_total_deaths"] / mort_totals["mortality_total_population"] * 100000,
-    np.nan,
-)
-
-mort_geo = (
-    mort_disagg.groupby(["fips", "year"], as_index=False)
-    .agg(
-        mortality_state=("state", _first_notna),
-        mortality_county=("county", _first_notna),
-    )
-)
-
-mort_disagg["race_sex_key"] = (
-    mort_disagg["race"].astype("string").str.lower().str.replace(r"[^a-z0-9]+", "_", regex=True).str.strip("_")
-    + "_"
-    + mort_disagg["sex"].astype("string").str.lower().str.replace(r"[^a-z0-9]+", "_", regex=True).str.strip("_")
-)
-
-deaths_wide = mort_disagg.pivot_table(
-    index=["fips", "year"], columns="race_sex_key", values="deaths", aggfunc="sum"
-).reset_index()
-deaths_wide = deaths_wide.rename(columns={c: f"mort_deaths_{c}" for c in deaths_wide.columns if c not in ["fips", "year"]})
-
-pop_wide = mort_disagg.pivot_table(
-    index=["fips", "year"], columns="race_sex_key", values="population", aggfunc="sum"
-).reset_index()
-pop_wide = pop_wide.rename(columns={c: f"mort_pop_{c}" for c in pop_wide.columns if c not in ["fips", "year"]})
-
-mort_panel = (
-    mort_geo
-    .merge(mort_totals, on=["fips", "year"], how="left")
-    .merge(deaths_wide, on=["fips", "year"], how="left")
-    .merge(pop_wide, on=["fips", "year"], how="left")
-)
-_add_fill("mort_county_year_panel", mort_panel)
-_add_key_qa("mort_county_year_panel", mort_panel, ["fips", "year"])
+cdc_key_out = os.path.join(qa_dir, f"{today_str}_qa_cdc_deathsofdespair_key_check.csv")
+cdc_key_check.to_csv(cdc_key_out, index=False)
+print("Saved QA:", cdc_key_out)
 
 
-# ---------- PART 3: Merge health + mortality ----------
-for d in [mh_combined, mort_panel]:
+# ---------- PART 3: Merge health + county CDC ----------
+for d in [mh_combined, cdc_panel]:
     d["fips"] = _normalize_fips(d["fips"])
     d["year"] = pd.to_numeric(d["year"], errors="coerce").astype("Int64")
 
 if mh_combined.duplicated(["fips", "year"]).any():
     mh_combined = mh_combined.groupby(["fips", "year"], as_index=False).agg(_first_notna)
-if mort_panel.duplicated(["fips", "year"]).any():
-    mort_panel = mort_panel.groupby(["fips", "year"], as_index=False).agg(_first_notna)
+if cdc_panel.duplicated(["fips", "year"]).any():
+    cdc_panel = cdc_panel.groupby(["fips", "year"], as_index=False).agg(_first_notna)
 
 wide_mh_full = pd.merge(
     mh_combined,
-    mort_panel,
+    cdc_panel,
     on=["fips", "year"],
     how="outer",
     sort=True,
     validate="1:1",
 )
 
-# overlap diagnostics
 wide_mh_full["has_mh"] = wide_mh_full[[c for c in mh_combined.columns if c not in ["fips", "year"]]].notna().any(axis=1)
-wide_mh_full["has_mort"] = wide_mh_full["mortality_total_deaths"].notna()
+wide_mh_full["has_mort"] = wide_mh_full["deaths"].notna()
 
 overlap_df = (
     wide_mh_full.groupby("year", as_index=False)
@@ -465,11 +481,135 @@ overlap_path = os.path.join(qa_dir, f"{today_str}_qa_health_overlap_by_year.csv"
 overlap_df.to_csv(overlap_path, index=False)
 print("Saved QA:", overlap_path)
 
-_add_fill("mh_mortality_merged_final", wide_mh_full)
-_add_key_qa("mh_mortality_merged_final", wide_mh_full, ["fips", "year"])
+_add_fill("mh_cdc_merged_final", wide_mh_full)
+_add_key_qa("mh_cdc_merged_final", wide_mh_full, ["fips", "year"])
 
 final_out = os.path.join(outf, f"{today_str}_mh_mortality_fips_yr.csv")
 wide_mh_full.to_csv(final_out, index=False)
 print("Saved:", final_out)
+
+
+# ---------- OPTIONAL EXTENSION: CDC DISAGGREGATED PANELS ----------
+if RUN_CDC_DISAGG_EXTENSION:
+    # read in the disaggregated (sex, age, ethnic)
+    cdc_csv_files = sorted(glob.glob(os.path.join(raw_cdc, "*.csv")))
+    disagg_files = [p for p in cdc_csv_files if not os.path.basename(p).startswith("cty-level-deathsofdespair-")]
+    # QA for file location
+    if not disagg_files:
+        print("Disaggregated CDC extension requested, but no tranche files found. Skipping extension.")
+    else:
+        mort_raw_parts = []
+        for p in disagg_files:
+            d = read_csv_with_fallback(p, low_memory=False)
+            d.columns = ( # helper to clean 
+                pd.Index(d.columns)
+                .astype(str)
+                .str.lower()
+                .str.strip()
+                .str.replace(r"\s+", "_", regex=True)
+            )
+            
+            req = ["state", "county", "county_code", "year", "deaths", "population", "race"]
+            missing = [c for c in req if c not in d.columns]
+            if missing:
+                continue
+            # further disagg 
+            if "sex" not in d.columns:
+                lower_name = os.path.basename(p).lower()
+                d["sex"] = "male" if "male" in lower_name else ("female" if "female" in lower_name else pd.NA)
+            # clean the cols again 
+            d["source_file"] = os.path.basename(p)
+            d["state"] = d["state"].astype("string").str.strip()
+            d["county"] = d["county"].astype("string").str.replace(r",\s*[A-Z]{2}$", "", regex=True).str.strip()
+            d["race"] = d["race"].astype("string").str.strip()
+            d["sex"] = d["sex"].astype("string").str.strip().str.title()
+            d["year"] = pd.to_numeric(d["year"], errors="coerce").astype("Int64")
+            d["deaths"] = pd.to_numeric(d["deaths"], errors="coerce")
+            d["population"] = pd.to_numeric(d["population"], errors="coerce")
+            d["county_code"] = pd.to_numeric(d["county_code"], errors="coerce").astype("Int64")
+            d["fips"] = d["county_code"].astype("string").str.zfill(5)
+            # create crude rate 
+            note_cols = [c for c in ["notes", "crude_rate"] if c in d.columns]
+            if note_cols:
+                note_str = d[note_cols].astype("string").fillna("").agg(" ".join, axis=1).str.lower()
+                d["is_unreliable"] = note_str.str.contains("unreliable|suppressed").astype("Int64")
+            else:
+                d["is_unreliable"] = 0
+                # put all into one dataframe 
+            mort_raw_parts.append(
+                d[
+                    [
+                        "year",
+                        "state",
+                        "county",
+                        "fips",
+                        "race",
+                        "sex",
+                        "deaths",
+                        "population",
+                        "is_unreliable",
+                        "source_file",
+                    ]
+                ].copy()
+            )
+
+        if mort_raw_parts:
+            mort_raw = pd.concat(mort_raw_parts, ignore_index=True, sort=False)
+            _add_fill("mort_disagg_raw_extension", mort_raw)
+            _add_key_qa("mort_disagg_raw_extension", mort_raw, ["fips", "year", "race", "sex"])
+
+            mort_keys = ["fips", "year", "state", "county", "race", "sex"]
+            mort_disagg = (
+                mort_raw.groupby(mort_keys, as_index=False)
+                .agg(
+                    deaths=("deaths", "sum"),
+                    population=("population", "sum"),
+                    unreliable_n=("is_unreliable", "sum"),
+                )
+            )
+            mort_disagg["crude_rate_per_100k"] = np.where(
+                mort_disagg["population"] > 0, # make sure that we're not calculating rates on missing populations
+                mort_disagg["deaths"] / mort_disagg["population"] * 100000,
+                np.nan,
+            )
+            # sum up the totals - although note that this is NOT going to sum to the AGG b/c it does not capture all mutually exclusive disaggregated groups 
+            totals = mort_disagg.groupby(["fips", "year"])["deaths"].transform("sum")
+            mort_disagg["pct_of_county_year_deaths"] = np.where(totals > 0, mort_disagg["deaths"] / totals * 100, np.nan)
+            _add_fill("mort_disagg_extension_final", mort_disagg)
+            _add_key_qa("mort_disagg_extension_final", mort_disagg, ["fips", "year", "race", "sex"])
+            # create output file
+            mort_disagg_out = os.path.join(local_ext_dir, f"{today_str}_mortality_sex_race_disagg_extension.csv")
+            mort_disagg.to_csv(mort_disagg_out, index=False)
+            print("Saved local extension:", mort_disagg_out)
+
+            # MORT TOTALS WILL BE FOR QA ON THE DATASET BUT SHOULD NOT EQUAL DISAGGREGATED PANEL 
+            mort_totals = (
+                mort_disagg.groupby(["fips", "year"], as_index=False)
+                .agg(
+                    mortality_total_deaths=("deaths", "sum"),
+                    mortality_total_population=("population", "sum"),
+                    mortality_unreliable_count=("unreliable_n", "sum"),
+                )
+            )
+            mort_totals["mortality_crude_rate_per_100k"] = np.where(
+                mort_totals["mortality_total_population"] > 0,
+                mort_totals["mortality_total_deaths"] / mort_totals["mortality_total_population"] * 100000,
+                np.nan,
+            )
+            mort_geo = (
+                mort_disagg.groupby(["fips", "year"], as_index=False)
+                .agg(
+                    mortality_state=("state", _first_notna),
+                    mortality_county=("county", _first_notna),
+                )
+            )
+            mort_panel_ext = mort_geo.merge(mort_totals, on=["fips", "year"], how="left")
+            mort_panel_out = os.path.join(local_ext_dir, f"{today_str}_mortality_county_year_extension.csv")
+            mort_panel_ext.to_csv(mort_panel_out, index=False)
+            print("Saved local extension:", mort_panel_out)
+        else:
+            print("Disaggregated CDC extension requested, but no valid disaggregated rows parsed.")
+else:
+    print("Skipping optional disaggregated CDC extension (RUN_CDC_DISAGG_EXTENSION=0).")
 
 _finalize_qa()
