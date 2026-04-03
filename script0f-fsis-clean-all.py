@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Run the FSIS cleaning pipeline end-to-end from a single script.
+FSIS cleaning pipeline end-to-end w/in a single 
 
-Default flow:
-1) script0e-fsis-slaughterhouses.py
-2) script0h-fsis-establishment-size-panel.py
-3) HUD fill:
-   - bulk mode (default): script0k-fsis-hud-bulk-zipyear-fill.py
-   - targeted mode: script0i-fsis-hud-zip-fips-fill.py then script0j-fsis-hud-zipyear-refill.py
-4) Optional manual ZIP template step: script0l-fsis-apply-manual-zip-fips.py
-5) script0m-fsis-deterministic-completion.py
-6) Optional manual county-label template step: script0n-fsis-apply-manual-county-fips.py
-"""
+1) download and parse FOIA requested inspection dta on slaughterhouses 
+2) create a panel with establishment ID w/ plant size classification
+3) HUD fill for partially filled geo data (fips recovery): 
+   - bulk mode (default): using HUD zip code to fips walk, fill in for establishments only with city  / state / zip 
+   - targeted mode: isolate only missing establishments and use fips walk 
+4) Optional manual ZIP template step: using manually found matches, backfilling in fips 
+5) merge all outputs together to create panel of fsis with highest coverage possible 
+
+    """
+# ----------------------- SET UP PART 1: DEFINE -------------------- -#
 
 import argparse
 import os
@@ -22,11 +22,14 @@ import sys
 from datetime import datetime
 
 
-REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(THIS_DIR) if os.path.basename(THIS_DIR) == "fsis-scripts" else THIS_DIR
+FSIS_SCRIPT_DIR = os.path.join(REPO_ROOT, "fsis-scripts")
 DB_BASE = os.path.expanduser("~/Dropbox/Mental")
 DB_DATA = os.path.join(DB_BASE, "Data")
 QA_DIR = os.path.join(DB_DATA, "FOIA-USDA-request", "qa-fsis")
 
+# ----------------------- DATA PART 1: EXECUTE FOLDER OF SCRIPTS -------------------- -#
 
 SCRIPT_ORDER = {
     "extract_raw": "script0e-fsis-slaughterhouses.py",
@@ -56,16 +59,22 @@ def _latest_file_by_regex(dirpath: str, pattern: str):
 
 
 def _run_script(script_name: str, dry_run=False):
-    path = os.path.join(REPO_DIR, script_name)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Missing script: {path}")
+    candidate_paths = [
+        os.path.join(FSIS_SCRIPT_DIR, script_name),
+        os.path.join(REPO_ROOT, script_name),
+    ]
+    path = next((p for p in candidate_paths if os.path.exists(p)), None)
+    if path is None:
+        raise FileNotFoundError(
+            f"Missing script: {script_name}. Checked: {candidate_paths}"
+        )
 
     cmd = [sys.executable, path]
     stamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{stamp}] RUN {script_name}")
+    print(f"[{stamp}] RUN {path}")
     if dry_run:
         return
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=REPO_ROOT)
 
 
 def _build_steps(hud_strategy: str, run_manual_zip: bool, run_manual_county: bool):
@@ -172,4 +181,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
