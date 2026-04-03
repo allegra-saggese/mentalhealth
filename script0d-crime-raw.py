@@ -6,7 +6,7 @@ Created on Sun Oct 19 11:05:15 2025
 @author: allegrasaggese
 """
 
-
+# ----------------------- SET UP PART 1: DEFINE -------------------- -#
 # load packages and workspaces
 import sys, importlib.util
 from collections import Counter
@@ -36,7 +36,6 @@ crimef = os.path.join(inf, "crime")
 crimef = os.path.join(crimef, "total-v1")
 
 csv_files = glob.glob(os.path.join(crimef, "*.csv"))
-
 print(f"Found {len(csv_files)} CSV files")
 
 # read all CSVs into a list of DataFrames
@@ -53,7 +52,7 @@ for file in csv_files:
 # if you want to combine all of them into one big df
 combined_df = pd.concat(dfs, ignore_index=True, sort=False)
 
-# HUGE DF - lets preserve memory
+# HUGE DF -lets check usage - we want to  preserve memory
 combined_df.memory_usage(deep=True).sum() / 1e6  # about 7 GB of memory used 
 
 bytes_used = combined_df.memory_usage(deep=True).sum()
@@ -64,11 +63,14 @@ mem_cols = (combined_df.memory_usage(deep=True)
             .sort_values(ascending=False))
 print(mem_cols.head(20))
 
-# collapse to year, FIPS, race, sex 
-
+# collapse to year, fips, race, sex 
 keys = ["year", "state", "county", "fips", "sex_of_arrestee", 
         "race_of_arrestee", "ethnicity_of_arrestee"]
 
+
+# ----------------------- DATA PART 1: SELECT KEY CRIME DATA -------------------- -#
+
+# keep only violent crimes - listed / chosen from discussion with reserach team 
 crime_cols = ['aggravated_assault',
               'driving_under_the_influence',
               'fondling_(incident_liberties/child_molest)',
@@ -83,6 +85,7 @@ crime_cols = ['aggravated_assault',
               'human_trafficking_-_commercial_sex_acts',
               'human_trafficking_-_involuntary_servitude']
 
+# create string normalization helper to strip out all extra spaces / marks 
 def norm(s: str) -> str:
     s = str(s).lower().strip()
     s = s.replace("–","-").replace("—","-")           # normalize unicode dashes
@@ -91,7 +94,7 @@ def norm(s: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s
 
-# build normalized->actual map from df
+# build normalized->actual map from existing dataframe
 colmap = {norm(c): c for c in df.columns}
 norm_cols = list(colmap.keys())
 
@@ -121,9 +124,10 @@ for t in targets:
     any_tok = [k for k in norm_cols if any(re.search(tok, k) for tok in toks)]
     print(" any-token hits:", any_tok[:10])
 
-# find the cols 
+# find the cols that don't seem to be matching
 traffic_cols = [c for c in combined_df.columns if combined_df.columns.str.contains(r"human|traffic", case=False, regex=True).any()]
 
+# create quick summary table to see the number of missing rows
 summary = (
     combined_df[traffic_cols]
     .isna()
@@ -132,14 +136,15 @@ summary = (
     .to_frame()
 )
 summary["n_filled"] = combined_df[traffic_cols].notna().sum()
-summary["pct_filled"] = 100 * summary["n_filled"] / len(combined_df)
+summary["pct_filled"] = 100 * summary["n_filled"] / len(combined_df) # make missing rows into a percentage 
 summary
 
-# the human trafficking cols exist, but with lower percentage filled 
+# finding - the human trafficking cols exist, but with lower percentage filled 
 for c in combined_df.columns:
     if "human" in c.lower():
         print(repr(c))
 
+# try second round of stripping out issues within the cols 
 combined_df.columns = (
     combined_df.columns
     .str.replace(r"[–—]", "-", regex=True)  # normalize dash types
@@ -183,7 +188,9 @@ crime_cols = ['aggravated_assault',
               'human_traffic_inv_servitude'
               ]
 
-# COLLAPSE TO RACE/SEX/FIPS/YR with count of incidents only 
+# ----------------------- DATA PART 2: CREATE CRIME STAT DATA FOR USE  -------------------- -#
+
+# collapse to unit of observation 
 collapsed = (
     combined_df.groupby(keys, as_index=False)[crime_cols].sum(min_count=1)
 )
@@ -210,9 +217,9 @@ violations = check[check["n_unique_fips"] > 1]
 
 print(f"Total groups with multiple FIPS: {len(violations)}") # no violations
 
-
-#### COLLAPSE TO ELIMINATE DISAGGREGATION BY DEMOGRAPHICS 
-# keys for the final panel
+# ----------------------- DATA PART 3: COLLAPSE + EXPORT -------------------- -#
+# COLLAPSE again to ignore demographic data - NOTE: in future iterations we will want to create an extens
+# keys for the final panel (although state-county are redudant)
 keys_fips = ["year", "state", "county", "fips"]
 
 # keep only crime columns that exist
@@ -230,12 +237,10 @@ collapsed_fips_only = (
 
 # recompute total incidents across all crime types
 collapsed_fips_only["total_incidents"] = collapsed_fips_only[crime_cols_present].sum(axis=1)
+# ----- ADD IN HERE HOW WE CAN TEST TO SEE IF THE CRIME TYPES CHANGE AT ALL 
 
 
-
-### EXPORT BOTH DATAFRAMES 
-today_str = date.today().strftime("%Y-%m-%d")
-
+# output creation
 crime_w_demog = f"{today_str}_crime_demog_final.csv"
 cdpath = os.path.join(outf, crime_w_demog)
 combined_df.to_csv(cdpath, index=False)

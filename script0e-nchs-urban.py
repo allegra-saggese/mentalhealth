@@ -6,6 +6,7 @@ Created on Wed Jan 14 11:55:22 2026
 @author: allegrasaggese
 """
 
+# ----------------------- SET UP PART 1: DEFINE -------------------- -#
 from packages import *
 from functions import *
 
@@ -20,7 +21,9 @@ csv_path = os.path.join(inf, "NCHSurb-rural-codes.csv")
 # read with encoding fallback
 df = read_csv_with_fallback(csv_path)
 
-# clean columns
+# ----------------------- DATA PART 1: CLEANING -------------------- -#
+
+# clean up columns w/ text string and rename cols for clarity 
 df.columns = df.columns.str.lower().str.strip()
 df = df.rename(columns={
     "stfips": "state_fips_code",
@@ -35,6 +38,7 @@ df = df.rename(columns={
     "code2006": "nchs_code_2006",
     "code1990": "nchs_code_1990",
 })
+
 
 # generate 5-digit FIPS (functions.generate_fips creates column "FIPS_generated")
 df = generate_fips(df, state_col="state_fips_code", city_col="county_code")
@@ -75,6 +79,8 @@ panel = df.melt(
 panel["year"] = panel["nchs_version"].map(year_map).astype("Int64")
 panel["nchs_code"] = pd.to_numeric(panel["nchs_code"], errors="coerce").astype("Int64")
 
+
+# ----------------------- DATA PART 2: FILTER BY URBAN / NON URBAN  -------------------- -#
 # NCHS labels (standard 6-level scheme)
 label_map = {
     1: "Large central metro",
@@ -116,8 +122,9 @@ panel_expanded = pd.concat(
 panel_expanded = panel_expanded[panel_expanded["year"] >= 2000].copy()
 panel_expanded = panel_expanded.sort_values(["fips_generated", "year"])
 
-# export
-today_str = date.today().strftime("%Y-%m-%d")
+
+# ----------------------- DATA PART 3: EXPORT   -------------------- -#
+
 panel_path = os.path.join(outf, f"{today_str}-rural-key.csv")
 
 panel_expanded.to_csv(panel_path, index=False)
