@@ -7,11 +7,12 @@ Health pipeline:
 1) County Health Rankings (mental health) consolidation
 2) CDC mortality (demographic tranche CSVs) consolidation
 3) Merge on fips-year
-4) Stage-by-stage QA artifacts for missingness and key integrity
+4) Stage-by-stage QA artifacts for missingness and key (fips-fips) integrity
 """
 
-import re
+# ----------------------- SET UP PART 1 : IMPORT KEY PATHS  -------------------- -#
 
+import re
 from functions import *
 from packages import *
 
@@ -22,10 +23,9 @@ outf = os.path.join(db_data, "clean")
 qa_dir = os.path.join(interim, "qa-health")
 os.makedirs(qa_dir, exist_ok=True)
 
-today_str = date.today().strftime("%Y-%m-%d")
 
 
-# ---------- QA helpers ----------
+# ----------------------- SET UP PART 2: QA HELPERS  -------------------- -#
 qa_fill_frames = []
 qa_key_frames = []
 
@@ -141,27 +141,31 @@ def _normalize_fips(series):
     return s
 
 
-# ---------- PART 1: Mental health ----------
+# ----------------------- DATA PART 1 : CLEAN MH SURVEY DATA  -------------------- -#
+
+# ID folder for the raw data 
 raw_mh = os.path.join(inf, "mental")
 mh_files = sorted(glob.glob(os.path.join(raw_mh, "*.csv")))
 if not mh_files:
-    raise FileNotFoundError(f"No mental health files found in {raw_mh}")
+    raise FileNotFoundError(f"No mental health files found in {raw_mh}") # qa check in case the files go missing! 
 
+# create blank directories to fill with the individual files 
 mh_file_inventory = []
 mh_dfs = []
 year_re = re.compile(r"(19|20)\d{2}(?=\.[A-Za-z0-9]+$)")
 
+# read through folder, find each year's surbey
 for p in mh_files:
     d = read_csv_with_fallback(p, low_memory=False)
     base = os.path.basename(p)
-    m = year_re.search(base)
+    m = year_re.search(base) # take the year from the filename 
     if not m:
         raise ValueError(f"Could not infer year from filename: {base}")
     yr = int(m.group(0))
 
     d.columns = _clean_mh_cols(d.columns)
     d = _dedupe_columns_keep_most_complete(d)
-    d["year"] = yr
+    d["year"] = yr # create column with the year from the year string
 
     if "5-digit_fips_code" not in d.columns:
         alt = [c for c in d.columns if "fips" in c]
@@ -170,7 +174,7 @@ for p in mh_files:
         else:
             raise KeyError(f"Missing FIPS column in {base}")
 
-    d["5-digit_fips_code"] = _normalize_fips(d["5-digit_fips_code"])
+    d["5-digit_fips_code"] = _normalize_fips(d["5-digit_fips_code"]) # pad / destring the fips 
     d["year"] = pd.to_numeric(d["year"], errors="coerce").astype("Int64")
 
     mh_file_inventory.append(
@@ -182,20 +186,28 @@ for p in mh_files:
             "n_dup_cols_after_clean": int(d.columns.duplicated().sum()),
         }
     )
-    mh_dfs.append(d)
+    mh_dfs.append(d) # append all data frames into long form 
 
+# convert to CSV 
 pd.DataFrame(mh_file_inventory).sort_values("year").to_csv(
     os.path.join(qa_dir, f"{today_str}_qa_health_mh_file_inventory.csv"), index=False
 )
 
+# concat all files 
 _add_fill("mh_raw_union_preselect", pd.concat(mh_dfs, ignore_index=True, sort=False))
 
-# Column presence and fill diagnostics
+
+
+
+# ----------------------- DATA PART 2 : MH - SELECT KEY VARS  -------------------- -#
+
+# review all cols in the panel 
 all_cols = sorted(set().union(*[set(d.columns) for d in mh_dfs]))
+
 presence_rows = []
 for col in all_cols:
     dfs_with_col = sum(col in d.columns for d in mh_dfs)
-    fill_vals = [d[col].notna().mean() * 100 for d in mh_dfs if col in d.columns]
+    fill_vals = [d[col].notna().mean() * 100 for d in mh_dfs if col in d.columns] # calculate fill rates
     presence_rows.append(
         {
             "column": col,
@@ -203,21 +215,36 @@ for col in all_cols:
             "avg_fill_pct_when_present": float(np.mean(fill_vals)) if fill_vals else np.nan,
         }
     )
+
+# create a df that tells us the share of complete rows for a particular column 
 presence_df = pd.DataFrame(presence_rows).sort_values(
     ["dfs_with_col", "avg_fill_pct_when_present", "column"], ascending=[False, False, True]
 )
+
+# ouput this QA file 
 presence_path = os.path.join(qa_dir, f"{today_str}_qa_health_mh_column_presence.csv")
 presence_df.to_csv(presence_path, index=False)
 print("Saved QA:", presence_path)
 
-# Keep keys + stable columns
-majority_cols = presence_df.loc[presence_df["dfs_with_col"] >= 11, "column"].tolist()
+
+# threshold gen --- use an arbitrarily chosen threshold (adjustable) to determine which cols we should keep 
+# threshold is 2 part: (1) MAJORITY - extensive margin - variable is in most survey years 
+# threshold is 2 part: (2) HIGH FILL - intensive margin - variable is in fewer survey years but is more robust w/in each year
+
+yr_threshold_ct = 11 # MAJORITY COL: variable name must be present in at least 11 of 15 
+avg_threshold = 80 # HIGH FILL:  choose percentage (80%) of total row fill when slicing for remaining cols 
+yr_threshold_ct_2 = 8 # HIGH FILL: choose a lower percentage (8 of 15) for years being present for a particular variable name 
+
+# apply the threshold 
+majority_cols = presence_df.loc[presence_df["dfs_with_col"] >= yr_threshold_ct, "column"].tolist()
 high_fill_cols = presence_df.loc[
-    (presence_df["dfs_with_col"] >= 8) & (presence_df["avg_fill_pct_when_present"] >= 80),
+    (presence_df["dfs_with_col"] >= yr_threshold_ct_2) & (presence_df["avg_fill_pct_when_present"] >= avg_threshold),
     "column",
 ].tolist()
 selected_cols = list(dict.fromkeys(["5-digit_fips_code", "year"] + majority_cols + high_fill_cols))
 
+
+# fill in dfs into set of list - copy so earlier data cleaning is traceable 
 mh_selected = []
 for d in mh_dfs:
     keep = [c for c in selected_cols if c in d.columns]
@@ -227,11 +254,14 @@ mh_combined = pd.concat(mh_selected, ignore_index=True, sort=False)
 _add_fill("mh_selected_concat", mh_combined)
 _add_key_qa("mh_selected_concat", mh_combined, ["5-digit_fips_code", "year"])
 
+
+# drop dupes if present by kepping the first in a group 
 if mh_combined.duplicated(["5-digit_fips_code", "year"]).any():
     mh_combined = (
         mh_combined.groupby(["5-digit_fips_code", "year"], as_index=False).agg(_first_notna)
     )
 
+# clean cols - make the year cols numeric, apply fips normalization to fips code 
 mh_combined = mh_combined.rename(columns={"5-digit_fips_code": "fips"})
 mh_combined["fips"] = _normalize_fips(mh_combined["fips"])
 mh_combined["year"] = pd.to_numeric(mh_combined["year"], errors="coerce").astype("Int64")
@@ -240,12 +270,13 @@ mh_combined = mh_combined.sort_values(["fips", "year"]).reset_index(drop=True)
 _add_fill("mh_final", mh_combined)
 _add_key_qa("mh_final", mh_combined, ["fips", "year"])
 
+# save output
 mh_out = os.path.join(outf, f"{today_str}_mentalhealthrank_full.csv")
 mh_combined.to_csv(mh_out, index=False)
 print("Saved:", mh_out)
 
 
-# ---------- PART 2: CDC mortality ----------
+# ----------------------- DATA PART 2 : CLEAN CDC data  -------------------- -#
 raw_cdc = os.path.join(inf, "cdc")
 cdc_csv_files = sorted(glob.glob(os.path.join(raw_cdc, "*.csv")))
 if not cdc_csv_files:
