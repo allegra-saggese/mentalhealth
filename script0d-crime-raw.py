@@ -4,6 +4,15 @@
 Created on Sun Oct 19 11:05:15 2025
 
 @author: allegrasaggese
+
+Crime pipeline:
+1) Load cleaned annual crime files (total-v1) and stack into one incident-level table.
+2) Select violent-crime columns and collapse to demographic keys:
+   fips-year-sex-race-ethnicity (plus county/state labels).
+3) Build main county-year panel by collapsing demographics away:
+   fips-year totals for selected crime types and total_incidents.
+4) Optional extension (off by default): preserve disaggregation by
+   sex/race/ethnicity/age bucket and save local extension outputs + QA.
 """
 
 # ----------------------- SET UP PART 1: DEFINE -------------------- -#
@@ -31,6 +40,15 @@ from packages import *
 # other folders
 inf = os.path.join(db_data, "raw") # input 
 outf = os.path.join(db_data, "clean") #output
+
+# write extension artifacts to the explicit Dropbox copy path used for this project round
+interim_override = "/Users/allegrasaggese/Dropbox/Mental/allegra-dropbox-copy/interim-data"
+qa_dir = os.path.join(interim_override, "qa-crime")
+local_ext_dir = os.path.join(interim_override, "crime-disagg-extension")
+os.makedirs(qa_dir, exist_ok=True)
+os.makedirs(local_ext_dir, exist_ok=True)
+today_str = date.today().strftime("%Y-%m-%d")
+RUN_CRIME_DISAGG_EXTENSION = os.getenv("RUN_CRIME_DISAGG_EXTENSION", "0").strip().lower() in {"1", "true", "yes", "y"}
 
 crimef = os.path.join(inf, "crime")
 crimef = os.path.join(crimef, "total-v1")
@@ -95,7 +113,7 @@ def norm(s: str) -> str:
     return s
 
 # build normalized->actual map from existing dataframe
-colmap = {norm(c): c for c in df.columns}
+colmap = {norm(c): c for c in combined_df.columns}
 norm_cols = list(colmap.keys())
 
 
@@ -154,11 +172,16 @@ combined_df.columns = (
 [c for c in combined_df.columns if "human" in c.lower()]
 
 
-# rename human trafficking columns and remake crime cols 
-combined_df = combined_df.rename(columns={
-    'human_trafficking_-_commercial_sex_acts ': 'human_traffic_comm_sex',
-    'human_trafficking_-_involuntary_servitude ': 'human_traffic_inv_servitude'
-})
+# rename human trafficking columns robustly
+rename_map = {}
+for c in combined_df.columns:
+    nc = norm(c)
+    if nc == norm("human_trafficking_-_commercial_sex_acts"):
+        rename_map[c] = "human_traffic_comm_sex"
+    elif nc == norm("human_trafficking_-_involuntary_servitude"):
+        rename_map[c] = "human_traffic_inv_servitude"
+if rename_map:
+    combined_df = combined_df.rename(columns=rename_map)
 
 # check colnames 
 print(repr(combined_df.columns.tolist())) # STILL NOT RECGONIZING IT! 
@@ -166,11 +189,9 @@ print(repr(combined_df.columns.tolist())) # STILL NOT RECGONIZING IT!
 for i, c in enumerate(combined_df.columns):
     if "human" in c.lower():
         print(i, repr(c))
-        
-# rename by position
-combined_df.columns.values[27] = "human_traffic_comm_sex"
-combined_df.columns.values[28] = "human_traffic_inv_servitude"
-[c for c in combined_df.columns if "human" in c.lower()] # WORKS! 
+
+if "human_traffic_comm_sex" not in combined_df.columns or "human_traffic_inv_servitude" not in combined_df.columns:
+    print("Warning: one or both human trafficking columns were not found after normalization.")
 
 
 # now remake the list of crime_cols 
@@ -199,7 +220,7 @@ collapsed = (
 collapsed["total_incidents"] = collapsed[crime_cols].sum(axis=1)
 
 # count raw incident rows per group for sanity
-collapsed["n_rows"] = df.groupby(keys).size().reset_index(name="n")["n"]
+collapsed["n_rows"] = combined_df.groupby(keys).size().reset_index(name="n")["n"]
 
 #check avg incident / yr (and demog decomp) collapse size 
 7631205/209760 # 36.380649313501145
@@ -249,9 +270,94 @@ combined_df.to_csv(cdpath, index=False)
 crime_flat= f"{today_str}_crime_fips_level_final.csv"
 cpath = os.path.join(outf, crime_flat)
 collapsed_fips_only.to_csv(cpath, index=False)
+print("Saved:", cdpath)
+print("Saved:", cpath)
 
 
+# ----------------------- OPTIONAL EXTENSION: CRIME DISAGG BY SEX/AGE/RACE -------------------- -#
+if RUN_CRIME_DISAGG_EXTENSION:
+    required_demo = ["sex_of_arrestee", "race_of_arrestee", "ethnicity_of_arrestee", "age_of_arrestee"]
+    missing_demo = [c for c in required_demo if c not in combined_df.columns]
+    if missing_demo:
+        print(f"Skipping crime disaggregation extension; missing columns: {missing_demo}")
+    else:
+        ext = combined_df.copy()
+        ext["year"] = pd.to_numeric(ext["year"], errors="coerce").astype("Int64")
+        ext["fips"] = (
+            ext["fips"].astype("string")
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+            .str.replace(r"\D", "", regex=True)
+            .str.zfill(5)
+        )
+        ext["state"] = ext["state"].astype("string").str.strip()
+        ext["county"] = ext["county"].astype("string").str.strip()
+        ext["sex_of_arrestee"] = ext["sex_of_arrestee"].astype("string").str.strip().str.lower()
+        ext["race_of_arrestee"] = ext["race_of_arrestee"].astype("string").str.strip().str.lower()
+        ext["ethnicity_of_arrestee"] = ext["ethnicity_of_arrestee"].astype("string").str.strip().str.lower()
+        # Source-native age disaggregation: keep the crime data's own age values.
+        ext["age_bucket"] = (
+            ext["age_of_arrestee"].astype("string").str.strip().str.replace(r"\.0$", "", regex=True)
+        )
+        ext["age_bucket"] = ext["age_bucket"].replace("", pd.NA).fillna("unknown")
+        ext["age_exact"] = pd.to_numeric(ext["age_bucket"], errors="coerce").astype("Int64")
 
+        ext_keys = [
+            "year", "state", "county", "fips",
+            "sex_of_arrestee", "race_of_arrestee", "ethnicity_of_arrestee",
+            "age_bucket"
+        ]
+        ext_crime_cols = [c for c in crime_cols if c in ext.columns]
+        disagg = (
+            ext.groupby(ext_keys, as_index=False)[ext_crime_cols]
+            .sum(min_count=1)
+        )
+        disagg["total_incidents"] = disagg[ext_crime_cols].sum(axis=1)
+        disagg["n_rows"] = ext.groupby(ext_keys).size().reset_index(name="n")["n"]
+
+        disagg_out = os.path.join(local_ext_dir, f"{today_str}_crime_sex_age_race_disagg_extension.csv")
+        disagg.to_csv(disagg_out, index=False)
+        print("Saved local extension:", disagg_out)
+
+        panel_keys = ["year", "state", "county", "fips", "sex_of_arrestee", "race_of_arrestee", "ethnicity_of_arrestee", "age_bucket"]
+        panel = (
+            disagg.groupby(panel_keys, as_index=False)[ext_crime_cols + ["total_incidents", "n_rows"]]
+            .sum(min_count=1)
+        )
+        panel_out = os.path.join(local_ext_dir, f"{today_str}_crime_fips_year_sex_race_agebucket_extension.csv")
+        panel.to_csv(panel_out, index=False)
+        print("Saved local extension:", panel_out)
+
+        qa_bucket = pd.concat(
+            [
+                pd.DataFrame({"dimension": "sex_of_arrestee", "value": sorted(panel["sex_of_arrestee"].dropna().unique())}),
+                pd.DataFrame({"dimension": "race_of_arrestee", "value": sorted(panel["race_of_arrestee"].dropna().unique())}),
+                pd.DataFrame({"dimension": "ethnicity_of_arrestee", "value": sorted(panel["ethnicity_of_arrestee"].dropna().unique())}),
+                pd.DataFrame({"dimension": "age_bucket", "value": sorted(panel["age_bucket"].dropna().unique())}),
+            ],
+            ignore_index=True,
+        )
+        qa_bucket_out = os.path.join(qa_dir, f"{today_str}_qa_crime_disagg_bucket_values.csv")
+        qa_bucket.to_csv(qa_bucket_out, index=False)
+        print("Saved QA:", qa_bucket_out)
+
+        qa_keys = pd.DataFrame(
+            [
+                {
+                    "n_rows_disagg": int(len(disagg)),
+                    "n_unique_disagg_keys": int(disagg[ext_keys].drop_duplicates().shape[0]),
+                    "n_duplicate_disagg_rows": int(disagg.duplicated(ext_keys).sum()),
+                    "n_rows_bucket_panel": int(len(panel)),
+                    "n_unique_panel_keys": int(panel[panel_keys].drop_duplicates().shape[0]),
+                    "n_duplicate_panel_rows": int(panel.duplicated(panel_keys).sum()),
+                }
+            ]
+        )
+        qa_keys_out = os.path.join(qa_dir, f"{today_str}_qa_crime_disagg_key_check.csv")
+        qa_keys.to_csv(qa_keys_out, index=False)
+        print("Saved QA:", qa_keys_out)
+else:
+    print("Skipping optional crime disaggregation extension (RUN_CRIME_DISAGG_EXTENSION=0).")
 
 
 
