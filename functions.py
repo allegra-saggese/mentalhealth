@@ -18,6 +18,10 @@ import urllib.error
 from urllib.parse import urlencode
 from urllib.request import urlopen, Request
 
+# packages for timestamping files 
+import datetime as datetime
+import time
+from datetime import date 
 
 ##################### STANDARD DEFINITIONS ####################
 
