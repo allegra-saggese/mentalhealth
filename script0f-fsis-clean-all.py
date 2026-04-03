@@ -74,7 +74,10 @@ def _run_script(script_name: str, dry_run=False):
     print(f"[{stamp}] RUN {path}")
     if dry_run:
         return
-    subprocess.run(cmd, check=True, cwd=REPO_ROOT)
+    env = os.environ.copy()
+    existing_py = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = REPO_ROOT if not existing_py else f"{REPO_ROOT}:{existing_py}"
+    subprocess.run(cmd, check=True, cwd=REPO_ROOT, env=env)
 
 
 def _build_steps(hud_strategy: str, run_manual_zip: bool, run_manual_county: bool):
