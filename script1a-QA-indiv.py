@@ -3,9 +3,11 @@
 """
 Created on Mon Jun 30 18:55:21 2025
 
-Population QA across merged outputs.
+Conduct QA across merged outputs - the merged output is the FULL PANEL 
 """
 
+
+# ----------------------- SET UP PART 1: DEFINE FILES + HELPERS -------------------- -#
 from packages import *
 from functions import *
 import re
@@ -15,7 +17,6 @@ merged_dir = os.path.join(db_data, "merged")
 out_dir = os.path.join(db_me, "interim-data")
 os.makedirs(out_dir, exist_ok=True)
 
-today_str = date.today().strftime("%Y-%m-%d")
 
 
 def _find_merged_files():
@@ -33,6 +34,7 @@ def _pop_cols(df):
 _to_num = to_numeric_series
 
 
+# ----------------------- QA PART 1: REVIEW POP DATA  -------------------- -#
 def _pick_reference(cols):
     priority = [
         "population_population_full",
@@ -119,6 +121,7 @@ for path in _find_merged_files():
             }
         )
 
+# ----------------------- QA PART 1: SUMMARY STATS  -------------------- -#
 
 summary_df = pd.DataFrame(summary_rows).sort_values(["file", "pct_non_null_numeric", "column"], ascending=[True, False, True])
 pair_df = pd.DataFrame(pair_rows).sort_values(["file", "n_overlap", "mean_abs_diff"], ascending=[True, False, True])
@@ -131,6 +134,7 @@ catalog_path = os.path.join(out_dir, f"{today_str}_qa_population_columns_catalog
 summary_df.to_csv(summary_path, index=False)
 pair_df.to_csv(pair_path, index=False)
 catalog_df.to_csv(catalog_path, index=False)
+
 
 print("Saved:", summary_path)
 print("Saved:", pair_path)
