@@ -119,6 +119,10 @@ def gini_from_values(values):
     return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
 
 
+# keep helper naming consistent with other scripts
+normalize_key = normalize_panel_key
+
+
 STATE_FIPS_TO_NAME = {
     "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas", "06": "California",
     "08": "Colorado", "09": "Connecticut", "10": "Delaware", "11": "District of Columbia",
