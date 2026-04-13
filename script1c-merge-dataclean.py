@@ -720,6 +720,9 @@ _drop.update(
     if c.startswith("ratio_of_population_to_") and "mentalhealthrank_full" in c
 )
 
+# CHR population column (redundant with population_population_full → population)
+_drop.add("population_raw_value_mentalhealthrank_full")
+
 # CAFO text / metadata columns
 _drop.update(
     c for c in [
@@ -743,6 +746,8 @@ def _strip_source_suffixes(name: str) -> str:
     n = n.replace("_raw_value_mentalhealthrank_full", "")
     n = n.replace("_mentalhealthrank_full", "")
     n = n.replace("_cafo_ops_by_size_compact", "_cafo")
+    # Fix double-cafo: any_large_cafo_cafo → any_large_cafo
+    n = n.replace("_cafo_cafo", "_cafo")
     n = n.replace("_cdc_county_year_deathsofdespair", "_despair")
     n = n.replace("_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip", "_fsis")
     n = n.replace("_crime_fips_level_final", "_crime")
