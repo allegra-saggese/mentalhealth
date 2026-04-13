@@ -54,27 +54,29 @@ os.makedirs(out_dir, exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")
 
 PANEL_YEARS = (2010, 2015)   # window where MH outcome coverage is adequate
-POP_COL     = "population_population_full"
+POP_COL     = "population"
 CAFO_TOTAL  = "cafo_total_ops_all_animals"
 
 # Outcome columns with clean display labels and units
+# All rate outcomes now standardized to per 100k via script1c rate block.
 OUTCOMES = {
     "Poor Mental Health Days\n(avg days/month, CHR)":
-        "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "Excessive Drinking\n(% adults, CHR)":
-        "excessive_drinking_raw_value_mentalhealthrank_full",
+        "poor_mental_health_days",
+    "Excessive Drinking\n(per 100k population, CHR)":
+        "excessive_drinking_per100k",
     "Violent Crime Rate\n(per 100k, CHR)":
-        "violent_crime_raw_value_mentalhealthrank_full",
+        "violent_crime",
     "Homicide Rate\n(per 100k, CHR)":
-        "homicides_raw_value_mentalhealthrank_full",
-    "Aggravated Assault\n(log UCR count + 1)":
-        "aggravated_assault_crime_fips_level_final",
+        "homicides",
+    "Aggravated Assault\n(per 100k, UCR)":
+        "aggravated_assault_per100k",
     "Deaths of Despair\nCrude Rate (per 100k, CDC)":
-        "crude_rate_cdc_county_year_deathsofdespair",
+        "crude_rate_despair",
 }
 
-# Columns that need their own log transform (raw counts, not already rates)
-LOG_Y_COLS = {"aggravated_assault_crime_fips_level_final"}
+# Columns that need an additional log transform on the y-axis.
+# All outcomes are now rates — no additional log transform needed.
+LOG_Y_COLS = set()
 
 # CAFO by animal type; each sub-dict maps size label to column
 CAFO_TYPES = {
@@ -84,17 +86,17 @@ CAFO_TYPES = {
 }
 CAFO_TYPE_COLORS = {"Cattle": "#1b7837", "Hogs": "#762a83", "Chickens": "#b35806"}
 
-FSIS_TOTAL    = "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip"
-FSIS_SLAUGHTER = "n_slaughterhouse_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip"
+FSIS_TOTAL     = "n_unique_establishments_fsis"
+FSIS_SLAUGHTER = "n_slaughterhouse_present_establishments_fsis"
 
 # 3 outcomes used for the by-type comparison (A2) — those with best coverage
 CORE_OUTCOMES_A2 = {
     "Poor Mental Health Days\n(avg days/month)":
-        "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "Excessive Drinking\n(% adults)":
-        "excessive_drinking_raw_value_mentalhealthrank_full",
+        "poor_mental_health_days",
+    "Excessive Drinking\n(per 100k)":
+        "excessive_drinking_per100k",
     "Violent Crime Rate\n(per 100k)":
-        "violent_crime_raw_value_mentalhealthrank_full",
+        "violent_crime",
 }
 
 # State FIPS → abbreviation (for labeling)
@@ -398,7 +400,7 @@ else:
 # Plot: dual-axis per county — CAFO ops per 10k pop (left, blue) and
 #       poor mental health days (right, red), 2010–2015.
 # =============================================================================
-MH_COL = "poor_mental_health_days_raw_value_mentalhealthrank_full"
+MH_COL = "poor_mental_health_days"
 
 df_b = df[df["year"].between(*PANEL_YEARS)].copy()
 df_b["cafo_per10k"] = (df_b[CAFO_TOTAL] / df_b[POP_COL].replace(0, np.nan)) * 10_000
@@ -511,12 +513,12 @@ selection_meta.to_csv(
 # Purpose: show how outcomes co-move before committing to a primary Y variable.
 # =============================================================================
 corr_outcomes = {
-    "Poor MH Days (CHR)":        "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "Excessive Drinking (CHR)":  "excessive_drinking_raw_value_mentalhealthrank_full",
-    "Violent Crime (CHR)":       "violent_crime_raw_value_mentalhealthrank_full",
-    "Homicides (CHR)":           "homicides_raw_value_mentalhealthrank_full",
-    "Agg. Assault (UCR)":        "aggravated_assault_crime_fips_level_final",
-    "Despair Rate (CDC)":        "crude_rate_cdc_county_year_deathsofdespair",
+    "Poor MH Days (CHR)":        "poor_mental_health_days",
+    "Excessive Drinking (CHR)":  "excessive_drinking_per100k",
+    "Violent Crime (CHR)":       "violent_crime",
+    "Homicides (CHR)":           "homicides",
+    "Agg. Assault (UCR)":        "aggravated_assault_per100k",
+    "Despair Rate (CDC)":        "crude_rate_despair",
 }
 
 corr_cols   = {lbl: col for lbl, col in corr_outcomes.items() if col in df_panel.columns}
@@ -710,7 +712,7 @@ if px is not None:
         df_2012 = df[df["year"] == 2012].copy()
         df_2012["cafo_log_per10k"] = log_per10k(df_2012[CAFO_TOTAL], df_2012[POP_COL])
         df_2012["fips_str"] = df_2012["fips"].astype("string").str.zfill(5)
-        _mh_col = "poor_mental_health_days_raw_value_mentalhealthrank_full"
+        _mh_col = "poor_mental_health_days"
 
         _map_specs = [
             (
