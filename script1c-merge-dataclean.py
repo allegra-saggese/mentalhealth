@@ -281,6 +281,61 @@ merged_all = merged_all.sort_values(["fips", "year"]).reset_index(drop=True)
 print("Final merged panel shape:", merged_all.shape)
 
 
+# --- Derived: crude rate from census population ---
+# Deaths column sourced from CDC WONDER county-year downloads (script0c).
+# Population from US Census via population_full (100% county-year coverage).
+#
+# cdc_in_query: indicator = 1 if county-year appeared in any CDC WONDER file.
+#   A value of 0 means the county was absent from the CDC download — could be
+#   a true zero or simply outside the query scope (ambiguous; see script1d).
+#   This flag is important for the ML framework to distinguish missingness types.
+#
+# crude_rate_from_census_pop: recomputed deaths-of-despair crude rate using
+#   the census population denominator instead of the CDC internal population.
+#   Allows full-panel rate comparison, bypassing CDC suppression of crude_rate
+#   when deaths ≤ 20. Deaths column retains the raw count regardless of suppression.
+_deaths_col = "deaths_cdc_county_year_deathsofdespair"
+_pop_col = "population_population_full"
+
+if _deaths_col in merged_all.columns and _pop_col in merged_all.columns:
+    _deaths = pd.to_numeric(merged_all[_deaths_col], errors="coerce")
+    _pop = pd.to_numeric(merged_all[_pop_col], errors="coerce")
+
+    # Three missingness states for the crude rate calculation:
+    #   cdc_in_query == 0 : county-year absent from CDC WONDER download — unknown
+    #                        whether true zero deaths or outside query scope.
+    #   cdc_in_query == 1, deaths_is_zero == 1 : CDC explicitly returned Deaths=0.
+    #                        Plausibly a true zero but cannot rule out suppression
+    #                        artefact; crude rate is set to NaN (not 0) to avoid
+    #                        treating ambiguous zeros as confirmed no-death counties.
+    #   cdc_in_query == 1, deaths_is_zero == 0 : Deaths > 0; crude rate computed.
+    merged_all["cdc_in_query"] = _deaths.notna().astype("Int64")
+    merged_all["deaths_is_zero"] = ((_deaths == 0) & _deaths.notna()).astype("Int64")
+
+    # Compute rate only where deaths are positive and census pop is positive.
+    _rate_mask = (_deaths > 0) & (_pop > 0)
+    merged_all["crude_rate_from_census_pop"] = (
+        (_deaths / _pop * 100_000).where(_rate_mask)
+    )
+    merged_all["deaths_per_10k_census_pop"] = (
+        (_deaths / _pop * 10_000).where(_rate_mask)
+    )
+
+    n_in_query = int(merged_all["cdc_in_query"].sum())
+    n_zero = int(merged_all["deaths_is_zero"].sum())
+    n_rate = int(_rate_mask.sum())
+    n_total = len(merged_all)
+    print(
+        f"Derived crude rate columns added.\n"
+        f"  cdc_in_query == 1 : {n_in_query:,} county-years ({100*n_in_query/n_total:.1f}%)\n"
+        f"  deaths_is_zero == 1 : {n_zero:,} (rate set to NaN — ambiguous zeros)\n"
+        f"  crude rate computed : {n_rate:,} county-years with Deaths > 0"
+    )
+else:
+    _missing = [c for c in [_deaths_col, _pop_col] if c not in merged_all.columns]
+    print(f"Warning: cannot compute crude rate from census pop — missing columns: {_missing}")
+
+
 # Export
 today_str = date.today().strftime("%Y-%m-%d")
 out_name = f"{today_str}_full_merged.csv"
