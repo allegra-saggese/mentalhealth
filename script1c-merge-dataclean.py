@@ -4,15 +4,23 @@
 Created on Tue Oct 21 01:10:00 2025
 
 Builds one county-year merged panel from the latest version of each clean file.
-Filtering rule: keep only (fips, year) where rural-key non_large_metro == 1.
 
-Quick purpose:
-- Finds the latest clean outputs by descriptor.
-- Normalizes each source to county-year (`fips, year`) and merges them.
-- Applies the rural-key filter used in the project’s main analysis panel.
-- Pulls county CDC mortality directly from script0c output
-  (`*_cdc_county_year_deathsofdespair.csv`) via descriptor matching.
-- Writes full merged panel + standard year-range slices.
+Panel frame: ALL counties where rural-key non_large_metro == 1.
+  The rural-key (NCHS urban-rural classification) is the backbone of the panel.
+  Every other dataset — including CAFO — is LEFT JOINED onto this frame, so
+  rural counties with no data for a given source are always present as NaN rows
+  (or 0 for CAFO counts, see zero-fill section below).
+
+Key design decisions:
+- CAFO (USDA Agricultural Census): zero-fill for census-covered years.
+  Absence in the census = confirmed zero operations, not a missing observation.
+  Years not yet covered (2022+) remain NaN until the raw .dta is added.
+- CDC deaths-of-despair: three-state missingness flag (cdc_in_query,
+  deaths_is_zero, crude_rate_from_census_pop). See inline comments.
+- CHR (County Health Rankings): CHR rate-only variables get imputed count
+  columns (*_count_imputed). Num/denom variables get a *_ratio_flag QA column.
+- FSIS (slaughterhouses): available 2017–present only; panel years 2017–2023
+  overlap with the analysis window.
 """
 
 from packages import *
@@ -266,6 +274,43 @@ cafo_animal_size = _build_cafo_animal_size_panel(latest[BASE_DESCRIPTOR], allowe
 if cafo_animal_size is not None and not cafo_animal_size.empty:
     merged_all = merged_all.merge(cafo_animal_size, on=["fips", "year"], how="left")
 
+# --- CAFO zero-fill for rural counties absent from USDA Census file ---
+# The USDA Agricultural Census is comprehensive: a rural county that does not
+# appear in the CAFO file for a census-covered year genuinely had zero animal
+# feeding operations — the absence is structural, not a missing observation.
+# We fill all numeric CAFO count columns with 0 for those county-years.
+#
+# Only years where the CAFO file contributed ≥1 observation are treated this
+# way. Years 2022+ currently have no coverage because 2022.dta has not been
+# added to raw/usda/ yet — those rows remain NaN until the file is added.
+#
+# Text/metadata columns (commodity descriptor, county name, class) are left
+# as NaN: there is no meaningful string value for a zero-operations county.
+_CAFO_TEXT_COLS = {
+    f"county_fips_name_{BASE_DESCRIPTOR}",
+    f"commodity_desc_{BASE_DESCRIPTOR}",
+    f"class_desc_{BASE_DESCRIPTOR}",
+}
+_cafo_covered_years = set(
+    merged_all.loc[merged_all["cafo_total_ops_all_animals"].notna(), "year"].unique()
+)
+_cafo_fill_cols = [
+    c for c in merged_all.columns
+    if (BASE_DESCRIPTOR in c or c.startswith("cafo_"))
+    and c not in _CAFO_TEXT_COLS
+    and pd.api.types.is_numeric_dtype(merged_all[c])
+]
+_in_cafo_year = merged_all["year"].isin(_cafo_covered_years)
+_all_cafo_null = merged_all[_cafo_fill_cols].isna().all(axis=1)
+_zero_fill_mask = _in_cafo_year & _all_cafo_null
+merged_all.loc[_zero_fill_mask, _cafo_fill_cols] = 0
+
+print(
+    f"CAFO zero-fill: {int(_zero_fill_mask.sum()):,} county-years → 0 "
+    f"(rural counties absent from USDA Census = confirmed no operations). "
+    f"Years covered by CAFO data: {sorted(_cafo_covered_years)}."
+)
+
 
 # Merge remaining selected datasets on top of base keys
 for descriptor in sorted(MERGE_DESCRIPTORS):
@@ -364,7 +409,14 @@ _CHR_REL_TOL = 0.10   # 10% relative in proportion space
 
 
 def _chr_detect_scale(series):
-    """Return 100 if raw_value is a proportion (0-1), else 1 (already 0-100)."""
+    """
+    Classify CHR raw_value units for count imputation (Pass 1).
+      Returns 100 when raw_value is a proportion (median ≤ 1.0), meaning
+      we multiply by 100 then divide by 100 × pop — equivalent to raw × pop.
+      Returns 1  when raw_value is already in percent (0–100) space, meaning
+      we divide by 100 × pop.
+    NOT used for ratio verification (Pass 2), which has its own unit logic.
+    """
     med = series.dropna().median()
     return 100.0 if med <= 1.0 else 1.0
 
@@ -402,9 +454,19 @@ for _col in sorted(_all_cols):
     _num = pd.to_numeric(merged_all[_col], errors="coerce")
     _den = pd.to_numeric(merged_all[_den_col], errors="coerce")
     _raw = pd.to_numeric(merged_all[_raw_col], errors="coerce")
-    _implied = (_num / _den).where(_den > 0)
-    _scale = _chr_detect_scale(_raw)
-    _raw_prop = _raw / _scale
+    _implied = (_num / _den).where(_den > 0)   # always in proportion (0–1) space
+
+    # Convert raw_value to proportion space for comparison.
+    # CHR raw_values come in three unit types:
+    #   proportion (median ≤ 1)  → raw_prop = raw_value          (e.g. adult_obesity=0.35)
+    #   percentage (1 < med ≤ 100) → raw_prop = raw_value / 100  (e.g. some_college=65.0)
+    #   rate per 100k (med > 100) → skip: can't normalize without knowing the rate base
+    _med = _raw.dropna().median()
+    if pd.isna(_med) or _med > 100:
+        # Rate-type variable (e.g. violent_crime per 100k) — skip comparison
+        continue
+    _raw_prop = _raw if _med <= 1.0 else (_raw / 100.0)
+
     _abs_diff = (_implied - _raw_prop).abs()
     _rel_diff = (_abs_diff / _raw_prop.abs()).where(_raw_prop.abs() > 1e-9)
     _checkable = _implied.notna() & _raw_prop.notna()
