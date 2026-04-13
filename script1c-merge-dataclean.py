@@ -486,6 +486,134 @@ if _high_flag:
         print(f"    {_s}: {_nf}/{_nc} ({100*_nf/_nc:.1f}%)")
 
 
+# ── Rate Standardization ──────────────────────────────────────────────────────
+# Derive *_per100k columns for crime counts and CHR variables not already
+# expressed per 100,000. Denominator is always population_population_full.
+# Purpose: put all rate variables on a common scale before regression/ML.
+#
+# Variables skipped (not population rates):
+#   - premature_death (YPLL, not an incidence rate)
+#   - preventable_hospital_stays (per Medicare enrollee, non-standard base)
+#   - poor_mental_health_days, poor_physical_health_days (day-count, 0–30 scale)
+#   - income_inequality (Gini coefficient)
+#   - food_environment_index (composite index, 0–10)
+#   - air_pollution_-_particulate_matter (µg/m³)
+#   - median_household_income (dollars)
+#   - drinking_water_violations (binary flag)
+#   - alcohol-impaired_driving_deaths (fraction of driving deaths, not per pop)
+#   - demographic composition columns (% by age/race/sex, %_rural, population)
+
+_pop_col = "population_population_full"
+_pop = merged_all[_pop_col]
+
+# --- Part 1: UCR crime counts → per 100k ------------------------------------
+# Raw incident counts from FBI UCR / state systems aggregated to county-year.
+# Metadata columns (state label, county label, n_rows) are excluded.
+_CRIME_COUNT_COLS = [
+    c for c in merged_all.columns
+    if c.endswith("_crime_fips_level_final")
+    and not any(c.startswith(p) for p in ("state_", "county_", "n_rows_"))
+]
+for _col in _CRIME_COUNT_COLS:
+    _new = _col.replace("_crime_fips_level_final", "") + "_per100k"
+    merged_all[_new] = (merged_all[_col] / _pop * 100_000).where(_pop > 0)
+
+print(f"Crime rate derivation: {len(_CRIME_COUNT_COLS)} count columns → *_per100k.")
+
+# --- Part 2: CHR variables → standardize to per 100,000 ---------------------
+# CHR distributes raw_value columns in mixed units. We create *_per100k
+# variants using the documented unit for each variable group.
+
+_CHR_SUFFIX = "_raw_value_mentalhealthrank_full"
+
+# 2a. Provider ratios: raw value = providers / population
+#     (e.g. 0.0005 ≈ 50 providers per 100,000). Multiply by 100,000.
+_CHR_PROVIDER_RATIO = [
+    "primary_care_physicians",
+    "mental_health_providers",
+    "dentists",
+    "other_primary_care_providers",
+]
+
+# 2b. Per-1,000 base (per 1,000 live births or per 1,000 females 15–19).
+#     Multiply by 100 to convert to per 100,000.
+_CHR_PER1000 = ["teen_births", "infant_mortality"]
+
+# 2c. Per-10,000 base (civic/social organizations per 10,000 population).
+#     Multiply by 10 to convert to per 100,000.
+_CHR_PER10000 = ["social_associations"]
+
+# 2d. Proportions (0–1): rate/prevalence variables expressed as a fraction of
+#     the relevant population. Multiply by 100,000 to convert to per 100,000.
+#     Demographic composition variables (% by race, sex, age, % rural) excluded
+#     — they describe population composition, not event rates.
+_CHR_PROPORTION = [
+    "adult_obesity",
+    "children_in_poverty",
+    "unemployment",
+    "uninsured_adults",
+    "access_to_healthy_foods",
+    "low_birthweight",
+    "poor_or_fair_health",
+    "adult_smoking",
+    "smoking_during_pregnancy",
+    "physical_inactivity",
+    "some_college",
+    "driving_alone_to_work",
+    "%_not_proficient_in_english",
+    "diabetes_prevalence",
+    "children_in_single-parent_households",
+    "mammography_screening",
+    "diabetes_monitoring",
+    "excessive_drinking",
+    "uninsured",
+    "uninsured_children",
+    "food_insecurity",
+    "severe_housing_problems",
+    "long_commute_-_driving_alone",
+    "access_to_exercise_opportunities",
+    "insufficient_sleep",
+    "frequent_mental_distress",
+    "frequent_physical_distress",
+]
+
+# 2e. Already per 100,000 — no new column needed.
+_CHR_ALREADY_PER100K = [
+    "violent_crime", "homicides", "motor_vehicle_crash_deaths",
+    "motor_vehicle_crash_occupancy_rate",
+    "on-road_motor_vehicle_crash-related_er_visits",
+    "sexually_transmitted_infections", "hiv_prevalence",
+    "premature_age-adjusted_mortality", "child_mortality", "injury_deaths",
+]
+
+
+def _make_chr_per100k(stem: str, factor: float) -> None:
+    raw_col = f"{stem}{_CHR_SUFFIX}"
+    out_col = f"{stem}_per100k"
+    if raw_col not in merged_all.columns:
+        print(f"  WARNING: {raw_col} not found — skipped.")
+        return
+    merged_all[out_col] = merged_all[raw_col] * factor
+
+
+for _stem in _CHR_PROVIDER_RATIO:
+    _make_chr_per100k(_stem, 100_000)
+for _stem in _CHR_PER1000:
+    _make_chr_per100k(_stem, 100)
+for _stem in _CHR_PER10000:
+    _make_chr_per100k(_stem, 10)
+for _stem in _CHR_PROPORTION:
+    _make_chr_per100k(_stem, 100_000)
+
+_n_chr = len(_CHR_PROVIDER_RATIO) + len(_CHR_PER1000) + len(_CHR_PER10000) + len(_CHR_PROPORTION)
+print(f"CHR rate standardization: {_n_chr} variables → *_per100k.")
+print(f"  Provider ratios (×100,000): {_CHR_PROVIDER_RATIO}")
+print(f"  Per-1,000   (×100): {_CHR_PER1000}")
+print(f"  Per-10,000  (×10):  {_CHR_PER10000}")
+print(f"  Proportions (×100,000): {len(_CHR_PROPORTION)} variables")
+print(f"  Already per 100k (no copy): {_CHR_ALREADY_PER100K}")
+
+
 # Export
 today_str = date.today().strftime("%Y-%m-%d")
 out_name = f"{today_str}_full_merged.csv"

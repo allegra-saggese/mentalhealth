@@ -340,29 +340,30 @@ print("Saved:", a2_path)
 # =============================================================================
 # FIGURE A3
 # Binned scatter: FSIS establishments (per capita, log) vs all 6 outcomes
-# 2017 cross-section only — FSIS county linkage not available before 2017
+# Panel: 2017–2023 (all years where FSIS county linkage is available)
 # =============================================================================
-df_2017 = df[df["year"] == 2017].copy()
+_FSIS_YEARS = (2017, 2023)
+df_fsis = df[df["year"].between(*_FSIS_YEARS)].copy()
 
-if FSIS_TOTAL in df_2017.columns and df_2017[FSIS_TOTAL].notna().sum() > 50:
-    df_2017["x_fsis"] = log_per10k(df_2017[FSIS_TOTAL], df_2017[POP_COL])
+if FSIS_TOTAL in df_fsis.columns and df_fsis[FSIS_TOTAL].notna().sum() > 50:
+    df_fsis["x_fsis"] = log_per10k(df_fsis[FSIS_TOTAL], df_fsis[POP_COL])
 
     fig, axes = plt.subplots(n_rows_a1, n_cols_a1, figsize=(n_cols_a1 * 5.5, n_rows_a1 * 4.5))
     axes = axes.flatten()
 
     for i, (ylabel, col) in enumerate(OUTCOMES.items()):
         ax = axes[i]
-        if col not in df_2017.columns:
+        if col not in df_fsis.columns:
             ax.set_visible(False)
             continue
-        y_vals = np.log1p(df_2017[col]) if col in LOG_Y_COLS else df_2017[col]
+        y_vals = np.log1p(df_fsis[col]) if col in LOG_Y_COLS else df_fsis[col]
         binned_scatter_ax(
             ax,
-            x_vals=df_2017["x_fsis"],
+            x_vals=df_fsis["x_fsis"],
             y_vals=y_vals,
             label_x="log(FSIS Establishments per 10k Population + 1)",
             label_y=ylabel,
-            n_bins=15,     # fewer bins: smaller n in 2017 cross-section
+            n_bins=20,
             color="#41b6c4",
         )
 
@@ -370,18 +371,18 @@ if FSIS_TOTAL in df_2017.columns and df_2017[FSIS_TOTAL].notna().sum() > 50:
         axes[j].set_visible(False)
 
     fig.suptitle(
-        "FSIS Slaughter & Processing Establishments vs. Outcomes — Rural US Counties, 2017\n"
+        f"FSIS Slaughter & Processing Establishments vs. Outcomes — Rural US Counties, {_FSIS_YEARS[0]}–{_FSIS_YEARS[1]}\n"
         "Treatment: log(total FSIS establishments per 10,000 residents + 1)   |   "
-        "Cross-section only (FSIS linkage unavailable pre-2017)",
+        "County-year panel (FSIS available 2017–present only)",
         fontsize=11, y=1.01,
     )
     plt.tight_layout()
-    a3_path = os.path.join(out_dir, f"{today_str}_A3_fsis_vs_outcomes_2017.png")
+    a3_path = os.path.join(out_dir, f"{today_str}_A3_fsis_vs_outcomes_{_FSIS_YEARS[0]}_{_FSIS_YEARS[1]}.png")
     fig.savefig(a3_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", a3_path)
 else:
-    print("FSIS 2017 data insufficient — skipping Figure A3.")
+    print("FSIS panel data insufficient — skipping Figure A3.")
 
 
 # =============================================================================
