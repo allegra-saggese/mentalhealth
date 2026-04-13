@@ -65,9 +65,14 @@ df["large_cafo_log"]      = log_per10k(
     df[["cafo_cattle_large","cafo_hogs_large","cafo_chickens_large"]].sum(axis=1, min_count=1),
     df[POP_COL]
 )
-# FSIS available 2017+; carry forward for structure but will be sparse in 2010-2015
-df["fsis_total_log"]      = log_per10k(df.get("n_unique_establishments_fsis", pd.Series(np.nan, index=df.index)), df[POP_COL])
-df["fsis_slaughter_log"]  = log_per10k(df.get("n_slaughterhouse_present_establishments_fsis", pd.Series(np.nan, index=df.index)), df[POP_COL])
+# FSIS available 2017+ only. Derive on the 2017–2023 slice so Figure U is non-empty.
+# %_hispanic is available from 2011+, so 2017–2023 rows all have Hispanic data.
+_df_fsis = df_raw[df_raw["year"].between(2017, 2023)].copy()
+_df_fsis["fsis_total_log"]     = log_per10k(_df_fsis["n_unique_establishments_fsis"], _df_fsis[POP_COL])
+_df_fsis["fsis_slaughter_log"] = log_per10k(_df_fsis["n_slaughterhouse_present_establishments_fsis"], _df_fsis[POP_COL])
+# Placeholder NaN columns on 2010–2015 df (used for S/V which stay on that window)
+df["fsis_total_log"]      = np.nan
+df["fsis_slaughter_log"]  = np.nan
 
 TREATMENT_VARS = {
     "CAFO Total (log/10k)":     "cafo_total_log",
@@ -96,14 +101,14 @@ CHR_HEALTH = {
     "Food Insecurity (%)":           "food_insecurity_per100k",
     "Children in Poverty (%)":       "children_in_poverty_per100k",
     "Unemployment (%)":              "unemployment_per100k",
-    "Deaths of Despair (crude rate)":"crude_rate_cdc_county_year_deathsofdespair",
+    "Deaths of Despair (crude rate)":"crude_rate_despair",
 }
 # Filter to cols that actually exist in the frame
 CHR_HEALTH = {k: v for k, v in CHR_HEALTH.items() if v in df.columns}
 
 # Core MH focus outcomes (for partial scatter)
 FOCUS_OUTCOMES = {
-    "Deaths of Despair (crude rate)": "crude_rate_cdc_county_year_deathsofdespair",
+    "Deaths of Despair (crude rate)": "crude_rate_despair",
     "Poor Mental Health Days":        "poor_mental_health_days",
     "Aggravated Assault (per 100k)":  "aggravated_assault_per100k",
 }
@@ -244,10 +249,23 @@ print("Saved:", path)
 
 # =============================================================================
 # FIGURE U: CAFO/FSIS exposure by %_hispanic quartile — boxplots
+# CAFO window: 2010–2015 | FSIS window: 2017–2023 (first available year)
+# %_hispanic has full coverage for both windows (CHR data, available from 2011+)
 # =============================================================================
-_u_df = df[[HISP_COL] + list(TREATMENT_VARS.values())].copy()
-_u_df = _u_df[_u_df[HISP_COL].notna()].copy()
-_u_df["hisp_q"] = pd.qcut(_u_df[HISP_COL], q=4, labels=QUARTILE_LABELS)
+# Build per-treatment source dataframes
+_CAFO_TREAT = {
+    "CAFO Total (log/10k)":  "cafo_total_log",
+    "CAFO Large (log/10k)":  "large_cafo_log",
+}
+_FSIS_TREAT = {
+    "FSIS Total (log/10k)":     "fsis_total_log",
+    "FSIS Slaughter (log/10k)": "fsis_slaughter_log",
+}
+
+def _u_source(tcol, is_fsis=False):
+    """Return the correct source dataframe for a treatment variable."""
+    src = _df_fsis if is_fsis else df
+    return src[[HISP_COL, tcol]].copy()
 
 n_treat = len(TREATMENT_VARS)
 fig, axes = plt.subplots(1, n_treat, figsize=(5 * n_treat, 6), sharey=False)
@@ -255,7 +273,18 @@ if n_treat == 1:
     axes = [axes]
 
 for ax, (tlabel, tcol) in zip(axes, TREATMENT_VARS.items()):
-    data_by_q = [_u_df.loc[_u_df["hisp_q"] == ql, tcol].dropna().values
+    is_fsis = tlabel.startswith("FSIS")
+    _src    = _df_fsis if is_fsis else df
+    window  = "2017–2023" if is_fsis else "2010–2015"
+
+    _u_sub = _src[[HISP_COL, tcol]].copy()
+    _u_sub = _u_sub[_u_sub[HISP_COL].notna() & _u_sub[tcol].notna()].copy()
+    if len(_u_sub) < 50:
+        ax.text(0.5, 0.5, "No data", transform=ax.transAxes, ha="center")
+        ax.set_title(tlabel); continue
+
+    _u_sub["hisp_q"] = pd.qcut(_u_sub[HISP_COL], q=4, labels=QUARTILE_LABELS)
+    data_by_q = [_u_sub.loc[_u_sub["hisp_q"] == ql, tcol].dropna().values
                  for ql in QUARTILE_LABELS]
     bp = ax.boxplot(
         data_by_q,
@@ -272,19 +301,19 @@ for ax, (tlabel, tcol) in zip(axes, TREATMENT_VARS.items()):
 
     # Overlay group means
     for qi, ql in enumerate(QUARTILE_LABELS, start=1):
-        _m = _u_df.loc[_u_df["hisp_q"] == ql, tcol].mean()
+        _m = _u_sub.loc[_u_sub["hisp_q"] == ql, tcol].mean()
         if not np.isnan(_m):
             ax.plot(qi, _m, "D", color="white", markersize=5,
                     markeredgecolor="black", markeredgewidth=0.8, zorder=5)
 
     ax.set_xticks(range(1, 5))
     ax.set_xticklabels(QUARTILE_LABELS, fontsize=8, rotation=20)
-    ax.set_title(tlabel, fontsize=10, fontweight="bold")
+    ax.set_title(f"{tlabel}\n({window})", fontsize=9, fontweight="bold")
     ax.set_ylabel("log(ops per 10,000 residents + 1)", fontsize=9)
 
 fig.suptitle(
-    "CAFO & FSIS Exposure by % Hispanic Quartile — Rural US Counties, 2010–2015\n"
-    "Box = IQR / Whiskers = 1.5×IQR / Diamond = group mean",
+    "CAFO & FSIS Exposure by % Hispanic Quartile — Rural US Counties\n"
+    "CAFO: 2010–2015 | FSIS: 2017–2023 (first available)   |   Box = IQR / Diamond = mean",
     fontsize=11, y=1.01,
 )
 plt.tight_layout()
