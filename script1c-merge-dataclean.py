@@ -614,8 +614,163 @@ print(f"  Proportions (×100,000): {len(_CHR_PROPORTION)} variables")
 print(f"  Already per 100k (no copy): {_CHR_ALREADY_PER100K}")
 
 
-# Export
+# ── Column cleanup: drop bloat, archive QA columns, rename for legibility ─────
+# Reduces 496-column frame to ~150 clean analysis-ready columns. Rules:
+#   1. Drop all-null columns (empty CI bounds, empty QA flags).
+#   2. Drop CHR confidence interval columns (_ci_low_, _ci_high_).
+#   3. Drop CHR numerator/denominator columns (CHR Pass 2 is complete).
+#   4. Drop CHR source metadata (name, n_rows, county_ranked, release_year, etc.).
+#   5. Original crime count columns: KEPT alongside _per100k versions.
+#   6. Drop crime metadata (state/county label columns, n_rows).
+#   7. Drop CDC metadata; keep deaths_, crude_rate_, pct_of_total_deaths_raw_, flags.
+#   8. Drop CHR raw_value for variables converted to _per100k (raw value is redundant).
+#   9. Drop FSIS metadata (county_name_any_, state_any_, n_rows_fsis).
+#  10. Drop population metadata duplicates (county_, n_rows_, county_code_).
+#  11. Archive ratio_flag columns to a QA CSV, then drop from main frame.
+#  12. Drop CHR population-ratio columns (redundant with _per100k).
+#      CAFO text/metadata columns also dropped.
+# Naming: source-descriptor suffixes stripped; see _strip_source_suffixes().
+
 today_str = date.today().strftime("%Y-%m-%d")
+
+# --- 11. Archive ratio_flag columns to QA CSV --------------------------------
+_ratio_flag_cols = [c for c in merged_all.columns if c.endswith("_ratio_flag")]
+if _ratio_flag_cols:
+    _qa_df = merged_all[["fips", "year"] + _ratio_flag_cols].copy()
+    _qa_path = os.path.join(merged_dir, f"{today_str}_ratio_flags_qa.csv")
+    os.makedirs(merged_dir, exist_ok=True)
+    _qa_df.to_csv(_qa_path, index=False)
+    print(f"Ratio flags archived: {_qa_path} ({len(_ratio_flag_cols)} columns)")
+
+# --- Build drop set ----------------------------------------------------------
+_drop = set()
+
+# 1. All-null columns
+_drop.update(c for c in merged_all.columns if merged_all[c].isna().all())
+
+# 2. CHR confidence interval columns
+_drop.update(
+    c for c in merged_all.columns
+    if "_ci_low_mentalhealthrank_full" in c or "_ci_high_mentalhealthrank_full" in c
+)
+
+# 3. CHR numerator / denominator columns
+_drop.update(
+    c for c in merged_all.columns
+    if "_numerator_mentalhealthrank_full" in c or "_denominator_mentalhealthrank_full" in c
+)
+
+# 4. CHR source metadata
+_CHR_META_COLS = [
+    "name_mentalhealthrank_full",
+    "n_rows_mentalhealthrank_full",
+    "county_ranked_(yes=1/no=0)_mentalhealthrank_full",
+    "release_year_mentalhealthrank_full",
+    "state_abbreviation_mentalhealthrank_full",
+    "state_fips_code_mentalhealthrank_full",
+    "county_fips_code_mentalhealthrank_full",
+]
+_drop.update(c for c in _CHR_META_COLS if c in merged_all.columns)
+
+# 6. Crime metadata (count columns themselves are retained per user decision)
+_drop.update(
+    c for c in ["state_crime_fips_level_final", "county_crime_fips_level_final",
+                "n_rows_x_crime_fips_level_final", "n_rows_y_crime_fips_level_final"]
+    if c in merged_all.columns
+)
+
+# 7. CDC metadata — keep: deaths_cdc_, crude_rate_cdc_, pct_of_total_deaths_raw_cdc_,
+#    cdc_in_query, deaths_is_zero, crude_rate_from_census_pop, deaths_per_10k_census_pop
+_CDC_SFX = "_cdc_county_year_deathsofdespair"
+_CDC_KEEP_PFX = ("deaths_cdc", "crude_rate_cdc", "pct_of_total_deaths_raw_cdc")
+_drop.update(
+    c for c in merged_all.columns
+    if c.endswith(_CDC_SFX) and not any(c.startswith(p) for p in _CDC_KEEP_PFX)
+)
+
+# 8. CHR raw_value columns for variables now expressed as _per100k
+_CHR_CONVERTED_STEMS = set(_CHR_PROVIDER_RATIO + _CHR_PER1000 + _CHR_PER10000 + _CHR_PROPORTION)
+_drop.update(
+    f"{stem}_raw_value_mentalhealthrank_full"
+    for stem in _CHR_CONVERTED_STEMS
+    if f"{stem}_raw_value_mentalhealthrank_full" in merged_all.columns
+)
+
+# 9. FSIS metadata
+_FSIS_SFX = "_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip"
+_drop.update(
+    c for c in merged_all.columns
+    if c.endswith(_FSIS_SFX) and any(
+        c.startswith(p) for p in ("county_name_any_", "state_any_", "n_rows_fsis")
+    )
+)
+
+# 10. Population metadata duplicates
+_drop.update(
+    c for c in ["county_population_full", "n_rows_population_full", "county_code_population_full"]
+    if c in merged_all.columns
+)
+
+# 11. Ratio flag columns (archived above)
+_drop.update(_ratio_flag_cols)
+
+# 12. CHR population-ratio columns (redundant with provider _per100k)
+_drop.update(
+    c for c in merged_all.columns
+    if c.startswith("ratio_of_population_to_") and "mentalhealthrank_full" in c
+)
+
+# CAFO text / metadata columns
+_drop.update(
+    c for c in [
+        "county_fips_name_cafo_ops_by_size_compact",
+        "class_desc_cafo_ops_by_size_compact",
+        "commodity_desc_cafo_ops_by_size_compact",
+        "n_rows_cafo_ops_by_size_compact",
+    ]
+    if c in merged_all.columns
+)
+
+# Safety: only drop columns that exist
+_drop = {c for c in _drop if c in merged_all.columns}
+merged_all.drop(columns=list(_drop), inplace=True)
+print(f"Column cleanup: dropped {len(_drop)} → {merged_all.shape[1]} remaining.")
+
+# --- Rename columns ----------------------------------------------------------
+def _strip_source_suffixes(name: str) -> str:
+    """Strip long source-descriptor suffixes and redundant _raw_value infix."""
+    n = name
+    n = n.replace("_raw_value_mentalhealthrank_full", "")
+    n = n.replace("_mentalhealthrank_full", "")
+    n = n.replace("_cafo_ops_by_size_compact", "_cafo")
+    n = n.replace("_cdc_county_year_deathsofdespair", "_despair")
+    n = n.replace("_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip", "_fsis")
+    n = n.replace("_crime_fips_level_final", "_crime")
+    return n
+
+_SPECIFIC_RENAMES = {
+    "population_population_full": "population",
+    "state_population_full": "state",
+    "state_code_population_full": "state_code",
+    "region_population_full": "region",
+    "division_population_full": "division",
+    "non_large_metro": "rural",
+}
+
+_rmap = {}
+for _col in merged_all.columns:
+    if _col in _SPECIFIC_RENAMES:
+        _rmap[_col] = _SPECIFIC_RENAMES[_col]
+    else:
+        _new = _strip_source_suffixes(_col)
+        if _new != _col:
+            _rmap[_col] = _new
+
+merged_all.rename(columns=_rmap, inplace=True)
+print(f"Columns renamed: {len(_rmap)}. Final shape: {merged_all.shape}")
+
+
+# Export
 out_name = f"{today_str}_full_merged.csv"
 out_path = os.path.join(merged_dir, out_name)
 os.makedirs(merged_dir, exist_ok=True)
