@@ -336,6 +336,94 @@ else:
     print(f"Warning: cannot compute crude rate from census pop — missing columns: {_missing}")
 
 
+# --- Derived: CHR count imputation and numerator/denominator verification ---
+# Pass 1: County Health Rankings variables that report only a raw_value (a rate
+#   or proportion) with no accompanying numerator column.  We back-calculate an
+#   implied count using the census population denominator, clearly labelled
+#   *_count_imputed so downstream users know these are derived, not measured.
+#
+# Pass 2: CHR variables that have both numerator and denominator columns.
+#   We verify numerator / denominator ≈ raw_value (within tolerance) and write
+#   a *_ratio_flag column (1 = discrepancy) for QA auditing.  No values are
+#   modified.
+#
+# These steps are logically downstream of the merge (they need population and
+# the full CHR column set), so they are done here rather than in a separate script.
+
+_CHR_SUFFIX = "_mentalhealthrank_full"
+_CHR_RATE_ONLY_VARS = [
+    "frequent_mental_distress",
+    "frequent_physical_distress",
+    "insufficient_sleep",
+    "access_to_exercise_opportunities",
+    "%_american_indian_and_alaskan_native",
+    "%_non-hispanic_african_american",
+]
+_CHR_ABS_TOL = 0.05   # 5 pp in proportion space
+_CHR_REL_TOL = 0.10   # 10% relative in proportion space
+
+
+def _chr_detect_scale(series):
+    """Return 100 if raw_value is a proportion (0-1), else 1 (already 0-100)."""
+    med = series.dropna().median()
+    return 100.0 if med <= 1.0 else 1.0
+
+
+def _chr_safe_stem(var):
+    return re.sub(r"[^a-z0-9]+", "_", var.lower()).strip("_")
+
+
+# Pass 1
+_pop_series = pd.to_numeric(merged_all.get(POP_COL := "population_population_full"), errors="coerce")
+_pass1_cols = []
+for _var in _CHR_RATE_ONLY_VARS:
+    _raw_col = f"{_var}_raw_value{_CHR_SUFFIX}"
+    _num_col = f"{_var}_numerator{_CHR_SUFFIX}"
+    if _raw_col not in merged_all.columns or _num_col in merged_all.columns:
+        continue
+    _raw = pd.to_numeric(merged_all[_raw_col], errors="coerce")
+    _scale = _chr_detect_scale(_raw)
+    _out = f"{_chr_safe_stem(_var)}_count_imputed"
+    merged_all[_out] = ((_raw * _scale / 100.0) * _pop_series).round(0).astype("Int64")
+    _pass1_cols.append(_out)
+print(f"CHR Pass 1 complete: {len(_pass1_cols)} count_imputed columns added.")
+
+# Pass 2
+_all_cols = set(merged_all.columns)
+_flag_counts = []
+for _col in sorted(_all_cols):
+    if not _col.endswith(f"_numerator{_CHR_SUFFIX}"):
+        continue
+    _stem = _col[: -(len("_numerator") + len(_CHR_SUFFIX))]
+    _den_col = f"{_stem}_denominator{_CHR_SUFFIX}"
+    _raw_col = f"{_stem}_raw_value{_CHR_SUFFIX}"
+    if _den_col not in _all_cols or _raw_col not in _all_cols:
+        continue
+    _num = pd.to_numeric(merged_all[_col], errors="coerce")
+    _den = pd.to_numeric(merged_all[_den_col], errors="coerce")
+    _raw = pd.to_numeric(merged_all[_raw_col], errors="coerce")
+    _implied = (_num / _den).where(_den > 0)
+    _scale = _chr_detect_scale(_raw)
+    _raw_prop = _raw / _scale
+    _abs_diff = (_implied - _raw_prop).abs()
+    _rel_diff = (_abs_diff / _raw_prop.abs()).where(_raw_prop.abs() > 1e-9)
+    _checkable = _implied.notna() & _raw_prop.notna()
+    _flag_mask = ((_abs_diff > _CHR_ABS_TOL) | (_rel_diff > _CHR_REL_TOL)) & _checkable
+    _flag_col = f"{_chr_safe_stem(_stem)}_ratio_flag"
+    merged_all[_flag_col] = pd.NA
+    merged_all.loc[_checkable, _flag_col] = _flag_mask[_checkable].astype("Int64")
+    n_flagged = int(_flag_mask.sum())
+    n_checkable = int(_checkable.sum())
+    _flag_counts.append((_stem, n_checkable, n_flagged))
+
+_high_flag = [(s, nc, nf) for s, nc, nf in _flag_counts if nc > 0 and nf / nc > 0.05]
+print(f"CHR Pass 2 complete: {len(_flag_counts)} ratio_flag columns added.")
+if _high_flag:
+    print("  WARNING — >5% flag rate in:")
+    for _s, _nc, _nf in _high_flag:
+        print(f"    {_s}: {_nf}/{_nc} ({100*_nf/_nc:.1f}%)")
+
+
 # Export
 today_str = date.today().strftime("%Y-%m-%d")
 out_name = f"{today_str}_full_merged.csv"
