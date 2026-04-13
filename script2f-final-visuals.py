@@ -278,7 +278,7 @@ for j in range(i + 1, len(axes)):
 fig.suptitle(
     f"CAFO Operations vs. Outcomes — Rural US Counties, {PANEL_YEARS[0]}–{PANEL_YEARS[1]}\n"
     "Treatment: log(total CAFO ops per 10,000 residents + 1)   |   "
-    "Bin means ± 95% CI   |   OLS fit",
+    "Outcomes: per 100k population or avg days/month   |   Bin means ± 95% CI   |   OLS fit",
     fontsize=11, y=1.01,
 )
 plt.tight_layout()
@@ -329,7 +329,7 @@ for row_i, (ylabel, y_col) in enumerate(outcome_list):
 
 fig.suptitle(
     f"CAFO by Animal Type vs. Outcomes — Rural US Counties, {PANEL_YEARS[0]}–{PANEL_YEARS[1]}\n"
-    "Columns: animal type   |   Rows: outcome",
+    "Treatment: log(type ops per 10,000 residents + 1)   |   Outcomes: per 100k or days/month   |   Columns: animal type   |   Rows: outcome",
     fontsize=11, y=1.01,
 )
 plt.tight_layout()
@@ -375,7 +375,7 @@ if FSIS_TOTAL in df_fsis.columns and df_fsis[FSIS_TOTAL].notna().sum() > 50:
     fig.suptitle(
         f"FSIS Slaughter & Processing Establishments vs. Outcomes — Rural US Counties, {_FSIS_YEARS[0]}–{_FSIS_YEARS[1]}\n"
         "Treatment: log(total FSIS establishments per 10,000 residents + 1)   |   "
-        "County-year panel (FSIS available 2017–present only)",
+        "Outcomes: per 100k or days/month   |   County-year panel (FSIS available 2017–present only)",
         fontsize=11, y=1.01,
     )
     plt.tight_layout()
@@ -764,10 +764,236 @@ if px is not None:
             except Exception as _e_img:
                 print(f"  PNG export skipped (install kaleido for static export): {_e_img}")
 
+        # ── Figures G & H: CAFO choropleths by animal type / size × census year ──
+        # Each figure is a 2×2 grid (one panel per census year: 2002, 2007, 2012, 2017).
+        # G = by animal type (cattle / hogs / chickens); H = by size class (S / M / L).
+        from plotly.subplots import make_subplots
+        import plotly.graph_objects as go
+
+        _CENSUS_YEARS = [2002, 2007, 2012, 2017]
+
+        # Animal type: derive totals from size sub-columns
+        _ANIMAL_GROUPS = {
+            "Cattle":   ("cafo_cattle_small",   "cafo_cattle_medium",   "cafo_cattle_large"),
+            "Hogs":     ("cafo_hogs_small",     "cafo_hogs_medium",     "cafo_hogs_large"),
+            "Chickens": ("cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large"),
+        }
+        # Size class: already in panel
+        _SIZE_GROUPS = {
+            "Small":  "small_cafo",
+            "Medium": "medium_cafo",
+            "Large":  "large_cafo",
+        }
+
+        def _make_cafo_2x2_choropleth(val_col_map, geojson, fig_title, colorscale, out_stub):
+            """
+            val_col_map: dict {census_year: (df_yr, col_name)} where col_name holds log per10k.
+            Creates a 2×2 plotly choropleth grid, saves HTML + PNG.
+            """
+            fig_ch = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=[str(y) for y in _CENSUS_YEARS],
+                specs=[[{"type": "choropleth"}, {"type": "choropleth"}],
+                       [{"type": "choropleth"}, {"type": "choropleth"}]],
+                vertical_spacing=0.06, horizontal_spacing=0.01,
+            )
+            for idx, yr in enumerate(_CENSUS_YEARS):
+                r, c = divmod(idx, 2)
+                df_yr, col_name = val_col_map[yr]
+                df_plot = df_yr[["fips_str", col_name]].dropna()
+                geo_key = "geo" if idx == 0 else f"geo{idx + 1}"
+                fig_ch.add_trace(
+                    go.Choropleth(
+                        geojson=geojson,
+                        locations=df_plot["fips_str"],
+                        z=df_plot[col_name],
+                        colorscale=colorscale,
+                        showscale=(idx == 0),
+                        colorbar={"title": "log(ops<br>per 10k+1)", "x": 1.02, "len": 0.45},
+                        zmin=0,
+                        marker_line_width=0,
+                    ),
+                    row=r + 1, col=c + 1,
+                )
+                fig_ch.update_layout(**{geo_key: dict(
+                    scope="usa", showlakes=False, projection_type="albers usa",
+                )})
+            fig_ch.update_layout(
+                title_text=fig_title, title_font_size=13,
+                height=720, width=1350,
+                margin={"r": 90, "t": 80, "l": 0, "b": 0},
+            )
+            _html = os.path.join(out_dir, f"{today_str}_{out_stub}.html")
+            _png  = os.path.join(out_dir, f"{today_str}_{out_stub}.png")
+            fig_ch.write_html(_html)
+            print("Saved HTML:", _html)
+            try:
+                fig_ch.write_image(_png, width=1400, height=750, scale=2)
+                print("Saved PNG: ", _png)
+            except Exception as _e_img:
+                print(f"  PNG skipped: {_e_img}")
+
+        # Figure G: by animal type
+        for _animal, _size_cols in _ANIMAL_GROUPS.items():
+            _val_map = {}
+            for _yr in _CENSUS_YEARS:
+                _df_yr = df[df["year"] == _yr].copy()
+                _df_yr["fips_str"] = _df_yr["fips"].astype("string").str.zfill(5)
+                # sum small + medium + large, then log per 10k
+                _col_total = f"_cafo_{_animal.lower()}_total"
+                _df_yr[_col_total] = _df_yr[[c for c in _size_cols if c in _df_yr.columns]].sum(axis=1, min_count=1)
+                _df_yr["_log_val"] = log_per10k(_df_yr[_col_total], _df_yr[POP_COL])
+                _val_map[_yr] = (_df_yr, "_log_val")
+            _make_cafo_2x2_choropleth(
+                _val_map, _counties_geojson,
+                fig_title=f"CAFO {_animal} Operations (log per 10k) — Rural US Counties, Census Years",
+                colorscale="YlOrRd",
+                out_stub=f"G_{_animal.lower()}_cafo_census_years",
+            )
+
+        # Figure H: by size class
+        for _size_label, _size_col in _SIZE_GROUPS.items():
+            _val_map = {}
+            for _yr in _CENSUS_YEARS:
+                _df_yr = df[df["year"] == _yr].copy()
+                _df_yr["fips_str"] = _df_yr["fips"].astype("string").str.zfill(5)
+                if _size_col not in _df_yr.columns:
+                    continue
+                _df_yr["_log_val"] = log_per10k(_df_yr[_size_col], _df_yr[POP_COL])
+                _val_map[_yr] = (_df_yr, "_log_val")
+            if not _val_map:
+                continue
+            _make_cafo_2x2_choropleth(
+                _val_map, _counties_geojson,
+                fig_title=f"CAFO {_size_label} Operations (log per 10k) — Rural US Counties, Census Years",
+                colorscale="Blues",
+                out_stub=f"H_{_size_label.lower()}_cafo_census_years",
+            )
+
     except Exception as _e_map:
-        print(f"Figures F1/F2 (choropleth) skipped: {_e_map}")
+        print(f"Figures F1/F2/G/H (choropleth) skipped: {_e_map}")
 else:
-    print("Figures F1/F2 skipped — plotly not available. Install plotly to enable maps.")
+    print("Figures F1/F2/G/H skipped — plotly not available. Install plotly to enable maps.")
+
+
+# =============================================================================
+# FIGURE I
+# Binned scatter: FSIS establishment subtypes (log per 10k) vs.
+# deaths of despair + poor mental health days — 2017–2023 panel
+# Rows = FSIS subtype; Columns = outcome
+# =============================================================================
+_FSIS_SUBTYPES = {
+    "Meat Slaughter\nEstablishments":          "n_meat_slaughter_establishments_fsis",
+    "Poultry Slaughter\nEstablishments":       "n_poultry_slaughter_establishments_fsis",
+    "Slaughter Only\n(no processing)":         "n_type_slaughter_only_fsis",
+    "Processing Only\n(no slaughter)":         "n_type_processing_only_fsis",
+    "Both Slaughter\n& Processing":            "n_type_both_slaughter_and_processing_fsis",
+}
+_FSIS_FOCUS_OUTCOMES = {
+    "Deaths of Despair\n(crude rate per 100k, CDC)": "crude_rate_despair",
+    "Poor Mental Health Days\n(avg days/month, CHR)": "poor_mental_health_days",
+}
+_df_fsis_i = df[df["year"].between(2017, 2023)].copy()
+
+_n_rows_i = len(_FSIS_SUBTYPES)
+_n_cols_i = len(_FSIS_FOCUS_OUTCOMES)
+_fig_i, _axes_i = plt.subplots(_n_rows_i, _n_cols_i,
+                                figsize=(_n_cols_i * 5.5, _n_rows_i * 4.0))
+
+for _ri, (_xlab, _xcol) in enumerate(_FSIS_SUBTYPES.items()):
+    if _xcol not in _df_fsis_i.columns:
+        for _ci in range(_n_cols_i):
+            _axes_i[_ri, _ci].set_visible(False)
+        continue
+    _x_vals = log_per10k(_df_fsis_i[_xcol], _df_fsis_i[POP_COL])
+    for _ci, (_ylab, _ycol) in enumerate(_FSIS_FOCUS_OUTCOMES.items()):
+        _ax = _axes_i[_ri, _ci]
+        if _ycol not in _df_fsis_i.columns:
+            _ax.set_visible(False)
+            continue
+        _y_vals = to_num(_df_fsis_i[_ycol])
+        binned_scatter_ax(
+            _ax,
+            x_vals=_x_vals,
+            y_vals=_y_vals,
+            label_x=f"log({_xlab.replace(chr(10), ' ')} per 10k + 1)",
+            label_y=_ylab,
+            n_bins=15,
+            color="#41b6c4",
+        )
+
+_fig_i.suptitle(
+    "FSIS Establishment Subtypes vs. Key Outcomes — Rural US Counties, 2017–2023\n"
+    "Treatment: log(subtype establishments per 10,000 residents + 1)   |   "
+    "Outcomes: per 100k or days/month   |   Bin means ± 95% CI   |   OLS fit",
+    fontsize=11, y=1.01,
+)
+plt.tight_layout()
+_i_path = os.path.join(out_dir, f"{today_str}_I_fsis_subtypes_vs_despair_mhdays.png")
+_fig_i.savefig(_i_path, dpi=200, bbox_inches="tight")
+plt.close(_fig_i)
+print("Saved:", _i_path)
+
+
+# =============================================================================
+# FIGURE J
+# Binned scatter: CAFO animal × size (3×3 grid) vs. deaths of despair
+# Window: 2010–2015 (MH coverage ≥90%); Y = crude_rate_despair
+# Rows = animal type (cattle / hogs / chickens); Columns = size class (S / M / L)
+# =============================================================================
+_CAFO_ANIMAL_SIZE = {
+    ("Cattle",   "Small"):  "cafo_cattle_small",
+    ("Cattle",   "Medium"): "cafo_cattle_medium",
+    ("Cattle",   "Large"):  "cafo_cattle_large",
+    ("Hogs",     "Small"):  "cafo_hogs_small",
+    ("Hogs",     "Medium"): "cafo_hogs_medium",
+    ("Hogs",     "Large"):  "cafo_hogs_large",
+    ("Chickens", "Small"):  "cafo_chickens_small",
+    ("Chickens", "Medium"): "cafo_chickens_medium",
+    ("Chickens", "Large"):  "cafo_chickens_large",
+}
+_ANIMALS_J  = ["Cattle", "Hogs", "Chickens"]
+_SIZES_J    = ["Small", "Medium", "Large"]
+_DESPAIR_COL = "crude_rate_despair"
+_df_j = df[df["year"].between(*PANEL_YEARS)].copy()
+
+_fig_j, _axes_j = plt.subplots(3, 3, figsize=(3 * 5.5, 3 * 4.5))
+
+for _ri, _animal in enumerate(_ANIMALS_J):
+    for _ci, _size in enumerate(_SIZES_J):
+        _ax = _axes_j[_ri, _ci]
+        _col = _CAFO_ANIMAL_SIZE[(_animal, _size)]
+        if _col not in _df_j.columns or _DESPAIR_COL not in _df_j.columns:
+            _ax.set_visible(False)
+            continue
+        _x = log_per10k(_df_j[_col], _df_j[POP_COL])
+        _y = to_num(_df_j[_DESPAIR_COL])
+        _color = CAFO_TYPE_COLORS.get(_animal, BLUE)
+        binned_scatter_ax(
+            _ax,
+            x_vals=_x,
+            y_vals=_y,
+            label_x=f"log({_animal} {_size} ops per 10k + 1)",
+            label_y="Deaths of Despair (per 100k, CDC)" if _ci == 0 else "",
+            n_bins=15,
+            color=_color,
+            title=f"{_animal} — {_size}" if _ri == 0 else None,
+        )
+        # Row labels
+        if _ci == 0:
+            _ax.set_ylabel(f"{_animal}\n" + _ax.get_ylabel(), fontsize=9)
+
+_fig_j.suptitle(
+    f"CAFO Animal Type × Size vs. Deaths of Despair — Rural US Counties, {PANEL_YEARS[0]}–{PANEL_YEARS[1]}\n"
+    "Treatment: log(ops per 10,000 residents + 1)   |   "
+    "Y: crude deaths-of-despair rate per 100k (CDC)   |   Bin means ± 95% CI   |   OLS fit",
+    fontsize=11, y=1.01,
+)
+plt.tight_layout()
+_j_path = os.path.join(out_dir, f"{today_str}_J_cafo_animal_size_vs_despair.png")
+_fig_j.savefig(_j_path, dpi=200, bbox_inches="tight")
+plt.close(_fig_j)
+print("Saved:", _j_path)
 
 
 print("\nAll figures saved to:", out_dir)
