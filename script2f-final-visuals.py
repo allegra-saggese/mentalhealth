@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Script 2d: Core descriptive visualizations — CAFO / FSIS exposure vs. outcomes.
+Script 2f: Core descriptive visualizations — CAFO / FSIS exposure vs. outcomes.
 
 Purpose:
     Produces analytically useful figures rather than QA diagnostics.
@@ -11,16 +11,23 @@ Purpose:
     (rates or percentages) and are used as-is.
 
 Figures produced:
-    A1 — Binned scatter: CAFO total ops (per capita, log) vs. all 6 outcomes
+    A1 — Binned scatter: CAFO total ops (per capita, log) vs. all 6 outcomes.
          Pooled 2010–2015. 20 equal-count bins, mean ± 95% CI, OLS fit.
     A2 — Binned scatter: CAFO by animal type (cattle / hogs / chickens)
          vs. 3 core outcomes. Same period.
-    A3 — Binned scatter: FSIS establishments (per capita, log) vs. all outcomes
+    A3 — Binned scatter: FSIS establishments (per capita, log) vs. all outcomes.
          2017 cross-section only (FSIS data not available before 2017).
     B  — County time series: 1 representative county per state, 2010–2015.
          CAFO exposure on left axis, Poor Mental Health Days on right axis.
     C  — Outcome cross-correlation heatmap (Spearman, 2010–2015).
          Shows which outcomes co-move before committing to a primary Y variable.
+    D  — Violin plots: outcome distributions by CAFO intensity quartile.
+         Pooled 2010–2015. Inner lines show Q1/median/Q3 within each violin.
+    E  — Box-and-whisker (median, no mean): same CAFO quartile grouping.
+         Overlaid with jitter of raw county observations. Median line in red.
+    F1 — Choropleth map: log(CAFO ops per 10k pop + 1), rural US counties, 2012.
+    F2 — Choropleth map: Poor Mental Health Days, rural US counties, 2012.
+         (F maps saved as both interactive HTML and static PNG)
 
 Outputs to: Dropbox/Mental/Data/merged/figs/core-visuals/
 
@@ -32,6 +39,11 @@ from functions import *
 from scipy import stats as scipy_stats
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+try:
+    import plotly.express as px
+except Exception:
+    px = None
 
 # =============================================================================
 # Configuration
@@ -537,5 +549,222 @@ fig.savefig(c_path, dpi=200, bbox_inches="tight")
 plt.close(fig)
 corr_matrix.to_csv(os.path.join(out_dir, f"{today_str}_C_outcome_crosscorrelation.csv"))
 print("Saved:", c_path)
+
+# =============================================================================
+# FIGURES D & E
+# D — Violin plots: outcome distributions by CAFO intensity quartile
+# E — Box-and-whisker (median only, no mean): same grouping
+#
+# Quartiles derived from log(CAFO total ops per 10k pop + 1) in df_panel.
+# Violins show the full empirical density; inner tick lines mark Q1/median/Q3.
+# Boxes show IQR with median highlighted in red; raw county dots underlaid.
+#
+# Rationale: binned scatters (A1-A2) show conditional means along a continuous
+# treatment gradient. Quartile plots complement these by showing distributional
+# heterogeneity — whether the outcome variance differs across CAFO intensity
+# levels, not just the conditional mean. Violin + box together give a reviewer
+# both the shape (violin) and the robust summary statistics (box/median).
+# =============================================================================
+df_panel["cafo_log_per10k"] = log_per10k(df_panel[CAFO_TOTAL], df_panel[POP_COL])
+df_panel["cafo_quartile"] = pd.qcut(
+    df_panel["cafo_log_per10k"],
+    q=4,
+    labels=["Q1\n(lowest)", "Q2", "Q3", "Q4\n(highest)"],
+    duplicates="drop",
+)
+
+n_cols_de = 3
+n_rows_de = int(np.ceil(len(OUTCOMES) / n_cols_de))
+QUARTILE_PALETTE = ["#d1e5f0", "#92c5de", "#4393c3", "#2166ac"]
+
+# --- Figure D: Violin ---
+fig, axes = plt.subplots(n_rows_de, n_cols_de, figsize=(n_cols_de * 5, n_rows_de * 4.5))
+axes = axes.flatten()
+
+for i, (ylabel, col) in enumerate(OUTCOMES.items()):
+    ax = axes[i]
+    if col not in df_panel.columns:
+        ax.set_visible(False)
+        continue
+
+    plot_df = df_panel[["cafo_quartile", col]].dropna().copy()
+    if plot_df.empty or plot_df["cafo_quartile"].nunique() < 2:
+        ax.set_visible(False)
+        continue
+
+    plot_df["y"] = np.log1p(plot_df[col]) if col in LOG_Y_COLS else plot_df[col]
+
+    sns.violinplot(
+        data=plot_df, x="cafo_quartile", y="y", ax=ax,
+        palette=QUARTILE_PALETTE,
+        inner="quartile",   # tick lines at Q1, median, Q3 inside the violin
+        linewidth=0.8,
+        cut=0,              # do not extrapolate beyond observed data range
+    )
+    ax.set_xlabel("CAFO Intensity Quartile\n(log ops per 10k pop)", fontsize=8)
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.tick_params(labelsize=7)
+
+    # Annotate median value above each violin body
+    y_top = ax.get_ylim()[1]
+    for j, q_label in enumerate(plot_df["cafo_quartile"].cat.categories):
+        med = plot_df.loc[plot_df["cafo_quartile"] == q_label, "y"].median()
+        ax.text(j, y_top * 0.98, f"{med:.2f}", ha="center", va="top",
+                fontsize=6.5, color=GREY, style="italic")
+
+for j in range(i + 1, len(axes)):
+    axes[j].set_visible(False)
+
+fig.suptitle(
+    f"Outcome Distributions by CAFO Intensity Quartile — Rural US Counties, "
+    f"{PANEL_YEARS[0]}–{PANEL_YEARS[1]}\n"
+    "Violin width = density   |   Inner ticks: Q1 / median / Q3   |   "
+    "CAFO quartiles: log(total ops per 10k pop + 1)",
+    fontsize=11, y=1.01,
+)
+plt.tight_layout()
+d_path = os.path.join(out_dir, f"{today_str}_D_violin_cafo_quartile_vs_outcomes.png")
+fig.savefig(d_path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", d_path)
+
+
+# --- Figure E: Box-and-whisker (median, no mean) ---
+fig, axes = plt.subplots(n_rows_de, n_cols_de, figsize=(n_cols_de * 5, n_rows_de * 4.5))
+axes = axes.flatten()
+
+for i, (ylabel, col) in enumerate(OUTCOMES.items()):
+    ax = axes[i]
+    if col not in df_panel.columns:
+        ax.set_visible(False)
+        continue
+
+    plot_df = df_panel[["cafo_quartile", col]].dropna().copy()
+    if plot_df.empty or plot_df["cafo_quartile"].nunique() < 2:
+        ax.set_visible(False)
+        continue
+
+    plot_df["y"] = np.log1p(plot_df[col]) if col in LOG_Y_COLS else plot_df[col]
+
+    # Raw county observations behind the boxes (alpha low, small dots)
+    sns.stripplot(
+        data=plot_df, x="cafo_quartile", y="y", ax=ax,
+        color=GREY, alpha=0.12, size=1.8, jitter=True, zorder=1,
+    )
+    # Box: IQR + whiskers (1.5×IQR). Fliers suppressed — visible via strip.
+    sns.boxplot(
+        data=plot_df, x="cafo_quartile", y="y", ax=ax,
+        palette=QUARTILE_PALETTE,
+        linewidth=1.0,
+        width=0.5,
+        flierprops={"marker": ""},           # hide flier dots (already in strip)
+        medianprops={"color": RED, "lw": 2.5},
+        showmeans=False,                     # median only — no mean marker
+        zorder=2,
+    )
+    ax.set_xlabel("CAFO Intensity Quartile\n(log ops per 10k pop)", fontsize=8)
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.tick_params(labelsize=7)
+
+for j in range(i + 1, len(axes)):
+    axes[j].set_visible(False)
+
+fig.suptitle(
+    f"Outcome Distributions by CAFO Intensity Quartile — Rural US Counties, "
+    f"{PANEL_YEARS[0]}–{PANEL_YEARS[1]}\n"
+    "Box = IQR   |   Red line = median (no mean shown)   |   "
+    "Whiskers = 1.5×IQR   |   Dots = individual county-years",
+    fontsize=11, y=1.01,
+)
+plt.tight_layout()
+e_path = os.path.join(out_dir, f"{today_str}_E_boxplot_cafo_quartile_vs_outcomes.png")
+fig.savefig(e_path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", e_path)
+
+
+# =============================================================================
+# FIGURES F1 & F2
+# Choropleth maps — rural US counties, 2012 (Census year; best joint coverage)
+# F1: log(CAFO ops per 10k pop + 1) — shows geographic concentration of CAFOs
+# F2: Poor Mental Health Days (avg days/month, CHR)
+#
+# Saved as interactive HTML (always) and static PNG (if kaleido is installed).
+# The side-by-side geographic view is the primary storytelling figure for
+# presentations: it lets a reader visually compare CAFO and MH geographies
+# before any modelling, revealing whether the two patterns spatially overlap.
+# =============================================================================
+if px is not None:
+    try:
+        from urllib.request import urlopen
+        import json as _json
+
+        _geojson_url = (
+            "https://raw.githubusercontent.com/plotly/datasets"
+            "/master/geojson-counties-fips.json"
+        )
+        with urlopen(_geojson_url) as _r:
+            _counties_geojson = _json.load(_r)
+
+        df_2012 = df[df["year"] == 2012].copy()
+        df_2012["cafo_log_per10k"] = log_per10k(df_2012[CAFO_TOTAL], df_2012[POP_COL])
+        df_2012["fips_str"] = df_2012["fips"].astype("string").str.zfill(5)
+        _mh_col = "poor_mental_health_days_raw_value_mentalhealthrank_full"
+
+        _map_specs = [
+            (
+                "cafo_log_per10k",
+                "log(CAFO Ops per 10k Population + 1)",
+                "YlOrRd",
+                "F1_cafo_intensity_map_2012",
+            ),
+            (
+                _mh_col,
+                "Poor Mental Health Days (avg days/month, CHR)",
+                "RdPu",
+                "F2_poor_mental_health_map_2012",
+            ),
+        ]
+
+        for _col, _label, _cscale, _stub in _map_specs:
+            if _col not in df_2012.columns:
+                print(f"Skipping map {_stub} — column '{_col}' not found.")
+                continue
+
+            _map_df = df_2012[["fips_str", _col]].dropna()
+            _fig_map = px.choropleth(
+                _map_df,
+                geojson=_counties_geojson,
+                locations="fips_str",
+                color=_col,
+                color_continuous_scale=_cscale,
+                scope="usa",
+                title=f"{_label} — Rural US Counties, 2012",
+                labels={_col: _label},
+            )
+            _fig_map.update_layout(
+                margin={"r": 0, "t": 50, "l": 0, "b": 0},
+                title_font_size=13,
+                geo={"showlakes": False},
+            )
+
+            # Always save interactive HTML
+            _html_path = os.path.join(out_dir, f"{today_str}_{_stub}.html")
+            _fig_map.write_html(_html_path)
+            print("Saved HTML:", _html_path)
+
+            # Save static PNG if kaleido is available
+            try:
+                _png_path = os.path.join(out_dir, f"{today_str}_{_stub}.png")
+                _fig_map.write_image(_png_path, width=1400, height=800, scale=2)
+                print("Saved PNG: ", _png_path)
+            except Exception as _e_img:
+                print(f"  PNG export skipped (install kaleido for static export): {_e_img}")
+
+    except Exception as _e_map:
+        print(f"Figures F1/F2 (choropleth) skipped: {_e_map}")
+else:
+    print("Figures F1/F2 skipped — plotly not available. Install plotly to enable maps.")
+
 
 print("\nAll figures saved to:", out_dir)
