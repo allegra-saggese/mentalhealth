@@ -43,6 +43,13 @@ MERGE_DESCRIPTORS = {
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
 CAFO_COMMODITIES = ("cattle", "hogs", "chickens")
+# Use canonical class definitions to avoid double-counting overlapping
+# commodity subclasses when collapsing to county-year totals.
+CAFO_CANONICAL_CLASS = {
+    "cattle": "incl calves",
+    "hogs": "all classes",
+    "chickens": "layers",
+}
 
 
 def _ensure_key(df):
@@ -139,6 +146,8 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
     """
     Build county-year CAFO animal x size columns from the compact CAFO file.
     Keeps existing CAFO total-size columns intact by adding a separate block.
+    Uses canonical class definitions per commodity to avoid overlapping-class
+    double counting (e.g., cattle incl calves vs beef/milk cow subclasses).
     """
     try:
         df = read_and_prepare(path)
@@ -151,7 +160,7 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
         print("Skip CAFO animal-size block: missing fips/year")
         return None
 
-    needed = {"commodity_desc", "small", "medium", "large"}
+    needed = {"commodity_desc", "class_desc", "small", "medium", "large"}
     missing_needed = sorted(list(needed - set(df.columns)))
     if missing_needed:
         print(f"Skip CAFO animal-size block: missing required columns {missing_needed}")
@@ -166,6 +175,12 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
     df = df[df["commodity_desc"].isin(CAFO_COMMODITIES)].copy()
     if df.empty:
         print("Skip CAFO animal-size block: no rows after commodity filter")
+        return None
+    df["class_desc"] = df["class_desc"].astype("string").str.strip().str.lower()
+    expected_class = df["commodity_desc"].map(CAFO_CANONICAL_CLASS)
+    df = df[df["class_desc"] == expected_class].copy()
+    if df.empty:
+        print("Skip CAFO animal-size block: no rows after canonical class filter")
         return None
 
     for size_col in ("small", "medium", "large"):

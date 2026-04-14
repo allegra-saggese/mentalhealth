@@ -197,42 +197,51 @@ donor_path = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/2026-02-23_ag_annu
 
 # standardize both dataframes
 combined_c = clean_cols(combined).copy()
-donor = clean_cols(pd.read_csv(donor_path, low_memory=False)).copy()
+donor = None
+if os.path.exists(donor_path):
+    donor = clean_cols(pd.read_csv(donor_path, low_memory=False)).copy()
+else:
+    print(f"Backfill donor file not found; skipping donor backfill: {donor_path}")
 
 # drop duplicate column names (critical for concat)
 combined_c = combined_c.loc[:, ~combined_c.columns.duplicated()].copy()
-donor = donor.loc[:, ~donor.columns.duplicated()].copy()
 
-# normalize donor filter columns
-for c in ["commodity_desc", "unit_desc", "statisticcat_desc"]:
-    if c in donor.columns:
-        donor[c] = donor[c].astype("string").str.strip().str.lower()
+if donor is not None:
+    donor = donor.loc[:, ~donor.columns.duplicated()].copy()
 
-donor["year"] = pd.to_numeric(donor["year"], errors="coerce").astype("Int64")
+    # normalize donor filter columns
+    for c in ["commodity_desc", "unit_desc", "statisticcat_desc"]:
+        if c in donor.columns:
+            donor[c] = donor[c].astype("string").str.strip().str.lower()
 
-# keep only 2012 + 2017 and core commodities
-backfill = donor[
-    donor["year"].isin([2012, 2017]) &
-    donor["commodity_desc"].isin(["cattle", "chickens", "hogs"])
-].copy()
+    donor["year"] = pd.to_numeric(donor["year"], errors="coerce").astype("Int64")
 
-print("backfill rows:", len(backfill))
-print(backfill.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
+    # keep only 2012 + 2017 and core commodities
+    backfill = donor[
+        donor["year"].isin([2012, 2017]) &
+        donor["commodity_desc"].isin(["cattle", "chickens", "hogs"])
+    ].copy()
 
-# align schemas safely (union of columns)
-all_cols = sorted(set(combined_c.columns) | set(backfill.columns))
-combined_c = combined_c.reindex(columns=all_cols)
-backfill = backfill.reindex(columns=all_cols)
+    print("backfill rows:", len(backfill))
+    print(backfill.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
 
-# concenate data 
-before = len(combined_c)
-combined = pd.concat([combined_c, backfill], ignore_index=True)
-combined = combined.drop_duplicates(ignore_index=True)
-after = len(combined)
+    # align schemas safely (union of columns)
+    all_cols = sorted(set(combined_c.columns) | set(backfill.columns))
+    combined_c = combined_c.reindex(columns=all_cols)
+    backfill = backfill.reindex(columns=all_cols)
 
-print("combined before:", before)
-print("combined after :", after)
-print("rows added     :", after - before)
+    # concenate data
+    before = len(combined_c)
+    combined = pd.concat([combined_c, backfill], ignore_index=True)
+    combined = combined.drop_duplicates(ignore_index=True)
+    after = len(combined)
+
+    print("combined before:", before)
+    print("combined after :", after)
+    print("rows added     :", after - before)
+else:
+    combined = combined_c.copy()
+    print("Proceeding without donor backfill; using API/local pull only.")
 
 # check we have ops in presence 
 chk = combined.copy()
@@ -246,9 +255,6 @@ chk = chk[
 
 # quick eye-ball QA 
 print(chk.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
-print(df_big["year"].min(), df_big["year"].max())                      # expect max up to 2021
-print(df2[df2["size_source"].notna()]["year"].max())                   # should be > 2011 now
-print(summary_compact["year"].min(), summary_compact["year"].max())    # should extend beyond 2011
 
 print(combined["year"].value_counts().sort_index().tail(10))
 
@@ -707,6 +713,84 @@ summary_compact["any_large_cafo"] = (summary_compact["large"] > 0).astype("Int8"
 summary_compact["any_medium_or_large_cafo"] = (
     (summary_compact["medium"] + summary_compact["large"]) > 0
 ).astype("Int8")
+
+# QA: cattle canonical vs subgroup overlap diagnostic at county-year level
+# Purpose: verify whether cattle subclasses can be summed without overlap.
+# Canonical reference = class_desc "incl calves".
+cattle_compact = summary_compact[summary_compact["commodity_desc"] == "cattle"].copy()
+if not cattle_compact.empty:
+    cattle_compact["ops_total"] = cattle_compact[["small", "medium", "large"]].sum(axis=1, min_count=1)
+    cattle_wide = (
+        cattle_compact.pivot_table(
+            index=["year", "fips_generated", "county_fips_name"],
+            columns="class_desc",
+            values="ops_total",
+            aggfunc="sum",
+        )
+        .reset_index()
+    )
+    cattle_wide.columns.name = None
+
+    canonical_col = "incl calves"
+    noncanonical_cols = [c for c in cattle_wide.columns if c not in {"year", "fips_generated", "county_fips_name", canonical_col}]
+    partition_candidate_cols = [c for c in ["(excl cows)", "cows, beef", "cows, milk"] if c in cattle_wide.columns]
+
+    cattle_wide["canonical_ops_incl_calves"] = pd.to_numeric(cattle_wide.get(canonical_col), errors="coerce")
+    cattle_wide["sum_noncanonical_ops"] = (
+        cattle_wide[noncanonical_cols].sum(axis=1, min_count=1) if noncanonical_cols else np.nan
+    )
+    cattle_wide["sum_partition_candidate_ops"] = (
+        cattle_wide[partition_candidate_cols].sum(axis=1, min_count=1) if partition_candidate_cols else np.nan
+    )
+    cattle_wide["sum_all_class_ops"] = (
+        cattle_wide["canonical_ops_incl_calves"] + cattle_wide["sum_noncanonical_ops"]
+    )
+
+    for lhs in ["sum_noncanonical_ops", "sum_partition_candidate_ops", "sum_all_class_ops"]:
+        ratio_col = f"ratio_{lhs}_to_canonical"
+        diff_col = f"abs_pct_diff_{lhs}_vs_canonical"
+        cattle_wide[ratio_col] = np.where(
+            cattle_wide["canonical_ops_incl_calves"] > 0,
+            cattle_wide[lhs] / cattle_wide["canonical_ops_incl_calves"],
+            np.nan,
+        )
+        cattle_wide[diff_col] = np.where(
+            cattle_wide["canonical_ops_incl_calves"] > 0,
+            (cattle_wide[lhs] - cattle_wide["canonical_ops_incl_calves"]).abs() / cattle_wide["canonical_ops_incl_calves"] * 100,
+            np.nan,
+        )
+
+    cattle_overlap_path = os.path.join(outf, f"{today_str}_qa_cattle_class_overlap_county_year.csv")
+    cattle_wide.to_csv(cattle_overlap_path, index=False)
+
+    year_diag = (
+        cattle_wide.groupby("year", as_index=False)
+        .agg(
+            county_years=("canonical_ops_incl_calves", "size"),
+            canonical_sum=("canonical_ops_incl_calves", "sum"),
+            partition_sum=("sum_partition_candidate_ops", "sum"),
+            all_class_sum=("sum_all_class_ops", "sum"),
+            median_ratio_partition_to_canonical=("ratio_sum_partition_candidate_ops_to_canonical", "median"),
+            median_ratio_all_to_canonical=("ratio_sum_all_class_ops_to_canonical", "median"),
+        )
+    )
+    year_diag["ratio_partition_sum_to_canonical_sum"] = np.where(
+        year_diag["canonical_sum"] > 0,
+        year_diag["partition_sum"] / year_diag["canonical_sum"],
+        np.nan,
+    )
+    year_diag["ratio_allclass_sum_to_canonical_sum"] = np.where(
+        year_diag["canonical_sum"] > 0,
+        year_diag["all_class_sum"] / year_diag["canonical_sum"],
+        np.nan,
+    )
+    cattle_overlap_year_path = os.path.join(outf, f"{today_str}_qa_cattle_class_overlap_by_year.csv")
+    year_diag.to_csv(cattle_overlap_year_path, index=False)
+
+    print("Saved cattle overlap QA (county-year):", cattle_overlap_path)
+    print("Saved cattle overlap QA (year-level):", cattle_overlap_year_path)
+    print("Cattle all-class vs canonical (year-level ratio):")
+    print(year_diag[["year", "ratio_allclass_sum_to_canonical_sum"]].to_string(index=False))
 
 
 # QA - print on the missing values, and the total values of the vars for manual inspection

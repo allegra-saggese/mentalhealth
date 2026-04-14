@@ -490,6 +490,10 @@ for c in ["commodity_desc", "small", "medium", "large"]:
         raise RuntimeError(f"Missing column in pre-merged CAFO compact file: {c}")
 pre["commodity_desc"] = pre["commodity_desc"].astype("string").str.strip().str.lower()
 pre = pre[pre["commodity_desc"].isin(["cattle", "hogs", "chickens"])].copy()
+if "class_desc" in pre.columns:
+    pre["class_desc"] = pre["class_desc"].astype("string").str.strip().str.lower()
+    canonical_class_map = {"cattle": "incl calves", "hogs": "all classes", "chickens": "layers"}
+    pre = pre[pre["class_desc"] == pre["commodity_desc"].map(canonical_class_map)].copy()
 for c in ["small", "medium", "large"]:
     pre[c] = to_num(pre[c])
 
