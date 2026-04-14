@@ -325,4 +325,108 @@ plt.close(fig)
 print("Saved:", path)
 
 
+# =============================================================================
+# FIGURE P: Combined — all three animals × S/M/L share, four census years,
+# single chart. Layout: 4 census years on x-axis; within each year, three
+# side-by-side 100%-stacked bars (one per animal). Lets you compare both
+# cross-animal composition and year-over-year change in one view.
+# =============================================================================
+ANIMAL_SIZE_MAP = {
+    "Cattle":   {"Small": "cafo_cattle_small",   "Medium": "cafo_cattle_medium",   "Large": "cafo_cattle_large"},
+    "Hogs":     {"Small": "cafo_hogs_small",     "Medium": "cafo_hogs_medium",     "Large": "cafo_hogs_large"},
+    "Chickens": {"Small": "cafo_chickens_small", "Medium": "cafo_chickens_medium", "Large": "cafo_chickens_large"},
+}
+ANIMALS = ["Cattle", "Hogs", "Chickens"]
+SIZES   = ["Small", "Medium", "Large"]
+
+# Size-shade: same blue palette as M1-M3 (light→dark = small→large)
+_SZ_COLORS = {"Small": "#d1e5f0", "Medium": "#4393c3", "Large": "#053061"}
+
+# Pre-compute share per (animal, year)
+share_data = {}
+for animal in ANIMALS:
+    for yr in CENSUS_YEARS:
+        df_yr = df[df["year"] == yr]
+        raw = {sz: (df_yr[col].sum(skipna=True) if col in df_yr.columns else 0.0)
+               for sz, col in ANIMAL_SIZE_MAP[animal].items()}
+        total = sum(raw.values())
+        share_data[(animal, yr)] = {sz: (raw[sz] / total * 100 if total > 0 else 0.0)
+                                    for sz in SIZES}
+
+n_yr  = len(CENSUS_YEARS)
+n_ani = len(ANIMALS)
+bar_w = 0.22          # width of each animal bar within a year group
+gap   = 0.04          # gap between animals within a year group
+group_span = n_ani * bar_w + (n_ani - 1) * gap
+year_positions = np.arange(n_yr) * (group_span + 0.35)   # spacing between year groups
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+import matplotlib.patches as mpatches
+for yr_i, yr in enumerate(CENSUS_YEARS):
+    x_center = year_positions[yr_i]
+    for ai, animal in enumerate(ANIMALS):
+        x_bar = x_center + (ai - 1) * (bar_w + gap)
+        bottoms = 0.0
+        for sz in SIZES:
+            val = share_data[(animal, yr)][sz]
+            color = _SZ_COLORS[sz]
+            # Use a hatch pattern to distinguish animals without relying on color alone
+            hatches = {"Cattle": "", "Hogs": "//", "Chickens": ".."}
+            ax.bar(x_bar, val, bottom=bottoms, width=bar_w,
+                   color=color, edgecolor="white", linewidth=0.6,
+                   hatch=hatches[animal])
+            if val >= 6:
+                ax.text(x_bar, bottoms + val / 2, f"{val:.0f}%",
+                        ha="center", va="center", fontsize=7,
+                        color="white" if sz != "Small" else "#333333",
+                        fontweight="bold")
+            bottoms += val
+    # Year label centred under the 3-bar group
+    ax.text(x_center, -6, str(yr), ha="center", va="top", fontsize=10, fontweight="bold")
+
+# Animal sub-labels under each bar within the first year group (as x-tick guide)
+for ai, animal in enumerate(ANIMALS):
+    x_bar = year_positions[0] + (ai - 1) * (bar_w + gap)
+    ax.text(x_bar, -3, animal[0],   # just first letter to keep it tight
+            ha="center", va="top", fontsize=7.5, color="grey")
+
+ax.set_xlim(year_positions[0] - group_span / 2 - 0.15,
+            year_positions[-1] + group_span / 2 + 0.15)
+ax.set_ylim(-8, 105)
+ax.set_xticks([])
+ax.set_ylabel("Share of Operations Within Animal Type (%)", fontsize=10)
+ax.set_title(
+    "CAFO Size-Class Composition by Animal Type — Rural US Counties, Census Years\n"
+    "Each group = one census year  |  C = Cattle, H = Hogs, Ch = Chickens\n"
+    "Hatch pattern distinguishes animals; color = size class (light = small, dark = large)",
+    fontsize=10,
+)
+ax.set_axisbelow(True)
+ax.grid(axis="y", alpha=0.3)
+
+# Legend: size classes
+size_handles = [mpatches.Patch(facecolor=_SZ_COLORS[sz], edgecolor="grey", label=sz) for sz in SIZES]
+# Animal hatch patches
+hatch_map = {"Cattle": "", "Hogs": "//", "Chickens": ".."}
+animal_handles = [mpatches.Patch(facecolor="#888888", hatch=hatch_map[a], edgecolor="white", label=a) for a in ANIMALS]
+ax.legend(handles=size_handles + [mpatches.Patch(color="none")] + animal_handles,
+          loc="upper right", fontsize=9, ncol=2, framealpha=0.85,
+          title="Size class  |  Animal")
+
+# Animal letter labels above each group in the first year
+for yr_i, yr in enumerate(CENSUS_YEARS):
+    x_center = year_positions[yr_i]
+    letters = ["C", "H", "Ch"]
+    for ai, (animal, letter) in enumerate(zip(ANIMALS, letters)):
+        x_bar = x_center + (ai - 1) * (bar_w + gap)
+        ax.text(x_bar, 101, letter, ha="center", va="bottom", fontsize=7, color="#555555")
+
+plt.tight_layout(rect=[0, 0.03, 1, 1])
+path_p = os.path.join(out_dir, f"{today_str}_P_all_animals_size_composition_combined.png")
+fig.savefig(path_p, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path_p)
+
+
 print(f"\nAll CAFO composition figures saved to: {out_dir}")
