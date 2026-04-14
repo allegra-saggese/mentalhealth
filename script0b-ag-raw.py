@@ -168,80 +168,52 @@ def fetch_ag_data():
     return pd.DataFrame()
 
 
-# import ag data from API (fallback to local .dta files if API fails)
-combined = pd.DataFrame()
+# Load .dta files as the authoritative baseline for USDA Census years.
+# The API often has gaps for specific commodity × census-year combinations
+# (e.g. hogs 2012+, cattle 2017+) even when it returns data for other combos,
+# so the old "fallback only if combined.empty" logic silently left those years
+# empty. We now ALWAYS load the .dta files and supplement with any API rows.
+agfolder = os.path.join(inf, "usda")
+agfiles = sorted(glob.glob(os.path.join(agfolder, "*.dta")))
+if not agfiles:
+    raise RuntimeError(f"No .dta files found in {agfolder}. Cannot build CAFO panel.")
+dta_frames = []
+for f in agfiles:
+    _df = pd.read_stata(f)
+    _df.columns = [c.lower().strip() for c in _df.columns]
+    dta_frames.append(_df)
+combined_dta = pd.concat(dta_frames, ignore_index=True)
+print(f"Loaded {len(combined_dta):,} rows from {len(agfiles)} local .dta files: {[os.path.basename(f) for f in agfiles]}")
+
+# Optionally supplement with API rows (adds any rows not already in .dta baseline)
+combined_api = pd.DataFrame()
 if USE_API:
     try:
-        combined = fetch_ag_data()
-        print(f"Loaded {len(combined):,} rows from USDA NASS Quick Stats API")
+        combined_api = fetch_ag_data()
+        combined_api.columns = [c.lower().strip() for c in combined_api.columns]
+        print(f"Loaded {len(combined_api):,} rows from USDA NASS API")
     except RuntimeError as e:
-        print("API fetch failed; falling back to local .dta files.")
-        print("Reason:", e)
+        print(f"API fetch failed (non-fatal — .dta baseline is sufficient): {e}")
 
-# if it fails to output 
-if combined.empty:
-    agfolder = os.path.join(inf, "usda")
-    agfiles = glob.glob(os.path.join(agfolder, "*.dta"))
-    if not agfiles:
-        raise RuntimeError(f"No .dta files found in {agfolder}")
-    agdfs = [pd.read_stata(file) for file in agfiles]
-    combined = pd.concat(agdfs, ignore_index=True)
-    print(f"Loaded {len(combined):,} rows from local .dta files")
-    
-    
-    
-# ----------------------- SET UP PART 3 : PULL USDA FROM API / BACKFILL SETTING   -------------------- -#
-
-# due to API failures with 2012, 2017 data - backfilling with old ag data (made with han earlier version of the script - will have to fork it from GitHub to use) 
-donor_path = "/Users/allegrasaggese/Dropbox/Mental/Data/clean/2026-02-23_ag_annual_df.csv" # note that we may 
-
-# standardize both dataframes
-combined_c = clean_cols(combined).copy()
-donor = None
-if os.path.exists(donor_path):
-    donor = clean_cols(pd.read_csv(donor_path, low_memory=False)).copy()
-else:
-    print(f"Backfill donor file not found; skipping donor backfill: {donor_path}")
-
-# drop duplicate column names (critical for concat)
-combined_c = combined_c.loc[:, ~combined_c.columns.duplicated()].copy()
-
-if donor is not None:
-    donor = donor.loc[:, ~donor.columns.duplicated()].copy()
-
-    # normalize donor filter columns
-    for c in ["commodity_desc", "unit_desc", "statisticcat_desc"]:
-        if c in donor.columns:
-            donor[c] = donor[c].astype("string").str.strip().str.lower()
-
-    donor["year"] = pd.to_numeric(donor["year"], errors="coerce").astype("Int64")
-
-    # keep only 2012 + 2017 and core commodities
-    backfill = donor[
-        donor["year"].isin([2012, 2017]) &
-        donor["commodity_desc"].isin(["cattle", "chickens", "hogs"])
-    ].copy()
-
-    print("backfill rows:", len(backfill))
-    print(backfill.groupby(["year", "unit_desc"]).size().unstack(fill_value=0))
-
-    # align schemas safely (union of columns)
-    all_cols = sorted(set(combined_c.columns) | set(backfill.columns))
-    combined_c = combined_c.reindex(columns=all_cols)
-    backfill = backfill.reindex(columns=all_cols)
-
-    # concenate data
-    before = len(combined_c)
-    combined = pd.concat([combined_c, backfill], ignore_index=True)
+# Merge: .dta is authoritative; API rows supplement where not already covered
+if not combined_api.empty:
+    combined = pd.concat([combined_dta, combined_api], ignore_index=True)
     combined = combined.drop_duplicates(ignore_index=True)
-    after = len(combined)
-
-    print("combined before:", before)
-    print("combined after :", after)
-    print("rows added     :", after - before)
+    print(f"Combined (dta + api, deduped): {len(combined):,} rows")
 else:
-    combined = combined_c.copy()
-    print("Proceeding without donor backfill; using API/local pull only.")
+    combined = combined_dta.copy()
+    print("Using .dta baseline only (no API supplement).")
+    
+    
+    
+# ----------------------- SET UP PART 3 : STANDARDIZE COMBINED DATA   -------------------- -#
+# The .dta files loaded above are the authoritative source for all four USDA Census years
+# (2002, 2007, 2012, 2017). No donor backfill is needed — the .dta files have complete
+# coverage for cattle, hogs, and chickens for all census years.
+# The old donor backfill introduced pre-processed rows (with fips_generated already set)
+# that conflict with the raw .dta rows (no fips_generated), causing the FIPS merge to fail.
+combined = combined.loc[:, ~combined.columns.duplicated()].copy()
+print("Proceeding with .dta baseline (+ any API supplement). No donor backfill applied.")
 
 # check we have ops in presence 
 chk = combined.copy()
@@ -396,6 +368,9 @@ print("No duplicates found in final dataframe? ",
 # recall that USDA aggregates to keep anonymity of the survey, so the FIPS level will not give us the exact number of rows = number of farms 
 
 # attach external fips-year key and county name
+if "_merge" in df_big.columns:
+    df_big = df_big.drop(columns=["_merge"])
+
 df_big = df_big.merge(
     fips_key,
     left_on=["fips_generated", "year"],

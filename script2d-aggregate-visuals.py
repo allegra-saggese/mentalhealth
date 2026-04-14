@@ -474,6 +474,12 @@ for col in ["commodity_desc", "class_desc"]:
         cafo[col] = "unknown"
     cafo[col] = cafo[col].astype("string").str.lower().str.strip()
 
+# Apply canonical class filter to avoid double-counting overlapping subclasses.
+# Matches the filter used in script1c._build_cafo_animal_size_panel().
+_CANONICAL = {"cattle": "incl calves", "hogs": "all classes", "chickens": "layers"}
+_mask = cafo["commodity_desc"].map(_CANONICAL) == cafo["class_desc"]
+cafo = cafo[_mask | ~cafo["commodity_desc"].isin(_CANONICAL)].copy()
+
 cafo_long = cafo.melt(
     id_vars=["fips", "year", "commodity_desc", "class_desc"],
     value_vars=["small", "medium", "large"],
@@ -520,14 +526,24 @@ safe_plot_close()
 
 
 # ---------------------------------------------------------------------
-# 6) Annual composition plots
+# 6) Annual composition plots — restricted to USDA Census years only.
+# Backfilled years (2003–2006, 2008–2011, etc.) are identical to the
+# preceding census year and would make the figure a flat staircase.
+# Showing only census years exposes the true 5-year change gradient.
+# NOTE: some commodity × census-year cells are missing from the raw pull
+# (hogs absent 2012+, chickens absent 2012–2016, cattle absent 2017+).
+# Missing cells produce empty bars rather than fabricated shares.
 # ---------------------------------------------------------------------
+CAFO_CENSUS_YEARS = [2002, 2007, 2012, 2017]
 comp_dir = os.path.join(figs_dir, "cafo_composition")
 os.makedirs(comp_dir, exist_ok=True)
 
-# A) For each size: share by commodity over time
+# Restrict to census years for composition figures
+cafo_long_census = cafo_long[cafo_long["year"].isin(CAFO_CENSUS_YEARS)].copy()
+
+# A) For each size: share by commodity — census years only
 size_commodity = (
-    cafo_long.groupby(["year", "size_bucket", "commodity_desc"], as_index=False)["ops_count"]
+    cafo_long_census.groupby(["year", "size_bucket", "commodity_desc"], as_index=False)["ops_count"]
     .sum()
 )
 size_commodity["pct_within_size_year"] = (
@@ -537,24 +553,45 @@ size_commodity["pct_within_size_year"] = (
 )
 size_commodity.to_csv(os.path.join(comp_dir, f"{today_str}_size_commodity_share.csv"), index=False)
 
+COMMODITY_COLORS = {"cattle": "#d48f3a", "chickens": "#6aab6e", "hogs": "#e06c6c"}
+
 for size in ["small", "medium", "large"]:
     d = size_commodity[size_commodity["size_bucket"] == size].copy()
     if d.empty:
         continue
-    pivot = d.pivot_table(index="year", columns="commodity_desc", values="pct_within_size_year", aggfunc="sum").fillna(0)
-    plt.figure(figsize=(10, 6))
-    plt.stackplot(pivot.index, [pivot[c] for c in pivot.columns], labels=pivot.columns, alpha=0.85)
-    plt.title(f"Commodity Share (%) Within {size.title()} CAFO Operations by Year")
-    plt.xlabel("Year")
-    plt.ylabel("Share (%)")
-    plt.legend(loc="upper left")
-    out = os.path.join(comp_dir, f"{today_str}_share_commodity_within_{size}.png")
-    plt.savefig(out, dpi=220, bbox_inches="tight")
-    safe_plot_close()
+    pivot = d.pivot_table(
+        index="year", columns="commodity_desc",
+        values="pct_within_size_year", aggfunc="sum",
+    ).reindex(CAFO_CENSUS_YEARS)  # keep only census years; missing → NaN (not plotted)
+    commodities = [c for c in ["cattle", "hogs", "chickens"] if c in pivot.columns]
+    pivot = pivot[commodities]
 
-# B) For each commodity: share small/medium/large over time
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(CAFO_CENSUS_YEARS))
+    width = 0.6
+    bottoms = np.zeros(len(CAFO_CENSUS_YEARS))
+    for comm in commodities:
+        vals = pivot[comm].fillna(0).values
+        ax.bar(x, vals, width, bottom=bottoms,
+               label=comm.title(), color=COMMODITY_COLORS.get(comm, None), alpha=0.85)
+        bottoms += vals
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(y) for y in CAFO_CENSUS_YEARS])
+    ax.set_xlabel("USDA Census Year")
+    ax.set_ylabel("Share of operations (%)")
+    ax.set_ylim(0, 105)
+    ax.set_title(
+        f"Commodity Share Within {size.title()} CAFO Operations\n"
+        "(USDA Census years only; missing bars = data not available for that census)"
+    )
+    ax.legend(loc="upper right")
+    out = os.path.join(comp_dir, f"{today_str}_share_commodity_within_{size}.png")
+    fig.savefig(out, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+# B) For each commodity: share small/medium/large — census years only
 commodity_size = (
-    cafo_long.groupby(["year", "commodity_desc", "size_bucket"], as_index=False)["ops_count"]
+    cafo_long_census.groupby(["year", "commodity_desc", "size_bucket"], as_index=False)["ops_count"]
     .sum()
 )
 commodity_size["pct_within_commodity_year"] = (
@@ -564,21 +601,41 @@ commodity_size["pct_within_commodity_year"] = (
 )
 commodity_size.to_csv(os.path.join(comp_dir, f"{today_str}_commodity_size_share.csv"), index=False)
 
+SIZE_COLORS = {"small": "#a8c7e8", "medium": "#4f94d0", "large": "#174e86"}
+
 for commodity in ["cattle", "chickens", "hogs"]:
     d = commodity_size[commodity_size["commodity_desc"] == commodity].copy()
     if d.empty:
         continue
-    pivot = d.pivot_table(index="year", columns="size_bucket", values="pct_within_commodity_year", aggfunc="sum").fillna(0)
-    pivot = pivot[[c for c in ["small", "medium", "large"] if c in pivot.columns]]
-    plt.figure(figsize=(10, 6))
-    plt.stackplot(pivot.index, [pivot[c] for c in pivot.columns], labels=pivot.columns, alpha=0.85)
-    plt.title(f"Size Share (%) Within {commodity.title()} Operations by Year")
-    plt.xlabel("Year")
-    plt.ylabel("Share (%)")
-    plt.legend(loc="upper left")
+    pivot = d.pivot_table(
+        index="year", columns="size_bucket",
+        values="pct_within_commodity_year", aggfunc="sum",
+    ).reindex(CAFO_CENSUS_YEARS)
+    sizes = [c for c in ["small", "medium", "large"] if c in pivot.columns]
+    pivot = pivot[sizes]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(CAFO_CENSUS_YEARS))
+    width = 0.6
+    bottoms = np.zeros(len(CAFO_CENSUS_YEARS))
+    for sz in sizes:
+        vals = pivot[sz].fillna(0).values
+        ax.bar(x, vals, width, bottom=bottoms,
+               label=sz.title(), color=SIZE_COLORS.get(sz, None), alpha=0.9)
+        bottoms += vals
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(y) for y in CAFO_CENSUS_YEARS])
+    ax.set_xlabel("USDA Census Year")
+    ax.set_ylabel("Share of operations (%)")
+    ax.set_ylim(0, 105)
+    ax.set_title(
+        f"Size Share Within {commodity.title()} CAFO Operations\n"
+        "(USDA Census years only; missing bars = data not available for that census)"
+    )
+    ax.legend(loc="upper right")
     out = os.path.join(comp_dir, f"{today_str}_share_size_within_{commodity}.png")
-    plt.savefig(out, dpi=220, bbox_inches="tight")
-    safe_plot_close()
+    fig.savefig(out, dpi=220, bbox_inches="tight")
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------

@@ -170,21 +170,21 @@ if missing_cafo:
 for c in cafo_cols_new:
     df[c] = to_num(df[c])
 
-fsis_col = "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip"
+fsis_col = "n_unique_establishments_fsis"
 fsis_size_cols = [
-    "n_size_bucket_1_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_2_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_3_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_4_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_5_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_missing_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_1_fsis",
+    "n_size_bucket_2_fsis",
+    "n_size_bucket_3_fsis",
+    "n_size_bucket_4_fsis",
+    "n_size_bucket_5_fsis",
+    "n_size_bucket_missing_fsis",
 ]
 for c in [fsis_col, *fsis_size_cols]:
     if c not in df.columns:
         raise RuntimeError(f"Missing required FSIS column in merged panel: {c}")
     df[c] = to_num(df[c])
 
-poor_mental_col = "poor_mental_health_days_raw_value_mentalhealthrank_full"
+poor_mental_col = "poor_mental_health_days"
 if poor_mental_col not in df.columns:
     raise RuntimeError(f"Missing required mental-health column in merged panel: {poor_mental_col}")
 df[poor_mental_col] = to_num(df[poor_mental_col])
@@ -251,7 +251,7 @@ fsis_stats.to_csv(os.path.join(out_dir, "fsis_county_year_sumstats.csv"), index=
 # ---------------------------------------------------------------------
 # 4) mental_fill_share.csv
 # ---------------------------------------------------------------------
-mental_cols = [c for c in df.columns if c.endswith("_mentalhealthrank_full") and "mental" in c.lower()]
+mental_cols = [c for c in df.columns if c.endswith("") and "mental" in c.lower()]
 any_mental = df[mental_cols].notna().any(axis=1) if mental_cols else pd.Series(False, index=df.index)
 mental_fill = pd.DataFrame(
     [
@@ -305,18 +305,18 @@ map_year = 2017
 df_2017 = df[df["year"] == map_year].copy()
 
 fsis_2017_cols = [
-    "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_unique_est_size_combos_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_slaughterhouse_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_processing_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_meat_slaughter_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_poultry_slaughter_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_1_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_2_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_3_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_4_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_5_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_missing_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_unique_establishments_fsis",
+    "n_unique_est_size_combos_fsis",
+    "n_slaughterhouse_present_establishments_fsis",
+    "n_processing_present_establishments_fsis",
+    "n_meat_slaughter_establishments_fsis",
+    "n_poultry_slaughter_establishments_fsis",
+    "n_size_bucket_1_fsis",
+    "n_size_bucket_2_fsis",
+    "n_size_bucket_3_fsis",
+    "n_size_bucket_4_fsis",
+    "n_size_bucket_5_fsis",
+    "n_size_bucket_missing_fsis",
 ]
 for c in fsis_2017_cols:
     if c not in df_2017.columns:
