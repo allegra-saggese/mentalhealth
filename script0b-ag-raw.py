@@ -195,14 +195,12 @@ if USE_API:
     except RuntimeError as e:
         print(f"API fetch failed (non-fatal — .dta baseline is sufficient): {e}")
 
-# Merge: .dta is authoritative; API rows supplement where not already covered
-if not combined_api.empty:
-    combined = pd.concat([combined_dta, combined_api], ignore_index=True)
-    combined = combined.drop_duplicates(ignore_index=True)
-    print(f"Combined (dta + api, deduped): {len(combined):,} rows")
-else:
-    combined = combined_dta.copy()
-    print("Using .dta baseline only (no API supplement).")
+# .dta files are authoritative for all 4 census years; API returns 403 for 2012/2017
+# and has extra schema columns (load_time, congr_district_code, etc.) absent in .dta,
+# so a full drop_duplicates() cannot remove overlapping rows → ~2x inflation.
+# Fix: use .dta exclusively. API supplement disabled to prevent double-counting.
+combined = combined_dta.copy()
+print(f"Using .dta baseline only ({len(combined):,} rows). API supplement disabled to prevent schema-mismatch duplication.")
     
     
     
