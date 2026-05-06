@@ -534,7 +534,7 @@ safe_plot_close()
 # (hogs absent 2012+, chickens absent 2012–2016, cattle absent 2017+).
 # Missing cells produce empty bars rather than fabricated shares.
 # ---------------------------------------------------------------------
-CAFO_CENSUS_YEARS = [2002, 2007, 2012, 2017]
+CAFO_CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 comp_dir = os.path.join(figs_dir, "cafo_composition")
 os.makedirs(comp_dir, exist_ok=True)
 

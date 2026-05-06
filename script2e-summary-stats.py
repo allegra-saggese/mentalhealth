@@ -284,7 +284,7 @@ save_state_choropleths(
     out_prefix="fsis_state_total_establishments",
 )
 
-# CAFO state choropleths: 2010-2015
+# CAFO state choropleths: 2010-2022 (includes newly available 2022 Census year)
 cafo_state_year_map = (
     df.groupby(["year", "state_fips", "state_abbrev"], as_index=False)["cafo_total_ops_all_animals"]
     .sum(min_count=1)
@@ -292,7 +292,7 @@ cafo_state_year_map = (
 save_state_choropleths(
     cafo_state_year_map,
     value_col="cafo_total_ops_all_animals",
-    years=list(range(2010, 2016)),
+    years=list(range(2010, 2023)),
     title_prefix="CAFO Total Ops (State-Year Total)",
     out_prefix="cafo_state_total_ops",
 )

@@ -49,7 +49,7 @@ MAP_SPECS = [
         "label": "CAFO Total Operations",
         "col": "cafo_total_ops_all_animals",
         "stub": "cafo_total_ops",
-        "years": [2007, 2012, 2017],
+        "years": [2007, 2012, 2017, 2022],
         "colorscale": "RdBu",
     },
     {

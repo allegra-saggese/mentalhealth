@@ -765,12 +765,12 @@ if px is not None:
                 print(f"  PNG export skipped (install kaleido for static export): {_e_img}")
 
         # ── Figures G & H: CAFO choropleths by animal type / size × census year ──
-        # Each figure is a 2×2 grid (one panel per census year: 2002, 2007, 2012, 2017).
+        # Layout is dynamic so it can include newly added census years (e.g., 2022).
         # G = by animal type (cattle / hogs / chickens); H = by size class (S / M / L).
         from plotly.subplots import make_subplots
         import plotly.graph_objects as go
 
-        _CENSUS_YEARS = [2002, 2007, 2012, 2017]
+        _CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 
         # Animal type: derive totals from size sub-columns
         _ANIMAL_GROUPS = {
@@ -785,20 +785,26 @@ if px is not None:
             "Large":  "large_cafo",
         }
 
-        def _make_cafo_2x2_choropleth(val_col_map, geojson, fig_title, colorscale, out_stub):
+        def _make_cafo_faceted_choropleth(val_col_map, geojson, fig_title, colorscale, out_stub):
             """
             val_col_map: dict {census_year: (df_yr, col_name)} where col_name holds log per10k.
-            Creates a 2×2 plotly choropleth grid, saves HTML + PNG.
+            Creates a dynamic faceted choropleth grid, saves HTML + PNG.
             """
+            _n = len(_CENSUS_YEARS)
+            _n_cols = min(3, _n)
+            _n_rows = int(np.ceil(_n / _n_cols))
+            _n_slots = _n_rows * _n_cols
+            _titles = [str(y) for y in _CENSUS_YEARS] + [""] * (_n_slots - _n)
+
             fig_ch = make_subplots(
-                rows=2, cols=2,
-                subplot_titles=[str(y) for y in _CENSUS_YEARS],
-                specs=[[{"type": "choropleth"}, {"type": "choropleth"}],
-                       [{"type": "choropleth"}, {"type": "choropleth"}]],
+                rows=_n_rows,
+                cols=_n_cols,
+                subplot_titles=_titles,
+                specs=[[{"type": "choropleth"} for _ in range(_n_cols)] for _ in range(_n_rows)],
                 vertical_spacing=0.06, horizontal_spacing=0.01,
             )
             for idx, yr in enumerate(_CENSUS_YEARS):
-                r, c = divmod(idx, 2)
+                r, c = divmod(idx, _n_cols)
                 df_yr, col_name = val_col_map[yr]
                 df_plot = df_yr[["fips_str", col_name]].dropna()
                 geo_key = "geo" if idx == 0 else f"geo{idx + 1}"
@@ -820,7 +826,7 @@ if px is not None:
                 )})
             fig_ch.update_layout(
                 title_text=fig_title, title_font_size=13,
-                height=720, width=1350,
+                height=360 * _n_rows, width=430 * _n_cols,
                 margin={"r": 90, "t": 80, "l": 0, "b": 0},
             )
             _html = os.path.join(out_dir, f"{today_str}_{out_stub}.html")
@@ -828,7 +834,7 @@ if px is not None:
             fig_ch.write_html(_html)
             print("Saved HTML:", _html)
             try:
-                fig_ch.write_image(_png, width=1400, height=750, scale=2)
+                fig_ch.write_image(_png, width=430 * _n_cols, height=360 * _n_rows, scale=2)
                 print("Saved PNG: ", _png)
             except Exception as _e_img:
                 print(f"  PNG skipped: {_e_img}")
@@ -844,7 +850,7 @@ if px is not None:
                 _df_yr[_col_total] = _df_yr[[c for c in _size_cols if c in _df_yr.columns]].sum(axis=1, min_count=1)
                 _df_yr["_log_val"] = log_per10k(_df_yr[_col_total], _df_yr[POP_COL])
                 _val_map[_yr] = (_df_yr, "_log_val")
-            _make_cafo_2x2_choropleth(
+            _make_cafo_faceted_choropleth(
                 _val_map, _counties_geojson,
                 fig_title=f"CAFO {_animal} Operations (log per 10k) — Rural US Counties, Census Years",
                 colorscale="YlOrRd",
@@ -863,7 +869,7 @@ if px is not None:
                 _val_map[_yr] = (_df_yr, "_log_val")
             if not _val_map:
                 continue
-            _make_cafo_2x2_choropleth(
+            _make_cafo_faceted_choropleth(
                 _val_map, _counties_geojson,
                 fig_title=f"CAFO {_size_label} Operations (log per 10k) — Rural US Counties, Census Years",
                 colorscale="Blues",

@@ -34,7 +34,7 @@ print(f"Panel loaded: {len(df):,} rows | {df['fips'].nunique():,} counties | "
       f"years {int(df['year'].min())}–{int(df['year'].max())}")
 
 POP_COL      = "population"
-CENSUS_YEARS = [2002, 2007, 2012, 2017]
+CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def log_per10k(series, pop):
@@ -89,8 +89,11 @@ _ANIMAL_TOTALS = {
 TOP_N = 20
 
 for k_idx, (animal, size_cols) in enumerate(_ANIMAL_TOTALS.items(), start=1):
-    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
-    axes = axes.flatten()
+    _n = len(CENSUS_YEARS)
+    _n_cols = min(3, _n)
+    _n_rows = int(np.ceil(_n / _n_cols))
+    fig, axes = plt.subplots(_n_rows, _n_cols, figsize=(5.4 * _n_cols, 4.8 * _n_rows))
+    axes = np.array(axes).reshape(-1)
     color = ANIMAL_COLORS[animal]
 
     for ax, yr in zip(axes, CENSUS_YEARS):
@@ -108,6 +111,8 @@ for k_idx, (animal, size_cols) in enumerate(_ANIMAL_TOTALS.items(), start=1):
         ax.tick_params(axis="y", labelsize=7)
         ax.tick_params(axis="x", labelsize=8)
         ax.set_xlim(left=0)
+    for ax in axes[len(CENSUS_YEARS):]:
+        ax.set_visible(False)
 
     fig.suptitle(
         f"Top {TOP_N} Counties by {animal} CAFO Concentration — Rural US, Census Years\n"
@@ -131,8 +136,11 @@ _ANIMAL_LARGE = {
 }
 
 for l_idx, (animal, large_col) in enumerate(_ANIMAL_LARGE.items(), start=1):
-    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
-    axes = axes.flatten()
+    _n = len(CENSUS_YEARS)
+    _n_cols = min(3, _n)
+    _n_rows = int(np.ceil(_n / _n_cols))
+    fig, axes = plt.subplots(_n_rows, _n_cols, figsize=(5.4 * _n_cols, 4.8 * _n_rows))
+    axes = np.array(axes).reshape(-1)
     color = ANIMAL_COLORS[animal]
 
     for ax, yr in zip(axes, CENSUS_YEARS):
@@ -149,6 +157,8 @@ for l_idx, (animal, large_col) in enumerate(_ANIMAL_LARGE.items(), start=1):
         ax.tick_params(axis="y", labelsize=7)
         ax.tick_params(axis="x", labelsize=8)
         ax.set_xlim(left=0)
+    for ax in axes[len(CENSUS_YEARS):]:
+        ax.set_visible(False)
 
     fig.suptitle(
         f"Top {TOP_N} Counties by Large {animal} CAFO Concentration — Rural US, Census Years\n"

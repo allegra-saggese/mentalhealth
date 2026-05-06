@@ -377,7 +377,7 @@ df_raw["total_all"]   = df_raw[["cafo_cattle_small","cafo_cattle_medium","cafo_c
 df_raw["large_share"] = df_raw["large_total"] / df_raw["total_all"].replace(0, np.nan)
 
 # Detect events at USDA Census years
-CENSUS_YEARS = [2002, 2007, 2012, 2017]
+CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 df_cens = df_raw[df_raw["year"].isin(CENSUS_YEARS)].sort_values(["fips","year"]).copy()
 df_cens["large_total_lag"] = df_cens.groupby("fips")["large_total"].shift(1)
 df_cens["large_share_lag"] = df_cens.groupby("fips")["large_share"].shift(1)
