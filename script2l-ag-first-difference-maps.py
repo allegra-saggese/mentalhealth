@@ -122,10 +122,11 @@ def year_summary(df_diff, col, label):
     rows = []
     for yr, g in df_diff.groupby("year"):
         x = to_num(g["first_diff"])
-        valid = x.notna().sum()
+        valid_mask = x.notna()
+        valid = valid_mask.sum()
         if valid == 0:
             continue
-        nz = (x != 0).sum()
+        nz = ((x != 0) & valid_mask).sum()
         rows.append(
             {
                 "variable": col,
