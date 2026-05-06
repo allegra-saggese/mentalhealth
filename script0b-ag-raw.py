@@ -42,33 +42,29 @@ outf = os.path.join(db_data, "clean") #output
 
 
 # ----------------------- SET UP PART 2 : PULL USDA FROM API  -------------------- -#
-# Purpose: pull the data directly from the API (avoiding the existind .dta files)
+# Purpose: add USDA 2022 Census rows from the API in the same shape used by the
+# existing .dta-based CAFO pipeline (rather than downloading broad raw extracts).
 
-# set KEY for API 
-os.environ["USDA_NASS_API_KEY"] = "30643212-7739-359A-B451-0EAD3D345DB9" # will have to change for user
-
-# pull USDA NASS Quick Stats data directly instead of reading .dta files 
-USE_API = True
-NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY") 
-if USE_API and not NASS_API_KEY:
+# API setup
+DEFAULT_NASS_API_KEY = "30643212-7739-359A-B451-0EAD3D345DB9"
+USE_API_SUPPLEMENT = True
+API_SUPPLEMENT_YEARS = [2022]  # pull only years not present in local .dta files
+NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY", DEFAULT_NASS_API_KEY)
+if USE_API_SUPPLEMENT and not NASS_API_KEY:
     raise RuntimeError("Missing USDA_NASS_API_KEY env var. Set it before running this script.")
 
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
 
-
-# set filters (user-specified)
+# Query filters for the API supplement.
+# We keep this narrow: only combinations that can flow into CAFO ops mappings.
 source_desc = "CENSUS"
 agg_level_desc = "COUNTY"
 sector_desc = "ANIMALS & PRODUCTS"
 commodity_desc_allow = ["CATTLE", "CHICKENS", "HOGS"]
+unit_desc_allow = ["OPERATIONS"]          # downstream CAFO construction uses operations rows
+statisticcat_desc_allow = ["INVENTORY"]   # mapped size bins are inventory categories
 
-unit_desc_allow = ["HEAD", "OPERATIONS"]
-statisticcat_desc_allow = ["INVENTORY", "OPERATIONS"]
-
-# take the census years only - where data is actually recorded 
-census_years = [2002, 2007, 2012, 2017]
-
-# take cmmodity-specific domain splits used only when a query exceeds 50k rows (otherwise its too intensive)
+# Split only when a request exceeds the NASS 50k cap.
 commodity_domain_splits = {
     "CATTLE": [
         "INVENTORY",
@@ -88,8 +84,84 @@ commodity_domain_splits = {
 }
 
 
-# create function to define a call in the API for the ag data 
-def fetch_ag_data():
+# Canonical .dta column shape used downstream.
+DTA_CORE_COLS = [
+    "group_desc", "commodity_desc", "class_desc", "prodn_practice_desc", "util_practice_desc",
+    "statisticcat_desc", "unit_desc", "short_desc", "domain_desc", "domaincat_desc",
+    "agg_level_desc", "state_ansi", "state_fips_code", "state_alpha", "state_name",
+    "asd_code", "asd_desc", "county_ansi", "county_code", "county_name", "location_desc",
+    "year", "freq_desc", "begin_code", "end_code", "reference_period_desc", "value", "cv_",
+]
+
+
+def _harmonize_api_to_dta_schema(df_api):
+    """
+    Keep API pulls in a .dta-compatible schema so downstream code stays unchanged.
+    """
+    if df_api.empty:
+        return df_api
+
+    out = df_api.copy()
+    out.columns = [c.lower().strip() for c in out.columns]
+
+    # API uses "CV (%)"; .dta files use "CV_".
+    if "cv (%)" in out.columns and "cv_" not in out.columns:
+        out = out.rename(columns={"cv (%)": "cv_"})
+
+    for c in DTA_CORE_COLS:
+        if c not in out.columns:
+            out[c] = pd.NA
+
+    return out[DTA_CORE_COLS].copy()
+
+
+def _filter_to_rows_used_downstream(df_raw):
+    """
+    Mirror the script's later CAFO filters early so API rows are already scoped to
+    what can actually survive into the analysis tables.
+    """
+    if df_raw.empty:
+        return df_raw
+
+    out = df_raw.copy()
+    for c in [
+        "domaincat_desc", "unit_desc", "statisticcat_desc", "domain_desc",
+        "commodity_desc", "group_desc", "class_desc"
+    ]:
+        if c in out.columns:
+            out[c] = out[c].astype("string").str.strip().str.lower()
+
+    comms_of_interest = ["cattle", "chickens", "hogs"]
+    class_keep_map = {
+        "cattle": {"incl calves", "(excl cows)", "cows, beef", "cows, milk", "calves", "calves, veal", "ge 500 lbs", "heifers, ge 500 lbs, milk replacement"},
+        "chickens": {"broilers", "layers", "layers & pullets", "pullets, replacement", "roosters"},
+        "hogs": {"all classes", "breeding"},
+    }
+
+    out = out[
+        (out["commodity_desc"].isin(comms_of_interest))
+        & (out["unit_desc"].isin(["operations", "head"]))
+        & (out["statisticcat_desc"].isin(["inventory", "operations"]))
+        & (out["domaincat_desc"].str.startswith("inventory", na=False))
+    ].copy()
+
+    allowed_pairs = {
+        (commodity, cls)
+        for commodity, classes in class_keep_map.items()
+        for cls in classes
+    }
+    pair_index = pd.MultiIndex.from_frame(out[["commodity_desc", "class_desc"]])
+    allowed_index = pd.MultiIndex.from_tuples(sorted(allowed_pairs))
+    out = out[pair_index.isin(allowed_index)].copy()
+
+    return out
+
+
+# create function to define a call in the API for the ag data
+def fetch_ag_data(years_to_pull):
+    if not years_to_pull:
+        return pd.DataFrame()
+
     def _keep_inventory_domaincat(df):
         """Keep only rows where domaincat_desc starts with 'inventory' (case-insensitive)."""
         if "domaincat_desc" in df.columns:
@@ -118,7 +190,7 @@ def fetch_ag_data():
     frames = []
     rate_sleep = 0.4  # basic rate limiting
 
-    for yr in census_years:
+    for yr in years_to_pull:
         for cmd in commodity_desc_allow:
             for unit in unit_desc_allow:
                 for stat in statisticcat_desc_allow: # call the units we want to pull
@@ -163,16 +235,17 @@ def fetch_ag_data():
                         if not df_pull.empty:
                             frames.append(df_pull)
 
-    if frames:
-        return pd.concat(frames, ignore_index=True)
-    return pd.DataFrame()
+    if not frames:
+        return pd.DataFrame()
+
+    pulled = pd.concat(frames, ignore_index=True)
+    pulled = _harmonize_api_to_dta_schema(pulled)
+    pulled = _filter_to_rows_used_downstream(pulled)
+    return pulled
 
 
-# Load .dta files as the authoritative baseline for USDA Census years.
-# The API often has gaps for specific commodity × census-year combinations
-# (e.g. hogs 2012+, cattle 2017+) even when it returns data for other combos,
-# so the old "fallback only if combined.empty" logic silently left those years
-# empty. We now ALWAYS load the .dta files and supplement with any API rows.
+# Load .dta files as the authoritative baseline for historical Census years.
+# Then append API rows only for missing Census years (currently 2022).
 agfolder = os.path.join(inf, "usda")
 agfiles = sorted(glob.glob(os.path.join(agfolder, "*.dta")))
 if not agfiles:
@@ -185,33 +258,44 @@ for f in agfiles:
 combined_dta = pd.concat(dta_frames, ignore_index=True)
 print(f"Loaded {len(combined_dta):,} rows from {len(agfiles)} local .dta files: {[os.path.basename(f) for f in agfiles]}")
 
-# Optionally supplement with API rows (adds any rows not already in .dta baseline)
+# Optionally supplement with API rows for years absent from .dta.
+dta_years = sorted(pd.to_numeric(combined_dta["year"], errors="coerce").dropna().astype(int).unique().tolist())
+years_to_pull_api = [yr for yr in API_SUPPLEMENT_YEARS if yr not in dta_years]
 combined_api = pd.DataFrame()
-if USE_API:
+if USE_API_SUPPLEMENT and years_to_pull_api:
     try:
-        combined_api = fetch_ag_data()
-        combined_api.columns = [c.lower().strip() for c in combined_api.columns]
-        print(f"Loaded {len(combined_api):,} rows from USDA NASS API")
+        combined_api = fetch_ag_data(years_to_pull_api)
+        print(f"Loaded {len(combined_api):,} filtered rows from USDA NASS API for years {years_to_pull_api}")
     except RuntimeError as e:
-        print(f"API fetch failed (non-fatal — .dta baseline is sufficient): {e}")
+        print(f"API fetch failed (non-fatal — proceeding with .dta baseline only): {e}")
+elif USE_API_SUPPLEMENT:
+    print(f"API supplement skipped: local .dta already covers requested years {API_SUPPLEMENT_YEARS}.")
 
-# .dta files are authoritative for all 4 census years; API returns 403 for 2012/2017
-# and has extra schema columns (load_time, congr_district_code, etc.) absent in .dta,
-# so a full drop_duplicates() cannot remove overlapping rows → ~2x inflation.
-# Fix: use .dta exclusively. API supplement disabled to prevent double-counting.
 combined = combined_dta.copy()
-print(f"Using .dta baseline only ({len(combined):,} rows). API supplement disabled to prevent schema-mismatch duplication.")
+if not combined_api.empty:
+    before_append = len(combined)
+    combined = pd.concat([combined, combined_api], ignore_index=True)
+    dedupe_cols = [c for c in DTA_CORE_COLS if c in combined.columns]
+    before_dedupe = len(combined)
+    combined = combined.drop_duplicates(subset=dedupe_cols, keep="first")
+    print(
+        "Appended API supplement rows: "
+        f"pre-append={before_append:,}, post-append={before_dedupe:,}, "
+        f"post-dedupe={len(combined):,}"
+    )
+else:
+    print(f"Using .dta baseline only ({len(combined):,} rows).")
     
     
     
 # ----------------------- SET UP PART 3 : STANDARDIZE COMBINED DATA   -------------------- -#
-# The .dta files loaded above are the authoritative source for all four USDA Census years
-# (2002, 2007, 2012, 2017). No donor backfill is needed — the .dta files have complete
-# coverage for cattle, hogs, and chickens for all census years.
+# The .dta files loaded above are authoritative for historical years
+# (2002, 2007, 2012, 2017). API rows (if appended) are harmonized to the same
+# schema and filtered to the same analysis-relevant subset (currently 2022).
 # The old donor backfill introduced pre-processed rows (with fips_generated already set)
 # that conflict with the raw .dta rows (no fips_generated), causing the FIPS merge to fail.
 combined = combined.loc[:, ~combined.columns.duplicated()].copy()
-print("Proceeding with .dta baseline (+ any API supplement). No donor backfill applied.")
+print("Proceeding with .dta baseline (+ API supplement, if available). No donor backfill applied.")
 
 # check we have ops in presence 
 chk = combined.copy()
@@ -220,7 +304,7 @@ for c in ["commodity_desc", "unit_desc"]:
 chk["year"] = pd.to_numeric(chk["year"], errors="coerce").astype("Int64")
 chk = chk[
     chk["commodity_desc"].isin(["cattle", "chickens", "hogs"]) &
-    chk["year"].isin([2012, 2017])
+    chk["year"].isin([2012, 2017, 2022])
 ]
 
 # quick eye-ball QA 
