@@ -1,7 +1,7 @@
 # Large-Scale Livestock, Slaughterhouse Work, and Mental Health in the US
 
 ## Purpose
-This project combines US health, crime, population, and agriculture data into one large, unbalanced county-year panel covering roughly 1999–2022 (source-dependent). The goal is to identify causal relationships between large-scale livestock operations (particularly slaughterhouse work) and mental health outcomes among US agriculture workers, using a repeated cross-section at the county (FIPS) level.
+This project combines US health, crime, population, and agriculture data into one large, unbalanced county-year panel covering roughly 1999–2022 (source-dependent). The goal is causal analysis between large-scale livestock operations (farms, slaughter and processing facilities) and mental health outcomes among US agriculture workers, using a repeated cross-section at the county (FIPS) level.
 
 ---
 
@@ -51,7 +51,7 @@ Data/
 Data/
 ├── clean/            # Output of script0* — one dated CSV per source
 ├── merged/           # Output of script1c — full panel + year-slice exports
-│   └── figs/
+│   └── figs/         # NOTE: FIGS WILL BE MOVED SO IT IS NO LONGER A SUBSET OF THE MERGED FOLDER 
 │       ├── panel-sumstats-by-farms/   # QA tables, correlation CSVs, QA memo
 │       │   ├── maps/                  # Plotly choropleth HTMLs
 │       │   └── plots/                 # PNG scatter and distribution plots
