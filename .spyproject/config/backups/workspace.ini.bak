@@ -4,7 +4,7 @@ save_data_on_exit = True
 save_history = True
 save_non_project_files = False
 project_type = 'empty-project-type'
-recent_files = ['packages.py', 'functions.py', 'script2-visualizations.py']
+recent_files = ['script1c-merge-dataclean.py', 'script1a-QA-indiv.py', 'script1b-audit-mental-vars.py', 'script0c-health-raw.py', 'script2f-final-visuals.py', 'script2e-summary-stats.py', 'script2h-threshold-presence.py']
 
 [main]
 version = 0.2.0
