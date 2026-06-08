@@ -23,7 +23,8 @@ import re
 import difflib
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
-repo = "/Users/allegrasaggese/Documents/GitHub/mentalhealth"
+import os
+repo = os.path.dirname(os.path.abspath(__file__))
 if repo not in sys.path:
     sys.path.append(repo)
 
@@ -41,10 +42,9 @@ from packages import *
 inf = os.path.join(db_data, "raw") # input 
 outf = os.path.join(db_data, "clean") #output
 
-# write extension artifacts to the explicit Dropbox copy path used for this project round
-interim_override = "/Users/allegrasaggese/Dropbox/Mental/allegra-dropbox-copy/interim-data"
-qa_dir = os.path.join(interim_override, "qa-crime")
-local_ext_dir = os.path.join(interim_override, "crime-disagg-extension")
+# write extension artifacts to interim (defined in packages.py)
+qa_dir = os.path.join(interim, "qa-crime")
+local_ext_dir = os.path.join(interim, "crime-disagg-extension")
 os.makedirs(qa_dir, exist_ok=True)
 os.makedirs(local_ext_dir, exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")

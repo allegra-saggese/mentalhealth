@@ -1,0 +1,1622 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Summary statistics and aggregate visualization pipeline for merged county-year data.
+Combines broad missingness/trend/composition analysis with targeted CAFO/FSIS/MH sumstats.
+Outputs:
+  - figs/                          missingness, violin, trend, binned scatter, state trend plots
+  - figs/panel-sumstats-by-farms/  coverage, CAFO/FSIS/MH sumstats, county + state maps
+"""
+
+from packages import *
+from functions import *
+import re
+
+try:
+    import plotly.express as px
+except Exception:
+    px = None
+
+# ---------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------
+merged_dir = os.path.join(db_data, "merged")
+clean_dir  = os.path.join(db_data, "clean")
+figs_dir   = os.environ.get("MENTAL_FIGS_DIR", os.path.join(merged_dir, "figs"))
+# panel-sumstats-by-farms: targeted CAFO/FSIS/MH summary tables and maps
+out_dir    = os.path.join(figs_dir, "panel-sumstats-by-farms")
+maps_dir   = os.path.join(out_dir, "maps")
+plots_dir  = os.path.join(out_dir, "plots")
+for _d in [figs_dir, out_dir, maps_dir, plots_dir]:
+    os.makedirs(_d, exist_ok=True)
+
+today_str       = date.today().strftime("%Y-%m-%d")
+MAX_TREND_VARS  = os.environ.get("MAX_TREND_VARS")
+STATE_PLOT_LIMIT = int(os.environ.get("STATE_PLOT_LIMIT", "12"))
+
+STATE_FIPS_TO_NAME = {
+    "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas", "06": "California",
+    "08": "Colorado", "09": "Connecticut", "10": "Delaware", "11": "District of Columbia",
+    "12": "Florida", "13": "Georgia", "15": "Hawaii", "16": "Idaho", "17": "Illinois",
+    "18": "Indiana", "19": "Iowa", "20": "Kansas", "21": "Kentucky", "22": "Louisiana",
+    "23": "Maine", "24": "Maryland", "25": "Massachusetts", "26": "Michigan", "27": "Minnesota",
+    "28": "Mississippi", "29": "Missouri", "30": "Montana", "31": "Nebraska", "32": "Nevada",
+    "33": "New Hampshire", "34": "New Jersey", "35": "New Mexico", "36": "New York",
+    "37": "North Carolina", "38": "North Dakota", "39": "Ohio", "40": "Oklahoma", "41": "Oregon",
+    "42": "Pennsylvania", "44": "Rhode Island", "45": "South Carolina", "46": "South Dakota",
+    "47": "Tennessee", "48": "Texas", "49": "Utah", "50": "Vermont", "51": "Virginia",
+    "53": "Washington", "54": "West Virginia", "55": "Wisconsin", "56": "Wyoming",
+}
+
+
+STATE_FIPS_TO_ABBR = {
+    "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA",
+    "08": "CO", "09": "CT", "10": "DE", "11": "DC", "12": "FL",
+    "13": "GA", "15": "HI", "16": "ID", "17": "IL", "18": "IN",
+    "19": "IA", "20": "KS", "21": "KY", "22": "LA", "23": "ME",
+    "24": "MD", "25": "MA", "26": "MI", "27": "MN", "28": "MS",
+    "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH",
+    "34": "NJ", "35": "NM", "36": "NY", "37": "NC", "38": "ND",
+    "39": "OH", "40": "OK", "41": "OR", "42": "PA", "44": "RI",
+    "45": "SC", "46": "SD", "47": "TN", "48": "TX", "49": "UT",
+    "50": "VT", "51": "VA", "53": "WA", "54": "WV", "55": "WI",
+    "56": "WY",
+}
+
+
+
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+def numeric_candidates(df, cols, min_parse_rate=0.8):
+    out = {}
+    rows = []
+    for c in cols:
+        s = df[c]
+        n_raw = int(s.notna().sum())
+        s_num = to_numeric_series(s)
+        n_num = int(s_num.notna().sum())
+        parse_rate = (n_num / n_raw) if n_raw else 0
+        is_numeric_like = pd.api.types.is_numeric_dtype(s) or (parse_rate >= min_parse_rate and n_num > 0)
+        rows.append(
+            {
+                "variable": c,
+                "raw_non_missing_n": n_raw,
+                "numeric_non_missing_n": n_num,
+                "parse_rate": parse_rate,
+                "numeric_like": int(is_numeric_like),
+            }
+        )
+        if is_numeric_like:
+            out[c] = s_num
+    meta = pd.DataFrame(rows).sort_values(["numeric_like", "parse_rate"], ascending=[False, False])
+    return out, meta
+
+
+def safe_plot_close():
+    plt.tight_layout()
+    plt.close()
+
+
+def safe_name(s, n=110):
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", str(s)).strip("_").lower()[:n]
+
+
+def write_csv_bundle(base_name, tables):
+    """
+    tables: dict{name -> DataFrame}
+    """
+    for name, obj in tables.items():
+        path = os.path.join(figs_dir, f"{today_str}_{base_name}_{name}.csv")
+        if isinstance(obj, pd.Series):
+            obj = obj.to_frame("value")
+        obj.to_csv(path, index=False)
+        print("Saved:", path)
+
+
+def chunked(items, k):
+    for i in range(0, len(items), k):
+        yield i // k + 1, items[i : i + k]
+
+
+def weighted_mean(x, w):
+    m = x.notna() & w.notna() & (w > 0)
+    if not m.any():
+        return np.nan
+    return np.average(x[m], weights=w[m])
+
+
+def get_series(df_like, col):
+    """
+    Always return a Series; protects against duplicate-label selection returning DataFrame.
+    """
+    obj = df_like[col]
+    if isinstance(obj, pd.DataFrame):
+        obj = obj.iloc[:, 0]
+    return obj
+
+
+def gini_from_values(values):
+    """
+    Gini for non-negative values. Returns nan if undefined.
+    """
+    x = np.array(values, dtype=float)
+    x = x[np.isfinite(x)]
+    x = x[x >= 0]
+    if x.size == 0:
+        return np.nan
+    if np.all(x == 0):
+        return 0.0
+    x = np.sort(x)
+    n = x.size
+    cumx = np.cumsum(x)
+    return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
+
+
+
+def summarize_numeric(df, columns):
+    rows = []
+    n_total = len(df)
+    for c in columns:
+        s = to_numeric_series(df[c]) if c in df.columns else pd.Series(dtype="float64")
+        nonmiss = int(s.notna().sum())
+        rows.append(
+            {
+                "variable": c,
+                "n_total": n_total,
+                "non_missing_n": nonmiss,
+                "fill_pct": (nonmiss / n_total * 100) if n_total else np.nan,
+                "mean": float(s.mean()) if nonmiss else np.nan,
+                "p50": float(s.quantile(0.50)) if nonmiss else np.nan,
+                "p90": float(s.quantile(0.90)) if nonmiss else np.nan,
+                "min": float(s.min()) if nonmiss else np.nan,
+                "max": float(s.max()) if nonmiss else np.nan,
+                "gt0_pct_among_nonmissing": float((s > 0).mean() * 100) if nonmiss else np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def save_state_choropleths(state_year_df, value_col, years, title_prefix, out_prefix):
+    if px is None:
+        print(f"Plotly unavailable. Skipping maps: {out_prefix}")
+        return
+    for yr in years:
+        d = state_year_df[state_year_df["year"] == yr].copy()
+        d = d[d[value_col].notna()].copy()
+        if d.empty:
+            continue
+        fig = px.choropleth(
+            d,
+            locations="state_abbrev",
+            locationmode="USA-states",
+            color=value_col,
+            scope="usa",
+            color_continuous_scale="OrRd",
+            hover_data={"state_fips": True, value_col: ":,.2f"},
+            title=f"{title_prefix} ({yr})",
+        )
+        out = os.path.join(maps_dir, f"{out_prefix}_{yr}.html")
+        fig.write_html(out, include_plotlyjs="cdn")
+
+
+
+
+def save_county_map_one_year(df_year, value_col, year, title_prefix, out_prefix):
+    if px is None:
+        return
+    d = df_year[["fips", value_col]].copy()
+    d[value_col] = to_numeric_series(d[value_col])
+    d = d[d["fips"].notna() & d[value_col].notna()].copy()
+    if d.empty:
+        return None
+
+    vals = d[value_col].replace([np.inf, -np.inf], np.nan).dropna()
+    if vals.empty:
+        return None
+    p99 = float(vals.quantile(0.99))
+    vmax = p99 if np.isfinite(p99) and p99 > 0 else float(vals.max())
+    range_color = (0, vmax) if np.isfinite(vmax) and vmax > 0 else None
+
+    fig = px.choropleth(
+        d,
+        geojson=COUNTY_GEOJSON_URL,
+        locations="fips",
+        color=value_col,
+        color_continuous_scale="OrRd",
+        range_color=range_color,
+        scope="usa",
+        hover_data={"fips": True, value_col: ":,.2f"},
+        title=f"{title_prefix} ({year})",
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    out = os.path.join(maps_dir, f"{out_prefix}_{safe_name(value_col)}_{year}.html")
+    fig.write_html(out, include_plotlyjs="cdn")
+    return out
+
+# 1) Load merged panel
+# ---------------------------------------------------------------------
+merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
+print("Using merged file:", merged_path)
+
+df = pd.read_csv(merged_path, low_memory=False)
+df = normalize_panel_key(df, dropna=False)
+df = df.loc[:, ~df.columns.duplicated()].copy()
+df = df.dropna(subset=["fips", "year"]).copy()
+df = df.sort_values(["fips", "year"]).reset_index(drop=True)
+
+dup_mask = df.duplicated(subset=["fips", "year"], keep=False)
+if dup_mask.any():
+    dup_path = os.path.join(figs_dir, f"{today_str}_merged_duplicate_fips_year_rows.csv")
+    df.loc[dup_mask].to_csv(dup_path, index=False)
+    print("Saved duplicate-key rows:", dup_path)
+    df = df.drop_duplicates(subset=["fips", "year"], keep="first").copy()
+
+print("Final panel rows (county-year):", len(df))
+
+key_cols = ["fips", "year"]
+analysis_cols = [c for c in df.columns if c not in key_cols]
+n_obs = len(df)
+
+
+# ---------------------------------------------------------------------
+
+
+# =====================================================================
+# SECTION A — Aggregate analysis (missingness, trends, compositions)
+# =====================================================================
+# 2) Missingness tables + family heatmaps + row completeness
+# ---------------------------------------------------------------------
+missing_overall = pd.DataFrame(
+    {
+        "variable": analysis_cols,
+        "non_missing_n": [int(df[c].notna().sum()) for c in analysis_cols],
+        "missing_n": [int(df[c].isna().sum()) for c in analysis_cols],
+        "dtype": [str(df[c].dtype) for c in analysis_cols],
+        "nunique": [int(df[c].nunique(dropna=True)) for c in analysis_cols],
+    }
+)
+missing_overall["fill_pct"] = missing_overall["non_missing_n"] / n_obs * 100
+missing_overall["missing_pct"] = missing_overall["missing_n"] / n_obs * 100
+missing_overall = missing_overall.sort_values("missing_pct", ascending=False)
+
+missing_by_year = (df.groupby("year")[analysis_cols].apply(lambda x: x.isna().mean() * 100)).sort_index()
+fill_by_year = 100 - missing_by_year
+
+row_fill_pct = df[analysis_cols].notna().mean(axis=1) * 100
+row_fill_distribution = pd.DataFrame({"fips": df["fips"], "year": df["year"], "row_fill_pct": row_fill_pct})
+row_fill_summary = row_fill_pct.describe(percentiles=[0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99]).to_frame("value")
+
+write_csv_bundle(
+    "merged_missingness",
+    {
+        "overall": missing_overall,
+        "pct_by_year": missing_by_year.reset_index(),
+        "fill_by_year": fill_by_year.reset_index(),
+        "row_fill_distribution": row_fill_distribution,
+        "row_fill_summary": row_fill_summary.reset_index(),
+    },
+)
+
+# By-year share of missing/non-missing cells across all analysis variables
+missing_share_by_year = pd.DataFrame(
+    {
+        "year": sorted(df["year"].dropna().astype(int).unique()),
+    }
+)
+missing_share_by_year["missing_share_pct"] = [
+    float(df.loc[df["year"] == y, analysis_cols].isna().mean().mean() * 100)
+    for y in missing_share_by_year["year"]
+]
+missing_share_by_year["non_missing_share_pct"] = 100 - missing_share_by_year["missing_share_pct"]
+write_csv_bundle("missingness_share", {"by_year": missing_share_by_year})
+
+plt.figure(figsize=(10, 5))
+sns.lineplot(data=missing_share_by_year, x="year", y="missing_share_pct", marker="o", color="#d62728")
+plt.title("Share of Missing Data by Year (All Variables)")
+plt.xlabel("Year")
+plt.ylabel("Missing share (%)")
+out = os.path.join(figs_dir, f"{today_str}_missing_share_by_year.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
+
+# Top-60 heatmap
+top60 = missing_overall.loc[missing_overall["missing_pct"].between(1, 99), "variable"].head(60).tolist()
+if top60:
+    plt.figure(figsize=(20, 8))
+    sns.heatmap(missing_by_year[top60], cmap="mako_r", cbar_kws={"label": "Missing %"})
+    plt.title("Missingness Heatmap by Year (Top 60 Variables)")
+    plt.xlabel("Variable")
+    plt.ylabel("Year")
+    plt.xticks(rotation=90, fontsize=7)
+    p = os.path.join(figs_dir, f"{today_str}_missingness_heatmap_top60.png")
+    plt.savefig(p, dpi=220, bbox_inches="tight")
+    safe_plot_close()
+    print("Saved:", p)
+
+# Missingness by variable family (separate heatmaps)
+family_suffixes = [
+    "cafo_ops_by_size_compact",
+    "crime_fips_level_final",
+    "mh_mortality_fips_yr",
+    "population_full",
+]
+
+
+def detect_family(col):
+    if col == "non_large_metro":
+        return "rural_key"
+    for suf in family_suffixes:
+        if col.endswith(f"_{suf}"):
+            return suf
+    return "other"
+
+
+family_df = pd.DataFrame({"variable": analysis_cols})
+family_df["family"] = family_df["variable"].map(detect_family)
+family_summary = (
+    family_df.groupby("family")["variable"]
+    .count()
+    .rename("n_variables")
+    .reset_index()
+    .sort_values("n_variables", ascending=False)
+)
+write_csv_bundle("missingness_family", {"variable_family_counts": family_summary, "variable_family_map": family_df})
+
+fam_dir = os.path.join(figs_dir, "missingness_family_heatmaps")
+os.makedirs(fam_dir, exist_ok=True)
+
+for family in sorted(family_df["family"].unique()):
+    fam_vars = family_df.loc[family_df["family"] == family, "variable"].tolist()
+    if not fam_vars:
+        continue
+    for chunk_idx, cols_chunk in chunked(fam_vars, 35):
+        plt.figure(figsize=(max(10, 0.45 * len(cols_chunk)), 7))
+        sns.heatmap(missing_by_year[cols_chunk], cmap="magma_r", cbar_kws={"label": "Missing %"})
+        plt.title(f"Missingness by Year - Family: {family} (chunk {chunk_idx})")
+        plt.xlabel("Variable")
+        plt.ylabel("Year")
+        plt.xticks(rotation=90, fontsize=7)
+        out = os.path.join(fam_dir, f"{today_str}_missingness_{safe_name(family)}_chunk{chunk_idx}.png")
+        plt.savefig(out, dpi=220, bbox_inches="tight")
+        safe_plot_close()
+
+# Row-completeness histograms
+quality_dir = os.path.join(figs_dir, "quality")
+os.makedirs(quality_dir, exist_ok=True)
+
+plt.figure(figsize=(10, 6))
+sns.histplot(row_fill_distribution["row_fill_pct"], bins=40, color="#1f77b4")
+plt.title("Row Completeness Distribution (All County-Year Rows)")
+plt.xlabel("Row Fill %")
+plt.ylabel("Count")
+out = os.path.join(quality_dir, f"{today_str}_row_completeness_hist_all.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
+
+plt.figure(figsize=(12, 7))
+sns.boxplot(data=row_fill_distribution, x="year", y="row_fill_pct", color="#2a9d8f")
+plt.title("Row Completeness by Year")
+plt.xlabel("Year")
+plt.ylabel("Row Fill %")
+plt.xticks(rotation=45)
+out = os.path.join(quality_dir, f"{today_str}_row_completeness_box_by_year.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
+
+
+# County coverage maps by year (HTML interactive)
+map_dir = os.path.join(figs_dir, "coverage_maps")
+os.makedirs(map_dir, exist_ok=True)
+if px is None:
+    print("Plotly not available; skipping county coverage maps.")
+else:
+    for yr in sorted(row_fill_distribution["year"].dropna().astype(int).unique()):
+        d = row_fill_distribution[row_fill_distribution["year"] == yr].copy()
+        if d.empty:
+            continue
+        d["fips"] = d["fips"].astype(str).str.zfill(5)
+        fig = px.choropleth(
+            d,
+            geojson=COUNTY_GEOJSON_URL,
+            locations="fips",
+            color="row_fill_pct",
+            color_continuous_scale="YlGnBu",
+            range_color=(0, 100),
+            scope="usa",
+            hover_data={"fips": True, "row_fill_pct": ":.1f"},
+            title=f"County Coverage (Row Fill %) - {yr}",
+        )
+        fig.update_geos(fitbounds="locations", visible=False)
+        out = os.path.join(map_dir, f"{today_str}_coverage_map_{yr}.html")
+        fig.write_html(out, include_plotlyjs="cdn")
+        print("Saved:", out)
+
+
+# ---------------------------------------------------------------------
+# 3) Summary stats for all variables
+# ---------------------------------------------------------------------
+numeric_map, numeric_meta = numeric_candidates(df, analysis_cols, min_parse_rate=0.8)
+numeric_df = pd.DataFrame(numeric_map, index=df.index)
+
+stats_rows = []
+for c in numeric_df.columns:
+    s = numeric_df[c]
+    stats_rows.append(
+        {
+            "variable": c,
+            "count": int(s.notna().sum()),
+            "missing_n": int(s.isna().sum()),
+            "fill_pct": float(s.notna().mean() * 100),
+            "mean": float(s.mean()) if s.notna().any() else np.nan,
+            "std": float(s.std()) if s.notna().any() else np.nan,
+            "min": float(s.min()) if s.notna().any() else np.nan,
+            "p01": float(s.quantile(0.01)) if s.notna().any() else np.nan,
+            "p05": float(s.quantile(0.05)) if s.notna().any() else np.nan,
+            "p25": float(s.quantile(0.25)) if s.notna().any() else np.nan,
+            "median": float(s.median()) if s.notna().any() else np.nan,
+            "p75": float(s.quantile(0.75)) if s.notna().any() else np.nan,
+            "p95": float(s.quantile(0.95)) if s.notna().any() else np.nan,
+            "p99": float(s.quantile(0.99)) if s.notna().any() else np.nan,
+            "max": float(s.max()) if s.notna().any() else np.nan,
+            "nunique": int(s.nunique(dropna=True)),
+            "zeros_n": int((s == 0).sum()) if s.notna().any() else 0,
+        }
+    )
+
+summary_numeric = pd.DataFrame(stats_rows).sort_values(["fill_pct", "std"], ascending=[False, False])
+summary_all = missing_overall.merge(summary_numeric, how="left", on="variable")
+
+write_csv_bundle(
+    "merged_summary_stats",
+    {
+        "all_variables": summary_all,
+        "numeric_variables": summary_numeric,
+        "numeric_parse_meta": numeric_meta,
+    },
+)
+
+# Descriptive structure add-ons: yearly means, YoY growth, CAGR, change stats
+if not numeric_df.empty:
+    yearly_means = numeric_df.copy()
+    yearly_means["year"] = df["year"].values
+    yearly_means = yearly_means.groupby("year", as_index=True).mean(numeric_only=True)
+    yearly_means = yearly_means.sort_index()
+
+    yoy_pct = yearly_means.pct_change() * 100
+    yoy_pct = yoy_pct.reset_index()
+    yearly_means_out = yearly_means.reset_index()
+
+    growth_rows = []
+    for c in yearly_means.columns:
+        s = yearly_means[c].dropna()
+        if s.empty:
+            growth_rows.append(
+                {"variable": c, "first_year": np.nan, "last_year": np.nan, "first_value": np.nan, "last_value": np.nan,
+                 "abs_change": np.nan, "pct_change": np.nan, "cagr_pct": np.nan}
+            )
+            continue
+        y0, y1 = int(s.index.min()), int(s.index.max())
+        v0, v1 = float(s.iloc[0]), float(s.iloc[-1])
+        n_years = max(y1 - y0, 1)
+        pct_change = ((v1 / v0 - 1) * 100) if (v0 not in [0, np.nan] and np.isfinite(v0)) else np.nan
+        cagr = (((v1 / v0) ** (1 / n_years) - 1) * 100) if (v0 > 0 and v1 > 0 and np.isfinite(v0) and np.isfinite(v1)) else np.nan
+        growth_rows.append(
+            {
+                "variable": c,
+                "first_year": y0,
+                "last_year": y1,
+                "first_value": v0,
+                "last_value": v1,
+                "abs_change": v1 - v0,
+                "pct_change": pct_change,
+                "cagr_pct": cagr,
+            }
+        )
+
+    growth_summary = pd.DataFrame(growth_rows).sort_values("cagr_pct", ascending=False)
+    write_csv_bundle(
+        "descriptive_growth",
+        {
+            "yearly_means": yearly_means_out,
+            "yoy_pct_change": yoy_pct,
+            "growth_summary": growth_summary,
+        },
+    )
+
+
+# ---------------------------------------------------------------------
+# 4) High-coverage variable violin plots
+# ---------------------------------------------------------------------
+high_cov = summary_numeric[
+    (summary_numeric["fill_pct"] >= 90) & (summary_numeric["nunique"] >= 20)
+].sort_values(["fill_pct", "std"], ascending=[False, False])
+if high_cov.empty:
+    high_cov = summary_numeric[
+        (summary_numeric["fill_pct"] >= 60) & (summary_numeric["nunique"] >= 8)
+    ].sort_values(["fill_pct", "std"], ascending=[False, False])
+high_cov_vars = high_cov["variable"].head(20).tolist()
+print("High-coverage vars selected for violins:", len(high_cov_vars))
+
+violin_dir = os.path.join(figs_dir, "violin_high_coverage")
+os.makedirs(violin_dir, exist_ok=True)
+
+for var in high_cov_vars:
+    s = numeric_df[var].dropna()
+    if s.empty:
+        continue
+    plt.figure(figsize=(6.5, 6))
+    sns.violinplot(y=s, inner="quartile", cut=0, color="#2a9d8f")
+    plt.title(f"Distribution: {var}")
+    plt.ylabel(var)
+    plt.xlabel("")
+    out = os.path.join(violin_dir, f"{today_str}_violin_{safe_name(var)}.png")
+    plt.savefig(out, dpi=220, bbox_inches="tight")
+    safe_plot_close()
+
+
+# ---------------------------------------------------------------------
+# 5) CAFO data for commodity/class/size analyses
+# ---------------------------------------------------------------------
+cafo_path = latest_file_glob(clean_dir, "*_cafo_ops_by_size_compact.csv")
+print("Using CAFO compact file:", cafo_path)
+cafo = pd.read_csv(cafo_path, low_memory=False)
+cafo = normalize_panel_key(cafo)
+cafo = cafo.merge(df[["fips", "year"]].drop_duplicates(), on=["fips", "year"], how="inner")
+
+for col in ["small", "medium", "large"]:
+    if col not in cafo.columns:
+        cafo[col] = 0
+    cafo[col] = pd.to_numeric(cafo[col], errors="coerce").fillna(0)
+
+for col in ["commodity_desc", "class_desc"]:
+    if col not in cafo.columns:
+        cafo[col] = "unknown"
+    cafo[col] = cafo[col].astype("string").str.lower().str.strip()
+
+# Apply canonical class filter to avoid double-counting overlapping subclasses.
+# Matches the filter used in script1c._build_cafo_animal_size_panel().
+_CANONICAL = {"cattle": "incl calves", "hogs": "all classes", "chickens": "layers"}
+_mask = cafo["commodity_desc"].map(_CANONICAL) == cafo["class_desc"]
+cafo = cafo[_mask | ~cafo["commodity_desc"].isin(_CANONICAL)].copy()
+
+cafo_long = cafo.melt(
+    id_vars=["fips", "year", "commodity_desc", "class_desc"],
+    value_vars=["small", "medium", "large"],
+    var_name="size_bucket",
+    value_name="ops_count",
+).dropna(subset=["ops_count"])
+
+cafo_violin_dir = os.path.join(figs_dir, "cafo_violin")
+os.makedirs(cafo_violin_dir, exist_ok=True)
+
+# Violin: each commodity, class-level by size bucket
+for commodity in ["cattle", "chickens", "hogs"]:
+    sub = cafo_long[cafo_long["commodity_desc"] == commodity].copy()
+    if sub.empty:
+        continue
+    top_classes = (
+        sub.groupby("class_desc")["ops_count"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(12)
+        .index
+        .tolist()
+    )
+    sub = sub[sub["class_desc"].isin(top_classes)]
+    plt.figure(figsize=(14, 7))
+    sns.violinplot(data=sub, x="class_desc", y="ops_count", hue="size_bucket", cut=0, inner="quartile")
+    plt.title(f"CAFO Operations Distribution by Class and Size: {commodity.title()}")
+    plt.xlabel("Class")
+    plt.ylabel("Operations")
+    plt.xticks(rotation=45, ha="right")
+    out = os.path.join(cafo_violin_dir, f"{today_str}_cafo_violin_{commodity}.png")
+    plt.savefig(out, dpi=220, bbox_inches="tight")
+    safe_plot_close()
+
+# Violin: cross-commodity by size
+plt.figure(figsize=(10, 6))
+sns.violinplot(data=cafo_long, x="commodity_desc", y="ops_count", hue="size_bucket", cut=0, inner="quartile")
+plt.title("CAFO Operations by Commodity and Size")
+plt.xlabel("Commodity")
+plt.ylabel("Operations")
+out = os.path.join(cafo_violin_dir, f"{today_str}_cafo_violin_commodity_compare.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
+
+
+# ---------------------------------------------------------------------
+# 6) Annual composition plots — restricted to USDA Census years only.
+# Backfilled years (2003–2006, 2008–2011, etc.) are identical to the
+# preceding census year and would make the figure a flat staircase.
+# Showing only census years exposes the true 5-year change gradient.
+# NOTE: some commodity × census-year cells are missing from the raw pull
+# (hogs absent 2012+, chickens absent 2012–2016, cattle absent 2017+).
+# Missing cells produce empty bars rather than fabricated shares.
+# ---------------------------------------------------------------------
+CAFO_CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
+comp_dir = os.path.join(figs_dir, "cafo_composition")
+os.makedirs(comp_dir, exist_ok=True)
+
+# Restrict to census years for composition figures
+cafo_long_census = cafo_long[cafo_long["year"].isin(CAFO_CENSUS_YEARS)].copy()
+
+# A) For each size: share by commodity — census years only
+size_commodity = (
+    cafo_long_census.groupby(["year", "size_bucket", "commodity_desc"], as_index=False)["ops_count"]
+    .sum()
+)
+size_commodity["pct_within_size_year"] = (
+    size_commodity["ops_count"]
+    / size_commodity.groupby(["year", "size_bucket"])["ops_count"].transform("sum")
+    * 100
+)
+size_commodity.to_csv(os.path.join(comp_dir, f"{today_str}_size_commodity_share.csv"), index=False)
+
+COMMODITY_COLORS = {"cattle": "#d48f3a", "chickens": "#6aab6e", "hogs": "#e06c6c"}
+
+for size in ["small", "medium", "large"]:
+    d = size_commodity[size_commodity["size_bucket"] == size].copy()
+    if d.empty:
+        continue
+    pivot = d.pivot_table(
+        index="year", columns="commodity_desc",
+        values="pct_within_size_year", aggfunc="sum",
+    ).reindex(CAFO_CENSUS_YEARS)  # keep only census years; missing → NaN (not plotted)
+    commodities = [c for c in ["cattle", "hogs", "chickens"] if c in pivot.columns]
+    pivot = pivot[commodities]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(CAFO_CENSUS_YEARS))
+    width = 0.6
+    bottoms = np.zeros(len(CAFO_CENSUS_YEARS))
+    for comm in commodities:
+        vals = pivot[comm].fillna(0).values
+        ax.bar(x, vals, width, bottom=bottoms,
+               label=comm.title(), color=COMMODITY_COLORS.get(comm, None), alpha=0.85)
+        bottoms += vals
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(y) for y in CAFO_CENSUS_YEARS])
+    ax.set_xlabel("USDA Census Year")
+    ax.set_ylabel("Share of operations (%)")
+    ax.set_ylim(0, 105)
+    ax.set_title(
+        f"Commodity Share Within {size.title()} CAFO Operations\n"
+        "(USDA Census years only; missing bars = data not available for that census)"
+    )
+    ax.legend(loc="upper right")
+    out = os.path.join(comp_dir, f"{today_str}_share_commodity_within_{size}.png")
+    fig.savefig(out, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+# B) For each commodity: share small/medium/large — census years only
+commodity_size = (
+    cafo_long_census.groupby(["year", "commodity_desc", "size_bucket"], as_index=False)["ops_count"]
+    .sum()
+)
+commodity_size["pct_within_commodity_year"] = (
+    commodity_size["ops_count"]
+    / commodity_size.groupby(["year", "commodity_desc"])["ops_count"].transform("sum")
+    * 100
+)
+commodity_size.to_csv(os.path.join(comp_dir, f"{today_str}_commodity_size_share.csv"), index=False)
+
+SIZE_COLORS = {"small": "#a8c7e8", "medium": "#4f94d0", "large": "#174e86"}
+
+for commodity in ["cattle", "chickens", "hogs"]:
+    d = commodity_size[commodity_size["commodity_desc"] == commodity].copy()
+    if d.empty:
+        continue
+    pivot = d.pivot_table(
+        index="year", columns="size_bucket",
+        values="pct_within_commodity_year", aggfunc="sum",
+    ).reindex(CAFO_CENSUS_YEARS)
+    sizes = [c for c in ["small", "medium", "large"] if c in pivot.columns]
+    pivot = pivot[sizes]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(CAFO_CENSUS_YEARS))
+    width = 0.6
+    bottoms = np.zeros(len(CAFO_CENSUS_YEARS))
+    for sz in sizes:
+        vals = pivot[sz].fillna(0).values
+        ax.bar(x, vals, width, bottom=bottoms,
+               label=sz.title(), color=SIZE_COLORS.get(sz, None), alpha=0.9)
+        bottoms += vals
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(y) for y in CAFO_CENSUS_YEARS])
+    ax.set_xlabel("USDA Census Year")
+    ax.set_ylabel("Share of operations (%)")
+    ax.set_ylim(0, 105)
+    ax.set_title(
+        f"Size Share Within {commodity.title()} CAFO Operations\n"
+        "(USDA Census years only; missing bars = data not available for that census)"
+    )
+    ax.legend(loc="upper right")
+    out = os.path.join(comp_dir, f"{today_str}_share_size_within_{commodity}.png")
+    fig.savefig(out, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------
+# 6b) CAFO concentration + transitions + entry/exit + density maps
+# ---------------------------------------------------------------------
+cafo_qc_dir = os.path.join(figs_dir, "cafo_quality")
+os.makedirs(cafo_qc_dir, exist_ok=True)
+
+# County-year commodity totals (across classes/sizes)
+cafo_cty_commodity = (
+    cafo_long.groupby(["year", "fips", "commodity_desc"], as_index=False)["ops_count"]
+    .sum()
+)
+
+# Concentration metrics by year x commodity
+concentration_rows = []
+for (yr, cmd), g in cafo_cty_commodity.groupby(["year", "commodity_desc"]):
+    x = g["ops_count"].fillna(0).astype(float).values
+    total = float(np.sum(x))
+    n = int((x > 0).sum())
+    if total > 0:
+        shares = x / total
+        hhi = float(np.sum(shares ** 2))
+    else:
+        hhi = np.nan
+    gini = gini_from_values(x)
+    top10_share = float(np.sort(x)[-10:].sum() / total * 100) if total > 0 else np.nan
+    concentration_rows.append(
+        {
+            "year": int(yr),
+            "commodity_desc": cmd,
+            "total_ops": total,
+            "n_counties_positive": n,
+            "hhi": hhi,
+            "gini": gini,
+            "top10_county_share_pct": top10_share,
+        }
+    )
+
+concentration_df = pd.DataFrame(concentration_rows).sort_values(["commodity_desc", "year"])
+concentration_df.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_concentration_by_year_commodity.csv"), index=False)
+
+# Plot concentration trends
+for metric in ["hhi", "gini", "top10_county_share_pct"]:
+    d = concentration_df.dropna(subset=[metric]).copy()
+    if d.empty:
+        continue
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=d, x="year", y=metric, hue="commodity_desc", marker="o")
+    plt.title(f"CAFO Concentration Trend: {metric}")
+    plt.xlabel("Year")
+    plt.ylabel(metric)
+    out = os.path.join(cafo_qc_dir, f"{today_str}_cafo_concentration_{metric}.png")
+    plt.savefig(out, dpi=220, bbox_inches="tight")
+    safe_plot_close()
+
+# Overall size-state transitions and entry/exit for large CAFO
+cafo_overall = cafo.groupby(["fips", "year"], as_index=False)[["small", "medium", "large"]].sum()
+cafo_overall["state_size"] = "no_cafo"
+cafo_overall.loc[cafo_overall["small"] > 0, "state_size"] = "small_only"
+cafo_overall.loc[cafo_overall["medium"] > 0, "state_size"] = "medium_or_more"
+cafo_overall.loc[cafo_overall["large"] > 0, "state_size"] = "large_present"
+cafo_overall = cafo_overall.sort_values(["fips", "year"])
+
+cafo_overall["next_year"] = cafo_overall.groupby("fips")["year"].shift(-1)
+cafo_overall["next_state_size"] = cafo_overall.groupby("fips")["state_size"].shift(-1)
+cafo_overall["lag_large"] = cafo_overall.groupby("fips")["large"].shift(1).fillna(0)
+cafo_overall["curr_large"] = cafo_overall["large"].fillna(0)
+
+transitions = cafo_overall[
+    cafo_overall["next_year"].notna() & ((cafo_overall["next_year"] - cafo_overall["year"]) == 1)
+].copy()
+transition_matrix = (
+    transitions.groupby(["state_size", "next_state_size"], as_index=False)
+    .size()
+    .rename(columns={"size": "n_transitions"})
+)
+transition_matrix.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_transition_matrix_overall.csv"), index=False)
+
+trans_by_year = (
+    transitions.groupby(["year", "state_size", "next_state_size"], as_index=False)
+    .size()
+    .rename(columns={"size": "n_transitions"})
+)
+trans_by_year.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_transition_matrix_by_year.csv"), index=False)
+
+entry_exit = cafo_overall.copy()
+entry_exit["entry_large"] = ((entry_exit["lag_large"] <= 0) & (entry_exit["curr_large"] > 0)).astype(int)
+entry_exit["exit_large"] = ((entry_exit["lag_large"] > 0) & (entry_exit["curr_large"] <= 0)).astype(int)
+
+entry_exit_year = (
+    entry_exit.groupby("year", as_index=False)
+    .agg(
+        entries_large=("entry_large", "sum"),
+        exits_large=("exit_large", "sum"),
+        counties=("fips", "nunique"),
+    )
+)
+entry_exit_year["entry_rate_pct"] = entry_exit_year["entries_large"] / entry_exit_year["counties"] * 100
+entry_exit_year["exit_rate_pct"] = entry_exit_year["exits_large"] / entry_exit_year["counties"] * 100
+entry_exit_year.to_csv(os.path.join(cafo_qc_dir, f"{today_str}_cafo_entry_exit_large_by_year.csv"), index=False)
+
+plt.figure(figsize=(10, 6))
+sns.lineplot(data=entry_exit_year, x="year", y="entry_rate_pct", marker="o", label="Entry rate")
+sns.lineplot(data=entry_exit_year, x="year", y="exit_rate_pct", marker="o", label="Exit rate")
+plt.title("Large-CAFO Entry/Exit Rates by Year")
+plt.xlabel("Year")
+plt.ylabel("Rate (%) of counties")
+out = os.path.join(cafo_qc_dir, f"{today_str}_cafo_entry_exit_rates.png")
+plt.savefig(out, dpi=220, bbox_inches="tight")
+safe_plot_close()
+
+# County-level CAFO density maps (overall and large) by year
+cafo_map_dir = os.path.join(figs_dir, "cafo_density_maps")
+os.makedirs(cafo_map_dir, exist_ok=True)
+
+cafo_map = cafo_overall[["fips", "year", "small", "medium", "large"]].copy()
+cafo_map["total_ops"] = cafo_map[["small", "medium", "large"]].sum(axis=1)
+if "population_population_full" in df.columns:
+    pop_tmp = df[["fips", "year", "population_population_full"]].copy()
+    pop_tmp["population_population_full"] = to_numeric_series(get_series(pop_tmp, "population_population_full"))
+    cafo_map = cafo_map.merge(pop_tmp, on=["fips", "year"], how="left")
+    cafo_map["ops_per_10k_pop"] = np.where(
+        cafo_map["population_population_full"] > 0,
+        cafo_map["total_ops"] / cafo_map["population_population_full"] * 10000,
+        np.nan,
+    )
+else:
+    cafo_map["ops_per_10k_pop"] = np.nan
+
+cafo_map.to_csv(os.path.join(cafo_map_dir, f"{today_str}_cafo_density_map_data.csv"), index=False)
+
+if px is not None:
+    for yr in sorted(cafo_map["year"].dropna().astype(int).unique()):
+        d = cafo_map[cafo_map["year"] == yr].copy()
+        if d.empty:
+            continue
+        d["fips"] = d["fips"].astype(str).str.zfill(5)
+
+        for metric, title, rng in [
+            ("total_ops", f"CAFO Density (Total Ops) - {yr}", None),
+            ("large", f"CAFO Density (Large Ops) - {yr}", None),
+            ("ops_per_10k_pop", f"CAFO Density (Ops per 10k pop) - {yr}", (0, np.nanpercentile(d["ops_per_10k_pop"].dropna(), 99) if d["ops_per_10k_pop"].notna().any() else 1)),
+        ]:
+            if metric not in d.columns:
+                continue
+            fig = px.choropleth(
+                d,
+                geojson=COUNTY_GEOJSON_URL,
+                locations="fips",
+                color=metric,
+                color_continuous_scale="OrRd",
+                range_color=rng,
+                scope="usa",
+                hover_data={"fips": True, metric: ":.2f"},
+                title=title,
+            )
+            fig.update_geos(fitbounds="locations", visible=False)
+            out = os.path.join(cafo_map_dir, f"{today_str}_cafo_density_{metric}_{yr}.html")
+            fig.write_html(out, include_plotlyjs="cdn")
+else:
+    print("Plotly not available; skipped CAFO density maps.")
+
+
+# ---------------------------------------------------------------------
+# 7) Ridge-like plots for crime and mental health
+# ---------------------------------------------------------------------
+ridge_dir = os.path.join(figs_dir, "ridge")
+os.makedirs(ridge_dir, exist_ok=True)
+
+ridge_targets = [
+    "aggravated_assault_crime_fips_level_final",
+    "violent_crime_raw_value_mh_mortality_fips_yr",
+    "poor_mental_health_days_raw_value_mh_mortality_fips_yr",
+    "frequent_mental_distress_raw_value_mh_mortality_fips_yr",
+]
+
+for var in ridge_targets:
+    if var not in df.columns:
+        continue
+    tmp = df[["year", var]].copy()
+    tmp[var] = to_numeric_series(tmp[var])
+    tmp = tmp.dropna()
+    if tmp.empty:
+        continue
+    tmp["year"] = tmp["year"].astype(int).astype(str)
+    # Keep years with enough support to draw KDE
+    yr_counts = tmp["year"].value_counts()
+    keep_years = yr_counts[yr_counts >= 40].index.tolist()
+    tmp = tmp[tmp["year"].isin(keep_years)]
+    if tmp.empty:
+        continue
+    g = sns.FacetGrid(tmp, row="year", hue="year", aspect=12, height=0.35, palette="viridis")
+    g.map(sns.kdeplot, var, fill=True, alpha=0.9, linewidth=1)
+    g.map(sns.kdeplot, var, color="white", lw=0.5)
+    g.set_titles("")
+    g.set(yticks=[], ylabel="")
+    g.despine(bottom=True, left=True)
+    g.fig.subplots_adjust(hspace=-0.6)
+    g.fig.suptitle(f"Ridgeline-style KDE by Year: {var}", y=1.02)
+    out = os.path.join(ridge_dir, f"{today_str}_ridge_{safe_name(var)}.png")
+    g.savefig(out, dpi=220, bbox_inches="tight")
+    plt.close(g.fig)
+
+
+# ---------------------------------------------------------------------
+# 8) Massive trend plots: every numeric variable vs CAFO counts
+# ---------------------------------------------------------------------
+trend_dir = os.path.join(figs_dir, "trends_all_variables")
+os.makedirs(trend_dir, exist_ok=True)
+
+cafo_count = (
+    cafo.groupby(["fips", "year", "commodity_desc"], as_index=False)[["small", "medium", "large"]]
+    .sum()
+)
+
+pop_col = "population_population_full" if "population_population_full" in df.columns else None
+if pop_col is not None:
+    df[pop_col] = to_numeric_series(get_series(df, pop_col))
+
+skip_vars = {
+    "year",
+    "non_large_metro",
+    "small_cafo_ops_by_size_compact",
+    "medium_cafo_ops_by_size_compact",
+    "large_cafo_ops_by_size_compact",
+    "any_large_cafo_cafo_ops_by_size_compact",
+    "any_medium_or_large_cafo_cafo_ops_by_size_compact",
+}
+outcome_vars = [c for c in numeric_df.columns if c not in skip_vars and not c.startswith("n_rows")]
+
+if MAX_TREND_VARS:
+    try:
+        cap = int(MAX_TREND_VARS)
+        if cap > 0:
+            outcome_vars = outcome_vars[:cap]
+    except Exception:
+        pass
+
+pd.DataFrame({"variable": outcome_vars}).to_csv(
+    os.path.join(trend_dir, f"{today_str}_trend_variable_list.csv"), index=False
+)
+print("Trend variables to plot:", len(outcome_vars))
+
+for idx, var in enumerate(outcome_vars, start=1):
+    if var not in df.columns:
+        continue
+    df[var] = to_numeric_series(get_series(df, var))
+    if df[var].notna().sum() < 30:
+        continue
+
+    for commodity in ["cattle", "chickens", "hogs"]:
+        cc = cafo_count[cafo_count["commodity_desc"] == commodity][["fips", "year", "small", "medium", "large"]].copy()
+        if cc.empty:
+            continue
+        rhs_cols = ["fips", "year", var]
+        if pop_col and pop_col != var:
+            rhs_cols.append(pop_col)
+        sub = cc.merge(df[rhs_cols], on=["fips", "year"], how="left")
+        if sub[var].notna().sum() < 30:
+            continue
+
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True)
+        size_cols = ["small", "medium", "large"]
+        size_titles = ["Small CAFO count", "Medium CAFO count", "Large CAFO count"]
+
+        for i, (size_col, stitle) in enumerate(zip(size_cols, size_titles)):
+            panel_cols = ["year", var, size_col]
+            if pop_col and pop_col != var:
+                panel_cols.append(pop_col)
+            panel = sub[panel_cols].copy()
+            panel = panel.dropna(subset=["year"])
+            agg = panel.groupby("year", as_index=False).agg(
+                outcome_mean=(var, "mean"),
+                cafo_count=(size_col, "sum"),
+            )
+            if pop_col:
+                w = panel.dropna(subset=[var, pop_col]).copy()
+                if not w.empty:
+                    w["weighted_val"] = w[var] * w[pop_col]
+                    wmean = (
+                        w.groupby("year", as_index=False)
+                        .agg(weighted_sum=("weighted_val", "sum"), weight_sum=(pop_col, "sum"))
+                    )
+                    wmean["outcome_wmean"] = wmean["weighted_sum"] / wmean["weight_sum"]
+                    wmean = wmean[["year", "outcome_wmean"]]
+                    agg = agg.merge(wmean, on="year", how="left")
+                else:
+                    agg["outcome_wmean"] = np.nan
+            else:
+                agg["outcome_wmean"] = np.nan
+
+            ax = axes[i]
+            ax.plot(agg["year"], agg["outcome_mean"], marker="o", color="#1f77b4", label="Outcome mean")
+            if agg["outcome_wmean"].notna().any():
+                ax.plot(agg["year"], agg["outcome_wmean"], marker="s", linestyle="--", color="#2ca02c", label="Outcome weighted mean")
+            ax.set_title(stitle)
+            ax.set_xlabel("Year")
+            if i == 0:
+                ax.set_ylabel(f"{var} (mean)")
+
+            ax2 = ax.twinx()
+            ax2.plot(agg["year"], agg["cafo_count"], marker="^", color="#d62728", alpha=0.8, label="CAFO count")
+            if i == 2:
+                ax2.set_ylabel("CAFO operations")
+
+        handles, labels = axes[0].get_legend_handles_labels()
+        h2, l2 = axes[0].twinx().get_legend_handles_labels()
+        fig.legend(handles + h2, labels + l2, loc="upper center", ncol=3, frameon=False)
+        fig.suptitle(f"{commodity.title()}: {var} vs CAFO size counts over time", y=1.03)
+        fig.tight_layout()
+        out = os.path.join(trend_dir, f"{today_str}_trend_{safe_name(commodity)}_{safe_name(var)}.png")
+        fig.savefig(out, dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+    if idx % 20 == 0:
+        print(f"Trend progress: {idx}/{len(outcome_vars)} variables")
+
+
+# ---------------------------------------------------------------------
+# 9) Binned scatters for key outcomes
+# ---------------------------------------------------------------------
+binned_dir = os.path.join(figs_dir, "binned_scatter")
+os.makedirs(binned_dir, exist_ok=True)
+
+key_outcomes = [
+    "aggravated_assault_crime_fips_level_final",
+    "violent_crime_raw_value_mh_mortality_fips_yr",
+    "some_college_raw_value_mh_mortality_fips_yr",
+    "population_population_full",
+]
+
+for var in key_outcomes:
+    if var not in df.columns:
+        continue
+    v = df[["fips", "year", var]].copy()
+    v[var] = to_numeric_series(get_series(v, var))
+    for commodity in ["cattle", "chickens", "hogs"]:
+        cc = cafo_count[cafo_count["commodity_desc"] == commodity][["fips", "year", "small", "medium", "large"]].copy()
+        if cc.empty:
+            continue
+        m = cc.merge(v, on=["fips", "year"], how="left")
+        for size_col in ["small", "medium", "large"]:
+            d = m[[size_col, var]].dropna().copy()
+            d = d[d[size_col] > 0]
+            if len(d) < 50 or d[size_col].nunique() < 10:
+                continue
+            try:
+                d["bin"] = pd.qcut(d[size_col], q=20, duplicates="drop")
+            except Exception:
+                continue
+            g = d.groupby("bin", observed=True).agg(x=(size_col, "mean"), y=(var, "mean"), n=("bin", "size")).reset_index(drop=True)
+            if g.empty:
+                continue
+            plt.figure(figsize=(7, 5))
+            sns.scatterplot(data=g, x="x", y="y", size="n", legend=False, color="#1f77b4")
+            sns.lineplot(data=g, x="x", y="y", color="#d62728")
+            plt.title(f"Binned scatter: {var} vs {commodity} {size_col} CAFO count")
+            plt.xlabel(f"{commodity} {size_col} CAFO count (bin mean)")
+            plt.ylabel(f"{var} (bin mean)")
+            out = os.path.join(
+                binned_dir, f"{today_str}_binned_{safe_name(var)}_{safe_name(commodity)}_{size_col}.png"
+            )
+            plt.savefig(out, dpi=220, bbox_inches="tight")
+            safe_plot_close()
+
+
+# ---------------------------------------------------------------------
+# 10) State-level trends for states with at least one large CAFO
+# ---------------------------------------------------------------------
+state_dir = os.path.join(figs_dir, "state_trends_large_cafo")
+os.makedirs(state_dir, exist_ok=True)
+
+cafo_state = cafo_count.copy()
+cafo_state["state_fips"] = cafo_state["fips"].astype(str).str[:2]
+cafo_state["state_name"] = cafo_state["state_fips"].map(STATE_FIPS_TO_NAME).fillna(cafo_state["state_fips"])
+
+# States with at least one large CAFO county-year observation
+state_large = (
+    cafo_state.groupby("state_fips", as_index=False)["large"]
+    .sum()
+    .rename(columns={"large": "large_ops_total"})
+)
+state_large = state_large[state_large["large_ops_total"] > 0].copy()
+state_large["state_name"] = state_large["state_fips"].map(STATE_FIPS_TO_NAME).fillna(state_large["state_fips"])
+state_large = state_large.sort_values("large_ops_total", ascending=False)
+state_large.to_csv(os.path.join(state_dir, f"{today_str}_states_with_large_cafo.csv"), index=False)
+
+# Plot several states (top by large-CAFO intensity)
+selected_states = state_large["state_fips"].head(STATE_PLOT_LIMIT).tolist()
+if "05" in state_large["state_fips"].values and "05" not in selected_states:
+    selected_states = selected_states + ["05"]  # always include Arkansas if present
+print("States with large CAFO (total):", len(state_large))
+print("States selected for state trend plots:", len(selected_states))
+
+# Outcome variables to compare against CAFO quantity at state-year level
+state_outcomes = [
+    "aggravated_assault_crime_fips_level_final",
+    "violent_crime_raw_value_mh_mortality_fips_yr",
+    "poor_mental_health_days_raw_value_mh_mortality_fips_yr",
+    "some_college_raw_value_mh_mortality_fips_yr",
+    "population_population_full",
+]
+state_outcomes = [v for v in state_outcomes if v in df.columns]
+
+df_state = df.copy()
+df_state["state_fips"] = df_state["fips"].astype(str).str[:2]
+df_state["state_name"] = df_state["state_fips"].map(STATE_FIPS_TO_NAME).fillna(df_state["state_fips"])
+
+for v in state_outcomes:
+    df_state[v] = to_numeric_series(get_series(df_state, v))
+
+for st in selected_states:
+    st_name = STATE_FIPS_TO_NAME.get(st, st)
+    for commodity in ["cattle", "chickens", "hogs"]:
+        ca = cafo_state[(cafo_state["state_fips"] == st) & (cafo_state["commodity_desc"] == commodity)].copy()
+        if ca.empty:
+            continue
+        ca_agg = ca.groupby("year", as_index=False)[["small", "medium", "large"]].sum()
+        ca_agg["total_cafo_ops"] = ca_agg[["small", "medium", "large"]].sum(axis=1)
+
+        for out_var in state_outcomes:
+            st_slice = df_state[df_state["state_fips"] == st].copy()
+            st_slice[out_var] = to_numeric_series(get_series(st_slice, out_var))
+            y = st_slice.groupby("year", as_index=False).agg(outcome_mean=(out_var, "mean"))
+            z = ca_agg.merge(y, on="year", how="inner").dropna(subset=["outcome_mean"])
+            if z.empty:
+                continue
+
+            fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True)
+            for i, size_col in enumerate(["small", "medium", "large"]):
+                ax = axes[i]
+                ax.plot(z["year"], z["outcome_mean"], marker="o", color="#1f77b4", label="Outcome mean")
+                ax.set_title(f"{size_col.title()} CAFO count")
+                ax.set_xlabel("Year")
+                if i == 0:
+                    ax.set_ylabel(out_var)
+                ax2 = ax.twinx()
+                ax2.plot(z["year"], z[size_col], marker="^", color="#d62728", label=f"{size_col} ops")
+                if i == 2:
+                    ax2.set_ylabel("CAFO ops count")
+
+            handles, labels = axes[0].get_legend_handles_labels()
+            h2, l2 = axes[0].twinx().get_legend_handles_labels()
+            fig.legend(handles + h2, labels + l2, loc="upper center", ncol=2, frameon=False)
+            fig.suptitle(f"{st_name} ({st}) - {commodity.title()} CAFO vs {out_var}", y=1.03)
+            fig.tight_layout()
+            out = os.path.join(
+                state_dir,
+                f"{today_str}_state_{safe_name(st_name)}_{safe_name(commodity)}_{safe_name(out_var)}.png",
+            )
+            fig.savefig(out, dpi=180, bbox_inches="tight")
+            plt.close(fig)
+
+
+print("Completed script2 outputs.")
+print("Output folder:", figs_dir)
+
+
+# =====================================================================
+# SECTION B — Targeted summary stats and maps
+#   county coverage, CAFO/FSIS/MH sumstats, county and state maps
+# =====================================================================
+# Required columns check
+# ---------------------------------------------------------------------
+cafo_cols_new = [
+    "cafo_cattle_small", "cafo_cattle_medium", "cafo_cattle_large",
+    "cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large",
+    "cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large",
+    "cafo_total_ops_all_animals", "cafo_total_ops_chickens",
+]
+missing_cafo = [c for c in cafo_cols_new if c not in df.columns]
+if missing_cafo:
+    raise RuntimeError(
+        "Merged panel is missing new CAFO animal-size columns. "
+        "Please rerun script1b-merge-dataclean.py first. "
+        f"Missing: {missing_cafo}"
+    )
+
+for c in cafo_cols_new:
+    df[c] = to_numeric_series(df[c])
+
+fsis_col = "n_unique_establishments_fsis"
+fsis_size_cols = [
+    "n_size_bucket_1_fsis",
+    "n_size_bucket_2_fsis",
+    "n_size_bucket_3_fsis",
+    "n_size_bucket_4_fsis",
+    "n_size_bucket_5_fsis",
+    "n_size_bucket_missing_fsis",
+]
+for c in [fsis_col, *fsis_size_cols]:
+    if c not in df.columns:
+        raise RuntimeError(f"Missing required FSIS column in merged panel: {c}")
+    df[c] = to_numeric_series(df[c])
+
+poor_mental_col = "poor_mental_health_days"
+if poor_mental_col not in df.columns:
+    raise RuntimeError(f"Missing required mental-health column in merged panel: {poor_mental_col}")
+df[poor_mental_col] = to_numeric_series(df[poor_mental_col])
+
+df["state_fips"] = df["fips"].astype("string").str[:2]
+df["state_abbrev"] = df["state_fips"].map(STATE_FIPS_TO_ABBR)
+
+
+# 1) county_coverage_check.csv
+# ---------------------------------------------------------------------
+rural_path = latest_file_glob(clean_dir, "*rural-key*.csv")
+rural_df = read_and_prepare(rural_path)
+rural_df = normalize_panel_key(rural_df)
+if "non_large_metro" not in rural_df.columns:
+    raise RuntimeError(f"'non_large_metro' not found in rural-key file: {rural_path}")
+rural_df["non_large_metro"] = pd.to_numeric(rural_df["non_large_metro"], errors="coerce").astype("Int64")
+
+rural_kept = rural_df.loc[rural_df["non_large_metro"] == 1, ["fips", "year"]].drop_duplicates()
+merged_keys = df[["fips", "year"]].drop_duplicates()
+
+coverage_row = pd.DataFrame(
+    [
+        {
+            "run_date": today_str,
+            "merged_file": os.path.basename(merged_path),
+            "rural_key_file": os.path.basename(rural_path),
+            "merged_rows": int(len(df)),
+            "merged_unique_counties": int(df["fips"].nunique()),
+            "rural_kept_rows": int(len(rural_kept)),
+            "rural_kept_unique_counties": int(rural_kept["fips"].nunique()),
+            "county_count_match": int(df["fips"].nunique() == rural_kept["fips"].nunique()),
+            "key_set_exact_match": int(
+                merged_keys.merge(rural_kept, on=["fips", "year"], how="outer", indicator=True)["_merge"].eq("both").all()
+            ),
+        }
+    ]
+)
+coverage_row.to_csv(os.path.join(out_dir, "county_coverage_check.csv"), index=False)
+
+
+# ---------------------------------------------------------------------
+# 2) CAFO sumstats (county-year and state-year)
+# ---------------------------------------------------------------------
+cafo_county_stats = summarize_numeric(df, cafo_cols_new)
+cafo_county_stats.to_csv(os.path.join(out_dir, "cafo_county_year_sumstats.csv"), index=False)
+
+state_year_cafo = (
+    df.groupby(["state_fips", "state_abbrev", "year"], as_index=False)[cafo_cols_new]
+    .sum(min_count=1)
+)
+cafo_state_stats = summarize_numeric(state_year_cafo, cafo_cols_new)
+cafo_state_stats.to_csv(os.path.join(out_dir, "cafo_state_year_sumstats.csv"), index=False)
+
+
+# ---------------------------------------------------------------------
+# 3) FSIS reliable-only county-year sumstats
+# ---------------------------------------------------------------------
+fsis_cols_reliable = [fsis_col, *fsis_size_cols]
+fsis_stats = summarize_numeric(df, fsis_cols_reliable)
+fsis_stats.to_csv(os.path.join(out_dir, "fsis_county_year_sumstats.csv"), index=False)
+
+
+# ---------------------------------------------------------------------
+# 4) mental_fill_share.csv
+# ---------------------------------------------------------------------
+mental_cols = [c for c in df.columns if c.endswith("") and "mental" in c.lower()]
+any_mental = df[mental_cols].notna().any(axis=1) if mental_cols else pd.Series(False, index=df.index)
+mental_fill = pd.DataFrame(
+    [
+        {
+            "run_date": today_str,
+            "merged_file": os.path.basename(merged_path),
+            "mental_column_count": int(len(mental_cols)),
+            "n_rows": int(len(df)),
+            "rows_with_any_mental_data": int(any_mental.sum()),
+            "share_rows_with_any_mental_data_pct": float(any_mental.mean() * 100),
+        }
+    ]
+)
+mental_fill.to_csv(os.path.join(out_dir, "mental_fill_share.csv"), index=False)
+
+
+# ---------------------------------------------------------------------
+# 5) Maps
+# ---------------------------------------------------------------------
+# FSIS state choropleths: 2017-2023
+fsis_state_year = (
+    df.groupby(["year", "state_fips", "state_abbrev"], as_index=False)[fsis_col]
+    .sum(min_count=1)
+)
+save_state_choropleths(
+    fsis_state_year,
+    value_col=fsis_col,
+    years=list(range(2017, 2024)),
+    title_prefix="FSIS Establishments (State-Year Total)",
+    out_prefix="fsis_state_total_establishments",
+)
+
+# CAFO state choropleths: 2010-2022 (includes newly available 2022 Census year)
+cafo_state_year_map = (
+    df.groupby(["year", "state_fips", "state_abbrev"], as_index=False)["cafo_total_ops_all_animals"]
+    .sum(min_count=1)
+)
+save_state_choropleths(
+    cafo_state_year_map,
+    value_col="cafo_total_ops_all_animals",
+    years=list(range(2010, 2023)),
+    title_prefix="CAFO Total Ops (State-Year Total)",
+    out_prefix="cafo_state_total_ops",
+)
+
+
+# ---------------------------------------------------------------------
+# 6) County-level maps for 2017 (FSIS + CAFO animal x size)
+# ---------------------------------------------------------------------
+map_year = 2017
+df_2017 = df[df["year"] == map_year].copy()
+
+fsis_2017_cols = [
+    "n_unique_establishments_fsis",
+    "n_unique_est_size_combos_fsis",
+    "n_slaughterhouse_present_establishments_fsis",
+    "n_processing_present_establishments_fsis",
+    "n_meat_slaughter_establishments_fsis",
+    "n_poultry_slaughter_establishments_fsis",
+    "n_size_bucket_1_fsis",
+    "n_size_bucket_2_fsis",
+    "n_size_bucket_3_fsis",
+    "n_size_bucket_4_fsis",
+    "n_size_bucket_5_fsis",
+    "n_size_bucket_missing_fsis",
+]
+for c in fsis_2017_cols:
+    if c not in df_2017.columns:
+        raise RuntimeError(f"Missing FSIS map column in merged panel: {c}")
+
+fsis_map_meta = []
+for c in fsis_2017_cols:
+    s = to_numeric_series(df_2017[c])
+    row = {
+        "year": map_year,
+        "variable": c,
+        "non_missing_n": int(s.notna().sum()),
+        "positive_n": int((s > 0).sum()),
+        "p50": float(s.quantile(0.50)) if s.notna().any() else np.nan,
+        "p90": float(s.quantile(0.90)) if s.notna().any() else np.nan,
+        "p99": float(s.quantile(0.99)) if s.notna().any() else np.nan,
+        "max": float(s.max()) if s.notna().any() else np.nan,
+    }
+    fsis_map_meta.append(row)
+    save_county_map_one_year(
+        df_2017,
+        value_col=c,
+        year=map_year,
+        title_prefix="FSIS County-Level Density",
+        out_prefix="county_fsis",
+    )
+pd.DataFrame(fsis_map_meta).to_csv(
+    os.path.join(out_dir, "fsis_county_map_2017_metric_summary.csv"),
+    index=False,
+)
+
+cafo_animal_size_cols = [
+    "cafo_cattle_small", "cafo_cattle_medium", "cafo_cattle_large",
+    "cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large",
+    "cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large",
+]
+
+cafo_map_meta = []
+for c in cafo_animal_size_cols:
+    s = to_numeric_series(df_2017[c])
+    row = {
+        "year": map_year,
+        "variable": c,
+        "non_missing_n": int(s.notna().sum()),
+        "positive_n": int((s > 0).sum()),
+        "p50": float(s.quantile(0.50)) if s.notna().any() else np.nan,
+        "p90": float(s.quantile(0.90)) if s.notna().any() else np.nan,
+        "p99": float(s.quantile(0.99)) if s.notna().any() else np.nan,
+        "max": float(s.max()) if s.notna().any() else np.nan,
+    }
+    cafo_map_meta.append(row)
+    save_county_map_one_year(
+        df_2017,
+        value_col=c,
+        year=map_year,
+        title_prefix="CAFO County-Level Animal x Size",
+        out_prefix="county_cafo_animal_size",
+    )
+pd.DataFrame(cafo_map_meta).to_csv(
+    os.path.join(out_dir, "cafo_county_map_2017_metric_summary.csv"),
+    index=False,
+)
+
+
+# ---------------------------------------------------------------------
+# 7) State-by-state county dot plots for 2017
+# ---------------------------------------------------------------------
+dot_df = df[(df["year"] == 2017)].copy()
+dot_df = dot_df[
+    dot_df["cafo_total_ops_all_animals"].notna()
+    & (dot_df["cafo_total_ops_all_animals"] > 0)
+    & dot_df[poor_mental_col].notna()
+].copy()
+
+for st in sorted(dot_df["state_fips"].dropna().unique()):
+    d = dot_df[dot_df["state_fips"] == st].copy()
+    if d.empty:
+        continue
+    st_lbl = d["state_abbrev"].dropna().iloc[0] if d["state_abbrev"].notna().any() else st
+    plt.figure(figsize=(7.2, 5.4))
+    sns.scatterplot(
+        data=d,
+        x="cafo_total_ops_all_animals",
+        y=poor_mental_col,
+        s=24,
+        alpha=0.65,
+        edgecolor=None,
+    )
+    plt.title(f"{st_lbl} County Dots (2017): Poor Mental Health vs Total CAFO Ops")
+    plt.xlabel("Total CAFO Operations (All Animals)")
+    plt.ylabel("Poor Mental Health Days (Raw Value)")
+    out = os.path.join(plots_dir, f"state_county_dots_{st_lbl}_2017.png")
+    plt.savefig(out, dpi=220, bbox_inches="tight")
+    plt.close()
+
+
+# ---------------------------------------------------------------------
+# 8) Chickens scatter facets (2010-2020)
+# ---------------------------------------------------------------------
+facet = df[df["year"].between(2010, 2020, inclusive="both")].copy()
+facet = facet[
+    facet["cafo_total_ops_chickens"].notna()
+    & (facet["cafo_total_ops_chickens"] > 0)
+    & facet[poor_mental_col].notna()
+].copy()
+
+facet["chicken_size_class"] = pd.NA
+facet.loc[facet["cafo_chickens_large"] > 0, "chicken_size_class"] = "large_present"
+facet.loc[(facet["cafo_chickens_large"] <= 0) & (facet["cafo_chickens_medium"] > 0), "chicken_size_class"] = "medium_present"
+facet.loc[
+    (facet["cafo_chickens_large"] <= 0)
+    & (facet["cafo_chickens_medium"] <= 0)
+    & (facet["cafo_chickens_small"] > 0),
+    "chicken_size_class",
+] = "small_only"
+facet = facet[facet["chicken_size_class"].notna()].copy()
+
+if not facet.empty:
+    palette = {"small_only": "#6baed6", "medium_present": "#fd8d3c", "large_present": "#cb181d"}
+    g = sns.relplot(
+        data=facet,
+        x="cafo_total_ops_chickens",
+        y=poor_mental_col,
+        hue="chicken_size_class",
+        col="year",
+        col_wrap=4,
+        kind="scatter",
+        s=18,
+        alpha=0.65,
+        palette=palette,
+        height=3.0,
+        aspect=1.15,
+    )
+    g.set_axis_labels("Chicken CAFO Operations (Total)", "Poor Mental Health Days (Raw Value)")
+    g.fig.suptitle("Chicken CAFOs vs Poor Mental Health Days (2010-2020)", y=1.02)
+    g.savefig(
+        os.path.join(plots_dir, "chickens_cafo_vs_poor_mental_health_faceted_2010_2020.png"),
+        dpi=220,
+        bbox_inches="tight",
+    )
+    plt.close(g.fig)
+
+    facet[
+        [
+            "fips",
+            "state_fips",
+            "state_abbrev",
+            "year",
+            "cafo_total_ops_chickens",
+            poor_mental_col,
+            "cafo_chickens_small",
+            "cafo_chickens_medium",
+            "cafo_chickens_large",
+            "chicken_size_class",
+        ]
+    ].to_csv(
+        os.path.join(out_dir, "chickens_scatter_data_2010_2020.csv"),
+        index=False,
+    )
+
+
+# ---------------------------------------------------------------------
+# 9) CAFO unit/count cross-check against pre-merged compact panel
+# ---------------------------------------------------------------------
+pre_cafo_path = latest_file_glob(clean_dir, "*_cafo_ops_by_size_compact.csv")
+pre = pd.read_csv(pre_cafo_path, low_memory=False)
+pre = normalize_panel_key(pre)
+
+for c in ["commodity_desc", "small", "medium", "large"]:
+    if c not in pre.columns:
+        raise RuntimeError(f"Missing column in pre-merged CAFO compact file: {c}")
+pre["commodity_desc"] = pre["commodity_desc"].astype("string").str.strip().str.lower()
+pre = pre[pre["commodity_desc"].isin(["cattle", "hogs", "chickens"])].copy()
+if "class_desc" in pre.columns:
+    pre["class_desc"] = pre["class_desc"].astype("string").str.strip().str.lower()
+    canonical_class_map = {"cattle": "incl calves", "hogs": "all classes", "chickens": "layers"}
+    pre = pre[pre["class_desc"] == pre["commodity_desc"].map(canonical_class_map)].copy()
+for c in ["small", "medium", "large"]:
+    pre[c] = to_numeric_series(pre[c])
+
+# Restrict pre-merged comparison to the same rural keys.
+pre = pre.merge(rural_kept, on=["fips", "year"], how="inner")
+
+pre_grp = (
+    pre.groupby(["fips", "year", "commodity_desc"], as_index=False)[["small", "medium", "large"]]
+    .sum(min_count=1)
+)
+pre_wide = pre_grp.pivot_table(
+    index=["fips", "year"],
+    columns="commodity_desc",
+    values=["small", "medium", "large"],
+    aggfunc="sum",
+)
+pre_wide.columns = [f"cafo_{commodity}_{size}" for size, commodity in pre_wide.columns]
+pre_wide = pre_wide.reset_index()
+
+for commodity in ["cattle", "hogs", "chickens"]:
+    for size in ["small", "medium", "large"]:
+        col = f"cafo_{commodity}_{size}"
+        if col not in pre_wide.columns:
+            pre_wide[col] = np.nan
+
+pre_animal_cols = [
+    "cafo_cattle_small", "cafo_cattle_medium", "cafo_cattle_large",
+    "cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large",
+    "cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large",
+]
+pre_wide["cafo_total_ops_all_animals"] = pre_wide[pre_animal_cols].sum(axis=1, min_count=1)
+pre_wide["cafo_total_ops_chickens"] = pre_wide[
+    ["cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large"]
+].sum(axis=1, min_count=1)
+
+merged_cmp = df[["fips", "year", *pre_animal_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]].copy()
+cmp = merged_cmp.merge(pre_wide, on=["fips", "year"], how="left", suffixes=("_merged", "_pre"))
+
+cross_rows = []
+for col in [*pre_animal_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]:
+    m = to_numeric_series(cmp[f"{col}_merged"])
+    p = to_numeric_series(cmp[f"{col}_pre"])
+    both = m.notna() & p.notna()
+    diff = (m - p).abs()
+    cross_rows.append(
+        {
+            "variable": col,
+            "n_keys_compared": int(both.sum()),
+            "pct_exact_match_on_compared_keys": float((diff[both] == 0).mean() * 100) if both.any() else np.nan,
+            "max_abs_diff": float(diff[both].max()) if both.any() else np.nan,
+            "merged_sum": float(m.sum(skipna=True)),
+            "premerged_sum": float(p.sum(skipna=True)),
+            "merged_p90": float(m.quantile(0.90)) if m.notna().any() else np.nan,
+            "premerged_p90": float(p.quantile(0.90)) if p.notna().any() else np.nan,
+            "merged_max": float(m.max()) if m.notna().any() else np.nan,
+            "premerged_max": float(p.max()) if p.notna().any() else np.nan,
+        }
+    )
+
+crosswalk = pd.DataFrame(cross_rows)
+crosswalk.to_csv(
+    os.path.join(out_dir, "cafo_animal_size_crosscheck_vs_premerged.csv"),
+    index=False,
+)
+
+unit_note = pd.DataFrame(
+    [
+        {
+            "source_file": os.path.basename(pre_cafo_path),
+            "inference": "CAFO animal-size values are operation/establishment counts, not animal head counts.",
+            "evidence_1": "script0b-ag-raw.py builds ops_in_bin from value and labels summary columns as small/medium/large operation totals.",
+            "evidence_2": "script0b-ag-raw.py comments: 'Keep operations counts in each inventory bin.'",
+            "evidence_3": "Merged CAFO animal-size columns match pre-merged compact county-year totals exactly on compared keys.",
+        }
+    ]
+)
+unit_note.to_csv(os.path.join(out_dir, "cafo_unit_crosscheck_note.csv"), index=False)
+
+print("Saved outputs in:", out_dir)
