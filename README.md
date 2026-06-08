@@ -71,8 +71,7 @@ Each script reads from `Data/raw/` and writes a dated CSV to `Data/clean/`.
 
 | Script | Purpose | Key output file (in `Data/clean/`) |
 |--------|---------|-----------------------------------|
-| `script0a-pop-fips-raw-merge.py` | US Census population (1990–2024) + FIPS crosswalk panel | `*_population_full.csv` |
-| `script0b-ag-raw.py` | USDA NASS CAFO operations by size (API + `.dta` fallback) | `*_cafo_ops_by_size_compact.csv` |
+| `script0a-pop-fips-raw-merge.py` | US Census population (1990–2024) + FIPS crosswalk panel **and** USDA NASS CAFO operations by size (API + `.dta` fallback) | `*_population_full.csv`, `*_cafo_ops_by_size_compact.csv` |
 | `script0c-health-raw.py` | County Health Rankings MH survey + CDC deaths-of-despair | `*_mentalhealthrank_full.csv`, `*_cdc_county_year_deathsofdespair.csv`, `*_mh_mortality_fips_yr.csv` |
 | `script0d-crime-raw.py` | FBI UCR violent crime, collapsed to FIPS-year | `*_crime_fips_level_final.csv` |
 | `script0e-nchs-urban.py` | NCHS urban-rural classification expanded to annual panel | `*-rural-key.csv` |
@@ -91,13 +90,12 @@ Each script reads from `Data/raw/` and writes a dated CSV to `Data/clean/`.
 | Script | Purpose | Output location |
 |--------|---------|-----------------|
 | `script2a-qa.py` | **QA pipeline (3 sections):** (1) CDC crude-rate sense check + re-export of merged panel with diagnostic columns; (2) pairwise correlation tables (Pearson + Spearman), FSIS 12-column QA, QA memo; (3) FSIS size-bin counts vs. poor mental health days scatter (2017 cross-section) | `Data/merged/figs/panel-sumstats-by-farms/` |
-| `script2b-aggregate-visuals.py` | Large missingness/trend/binned-scatter/state-level visualization batch | `Data/merged/figs/` subfolders |
-| `script2c-summary-stats.py` | Summary statistics, CAFO unit cross-check vs. pre-merged compact file, county choropleth maps, chicken scatter facets | `Data/merged/figs/panel-sumstats-by-farms/` |
-| `script2d-final-visuals.py` | **Core analytical figures**: binned scatter (A1/A2/A3), county time-series (B), outcome cross-correlation heatmap (C), violin/box plots (D/E), choropleth maps (F1/F2) | `Data/merged/figs/core-visuals/` |
-| `script2e-cafo-composition.py` | CAFO geographic concentration: top-20 county rankings, stacked size-composition bars | `Data/merged/figs/cafo-composition/` |
-| `script2f-threshold-presence.py` | CAFO threshold/presence analysis: binary presence vs. outcomes, dose-response tiers, small vs. large CAFO comparison | `Data/merged/figs/threshold-presence/` |
-| `script2g-hispanic-chr-explorer.py` | Hispanic population as confounder: CHR correlation heatmap, outcome profiles by %Hispanic quartile, partial scatter residualized on %Hispanic | `Data/merged/figs/hispanic-chr/` |
-| `script2h-choropleth-maps.py` | **Choropleth map pipeline (3 sections):** (1) FSIS establishment counts by type (2017–2023); (2) mental health outcome values by year; (3) agricultural first-difference maps for identifying variation | `figs/fsis-choropleth/`, `figs/mental-outcome-coverage-maps/`, `figs/ag-first-diff-maps/` |
+| `script2b-summary-stats-vis.py` | **Combined stats + visualization (2 sections):** (A) broad missingness/trend/violin/binned-scatter/state-level batch; (B) targeted CAFO/FSIS/MH sumstats, coverage check, county and state maps, chicken scatter facets, CAFO unit cross-check | `Data/merged/figs/` and `figs/panel-sumstats-by-farms/` |
+| `script2c-final-visuals.py` | **Core analytical figures**: binned scatter (A1/A2/A3), county time-series (B), outcome cross-correlation heatmap (C), violin/box plots (D/E), choropleth maps (F1/F2) | `Data/merged/figs/core-visuals/` |
+| `script2d-cafo-composition.py` | CAFO geographic concentration: top-20 county rankings, stacked size-composition bars | `Data/merged/figs/cafo-composition/` |
+| `script2e-threshold-presence.py` | CAFO threshold/presence analysis: binary presence vs. outcomes, dose-response tiers, small vs. large CAFO comparison | `Data/merged/figs/threshold-presence/` |
+| `script2f-hispanic-chr-explorer.py` | Hispanic population as confounder: CHR correlation heatmap, outcome profiles by %Hispanic quartile, partial scatter residualized on %Hispanic | `Data/merged/figs/hispanic-chr/` |
+| `script2g-choropleth-maps.py` | **Choropleth map pipeline (3 sections):** (1) FSIS establishment counts by type (2017–2023); (2) mental health outcome values by year; (3) agricultural first-difference maps for identifying variation | `figs/fsis-choropleth/`, `figs/mental-outcome-coverage-maps/`, `figs/ag-first-diff-maps/` |
 
 ### Stage 3 — Analysis
 

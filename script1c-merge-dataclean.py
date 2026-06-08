@@ -177,6 +177,8 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
         print("Skip CAFO animal-size block: no rows after commodity filter")
         return None
     df["class_desc"] = df["class_desc"].astype("string").str.strip().str.lower()
+    # Save pre-canonical copy (class_desc already standardized) for beef/dairy extraction below.
+    df_all_classes = df.copy()
     expected_class = df["commodity_desc"].map(CAFO_CANONICAL_CLASS)
     df = df[df["class_desc"] == expected_class].copy()
     if df.empty:
@@ -224,7 +226,39 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
     chickens_cols = [f"cafo_chickens_{s}" for s in ("small", "medium", "large")]
     wide["cafo_total_ops_chickens"] = wide[chickens_cols].sum(axis=1, min_count=1)
 
-    keep_cols = ["fips", "year", *animal_size_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]
+    # --- Beef and dairy sub-panels ---
+    # "cattle incl calves" ≠ beef + dairy: it also includes calves, steers, bulls, and feedlot.
+    # Beef and dairy are disjoint subsets of incl calves. Add them as separate columns so
+    # the analysis can distinguish beef vs dairy operations without double-counting in totals.
+    df_cattle = df_all_classes[df_all_classes["commodity_desc"] == "cattle"].copy()
+    df_cattle = df_cattle.merge(allowed_keys, on=["fips", "year"], how="inner")
+    for size_col in ("small", "medium", "large"):
+        df_cattle[size_col] = pd.to_numeric(df_cattle[size_col], errors="coerce")
+
+    beef_dairy_cols = []
+    for label, class_val in [("cattle_beef", "cows, beef"), ("cattle_dairy", "cows, milk")]:
+        sub = df_cattle[df_cattle["class_desc"] == class_val].copy()
+        for size in ("small", "medium", "large"):
+            col = f"cafo_{label}_{size}"
+            beef_dairy_cols.append(col)
+            if not sub.empty and sub[size].notna().any():
+                grp = (
+                    sub.groupby(["fips", "year"], as_index=False)[size]
+                    .sum(min_count=1)
+                    .rename(columns={size: col})
+                )
+                wide = wide.merge(grp[["fips", "year", col]], on=["fips", "year"], how="left")
+            else:
+                wide[col] = pd.NA
+        wide[f"cafo_{label}_total"] = (
+            wide[[f"cafo_{label}_{s}" for s in ("small", "medium", "large")]]
+            .apply(pd.to_numeric, errors="coerce")
+            .sum(axis=1, min_count=1)
+        )
+        beef_dairy_cols.append(f"cafo_{label}_total")
+
+    keep_cols = ["fips", "year", *animal_size_cols, "cafo_total_ops_all_animals",
+                 "cafo_total_ops_chickens", *beef_dairy_cols]
     wide = wide[keep_cols].copy()
     print(f"Use CAFO animal-size block: {wide.shape}")
     return wide
