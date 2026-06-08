@@ -486,3 +486,66 @@ def map_size_class(df, mapping, unit_match, class_match, out_col):
     if class_match is not None:
         mask = mask & (df["class_desc"] == class_match)
     df[out_col] = df["domaincat_desc"].map(mapping).where(mask, other=pd.NA).astype("Int64")
+
+
+##################### VISUALIZATION HELPERS ####################
+
+# Shared URL for Plotly county choropleth maps — used in script2b, 2d, 2e, 2h
+COUNTY_GEOJSON_URL = (
+    "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
+)
+
+
+# used in: script2d-aggregate-visuals.py, script2f-final-visuals.py,
+# used in: script2e-cafo-composition.py, script2f-threshold-presence.py,
+# used in: script2g-hispanic-chr-explorer.py, script2h-choropleth-maps.py, script3-ridge.py
+def log_per10k(series, pop):
+    """log(count per 10,000 population + 1); removes mechanical county-size correlation."""
+    x   = pd.to_numeric(series, errors="coerce")
+    pop = pd.to_numeric(pop,    errors="coerce").replace(0, np.nan)
+    return np.log1p((x / pop) * 10_000)
+
+
+# used in: script2h-choropleth-maps.py
+def load_county_geojson(merged_dir=None):
+    """
+    Load Plotly county GeoJSON for choropleth maps.
+    Falls back to GeoJSON embedded in local HTML files if the network is unavailable.
+    """
+    import json
+    try:
+        from urllib.request import urlopen
+        with urlopen(COUNTY_GEOJSON_URL, timeout=20) as r:
+            return json.load(r)
+    except Exception as e:
+        print(f"GeoJSON URL fetch failed ({e}); trying local HTML fallback.")
+
+    if merged_dir is None:
+        raise RuntimeError("Could not load county GeoJSON from URL; pass merged_dir for fallback.")
+
+    html_candidates = (
+        sorted(glob.glob(os.path.join(merged_dir, "figs", "core-visuals", "*_F2_poor_mental_health_map_2012.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(merged_dir, "figs", "core-visuals", "*_F1_cafo_intensity_map_2012.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(merged_dir, "figs", "fsis-choropleth", "*.html")), reverse=True)
+    )
+
+    decoder = json.JSONDecoder()
+    for html_path in html_candidates:
+        try:
+            txt = open(html_path, "r", encoding="utf-8", errors="ignore").read()
+            start = txt.find('{"type":"FeatureCollection"')
+            if start < 0:
+                idx = txt.find('"type":"FeatureCollection"')
+                if idx < 0:
+                    continue
+                start = txt.rfind("{", 0, idx)
+                if start < 0:
+                    continue
+            obj, _ = decoder.raw_decode(txt[start:])
+            if isinstance(obj, dict) and obj.get("type") == "FeatureCollection" and "features" in obj:
+                print(f"Loaded county GeoJSON from local fallback: {os.path.basename(html_path)}")
+                return obj
+        except Exception:
+            continue
+
+    raise RuntimeError("Could not load county GeoJSON from URL or local HTML fallback.")

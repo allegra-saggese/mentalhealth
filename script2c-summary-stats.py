@@ -29,7 +29,6 @@ os.makedirs(maps_dir, exist_ok=True)
 os.makedirs(plots_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
-COUNTY_GEOJSON_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
 STATE_FIPS_TO_ABBR = {
     "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA",
@@ -49,16 +48,11 @@ STATE_FIPS_TO_ABBR = {
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
-latest_file = latest_file_glob
-to_num = to_numeric_series
-normalize_key = normalize_panel_key
-
-
 def summarize_numeric(df, columns):
     rows = []
     n_total = len(df)
     for c in columns:
-        s = to_num(df[c]) if c in df.columns else pd.Series(dtype="float64")
+        s = to_numeric_series(df[c]) if c in df.columns else pd.Series(dtype="float64")
         nonmiss = int(s.notna().sum())
         rows.append(
             {
@@ -108,7 +102,7 @@ def save_county_map_one_year(df_year, value_col, year, title_prefix, out_prefix)
     if px is None:
         return
     d = df_year[["fips", value_col]].copy()
-    d[value_col] = to_num(d[value_col])
+    d[value_col] = to_numeric_series(d[value_col])
     d = d[d["fips"].notna() & d[value_col].notna()].copy()
     if d.empty:
         return None
@@ -140,11 +134,11 @@ def save_county_map_one_year(df_year, value_col, year, title_prefix, out_prefix)
 # ---------------------------------------------------------------------
 # Load latest merged panel
 # ---------------------------------------------------------------------
-merged_path = latest_file(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
 print("Using merged panel:", merged_path)
 
 df = pd.read_csv(merged_path, low_memory=False)
-df = normalize_key(df)
+df = normalize_panel_key(df)
 df = df.loc[:, ~df.columns.duplicated()].copy()
 df = df.drop_duplicates(subset=["fips", "year"], keep="first").copy()
 df = df.sort_values(["fips", "year"]).reset_index(drop=True)
@@ -168,7 +162,7 @@ if missing_cafo:
     )
 
 for c in cafo_cols_new:
-    df[c] = to_num(df[c])
+    df[c] = to_numeric_series(df[c])
 
 fsis_col = "n_unique_establishments_fsis"
 fsis_size_cols = [
@@ -182,12 +176,12 @@ fsis_size_cols = [
 for c in [fsis_col, *fsis_size_cols]:
     if c not in df.columns:
         raise RuntimeError(f"Missing required FSIS column in merged panel: {c}")
-    df[c] = to_num(df[c])
+    df[c] = to_numeric_series(df[c])
 
 poor_mental_col = "poor_mental_health_days"
 if poor_mental_col not in df.columns:
     raise RuntimeError(f"Missing required mental-health column in merged panel: {poor_mental_col}")
-df[poor_mental_col] = to_num(df[poor_mental_col])
+df[poor_mental_col] = to_numeric_series(df[poor_mental_col])
 
 df["state_fips"] = df["fips"].astype("string").str[:2]
 df["state_abbrev"] = df["state_fips"].map(STATE_FIPS_TO_ABBR)
@@ -196,9 +190,9 @@ df["state_abbrev"] = df["state_fips"].map(STATE_FIPS_TO_ABBR)
 # ---------------------------------------------------------------------
 # 1) county_coverage_check.csv
 # ---------------------------------------------------------------------
-rural_path = latest_file(clean_dir, "*rural-key*.csv")
+rural_path = latest_file_glob(clean_dir, "*rural-key*.csv")
 rural_df = read_and_prepare(rural_path)
-rural_df = normalize_key(rural_df)
+rural_df = normalize_panel_key(rural_df)
 if "non_large_metro" not in rural_df.columns:
     raise RuntimeError(f"'non_large_metro' not found in rural-key file: {rural_path}")
 rural_df["non_large_metro"] = pd.to_numeric(rural_df["non_large_metro"], errors="coerce").astype("Int64")
@@ -324,7 +318,7 @@ for c in fsis_2017_cols:
 
 fsis_map_meta = []
 for c in fsis_2017_cols:
-    s = to_num(df_2017[c])
+    s = to_numeric_series(df_2017[c])
     row = {
         "year": map_year,
         "variable": c,
@@ -356,7 +350,7 @@ cafo_animal_size_cols = [
 
 cafo_map_meta = []
 for c in cafo_animal_size_cols:
-    s = to_num(df_2017[c])
+    s = to_numeric_series(df_2017[c])
     row = {
         "year": map_year,
         "variable": c,
@@ -481,9 +475,9 @@ if not facet.empty:
 # ---------------------------------------------------------------------
 # 9) CAFO unit/count cross-check against pre-merged compact panel
 # ---------------------------------------------------------------------
-pre_cafo_path = latest_file(clean_dir, "*_cafo_ops_by_size_compact.csv")
+pre_cafo_path = latest_file_glob(clean_dir, "*_cafo_ops_by_size_compact.csv")
 pre = pd.read_csv(pre_cafo_path, low_memory=False)
-pre = normalize_key(pre)
+pre = normalize_panel_key(pre)
 
 for c in ["commodity_desc", "small", "medium", "large"]:
     if c not in pre.columns:
@@ -495,7 +489,7 @@ if "class_desc" in pre.columns:
     canonical_class_map = {"cattle": "incl calves", "hogs": "all classes", "chickens": "layers"}
     pre = pre[pre["class_desc"] == pre["commodity_desc"].map(canonical_class_map)].copy()
 for c in ["small", "medium", "large"]:
-    pre[c] = to_num(pre[c])
+    pre[c] = to_numeric_series(pre[c])
 
 # Restrict pre-merged comparison to the same rural keys.
 pre = pre.merge(rural_kept, on=["fips", "year"], how="inner")
@@ -534,8 +528,8 @@ cmp = merged_cmp.merge(pre_wide, on=["fips", "year"], how="left", suffixes=("_me
 
 cross_rows = []
 for col in [*pre_animal_cols, "cafo_total_ops_all_animals", "cafo_total_ops_chickens"]:
-    m = to_num(cmp[f"{col}_merged"])
-    p = to_num(cmp[f"{col}_pre"])
+    m = to_numeric_series(cmp[f"{col}_merged"])
+    p = to_numeric_series(cmp[f"{col}_pre"])
     both = m.notna() & p.notna()
     diff = (m - p).abs()
     cross_rows.append(

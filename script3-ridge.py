@@ -36,6 +36,13 @@ from packages import *
 from functions import *
 import statsmodels.api as sm
 
+import sklearn
+from sklearn.preprocessing import scale
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LassoCV, LinearRegression, Ridge, RidgeCV
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+
 # ── Directories ───────────────────────────────────────────────────────────────
 merged_dir = os.path.join(db_data, "merged")
 out_dir    = os.path.join(db_data, "merged", "figs", "script3")
@@ -49,12 +56,6 @@ print(f"Rural panel: {len(df_raw):,} rows | {df_raw['fips'].nunique():,} countie
       f"years {int(df_raw['year'].min())}–{int(df_raw['year'].max())}")
 
 POP_COL = "population"
-
-# ── Helper: log per 10k ───────────────────────────────────────────────────────
-def log_per10k(series, pop):
-    x   = pd.to_numeric(series, errors="coerce")
-    pop = pd.to_numeric(pop,    errors="coerce").replace(0, np.nan)
-    return np.log1p((x / pop) * 10_000)
 
 # ── Derive treatment variables ────────────────────────────────────────────────
 def _derive_treatments(df):

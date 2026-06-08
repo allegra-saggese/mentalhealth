@@ -26,7 +26,6 @@ figs_dir = os.environ.get("MENTAL_FIGS_DIR", os.path.join(merged_dir, "figs"))
 os.makedirs(figs_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
-COUNTY_GEOJSON_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 MAX_TREND_VARS = os.environ.get("MAX_TREND_VARS")  # optional cap for very large trend batch
 STATE_PLOT_LIMIT = int(os.environ.get("STATE_PLOT_LIMIT", "12"))
 
@@ -117,10 +116,6 @@ def gini_from_values(values):
     n = x.size
     cumx = np.cumsum(x)
     return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
-
-
-# keep helper naming consistent with other scripts
-normalize_key = normalize_panel_key
 
 
 STATE_FIPS_TO_NAME = {
@@ -461,7 +456,7 @@ for var in high_cov_vars:
 cafo_path = latest_file_glob(clean_dir, "*_cafo_ops_by_size_compact.csv")
 print("Using CAFO compact file:", cafo_path)
 cafo = pd.read_csv(cafo_path, low_memory=False)
-cafo = normalize_key(cafo)
+cafo = normalize_panel_key(cafo)
 cafo = cafo.merge(df[["fips", "year"]].drop_duplicates(), on=["fips", "year"], how="inner")
 
 for col in ["small", "medium", "large"]:

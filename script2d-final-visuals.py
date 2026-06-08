@@ -126,20 +126,6 @@ GREY = "#636363"
 # =============================================================================
 # Helpers
 # =============================================================================
-to_num    = to_numeric_series
-load_file = latest_file_glob
-
-
-def log_per10k(series, pop_series):
-    """
-    Compute log(x per 10k population + 1).
-    Handles zero population and zero ops cleanly.
-    """
-    x   = to_num(series)
-    pop = to_num(pop_series).replace(0, np.nan)
-    return np.log1p((x / pop) * 10_000)
-
-
 def binned_scatter_ax(ax, x_vals, y_vals, label_x, label_y,
                       n_bins=20, color=BLUE, title=None):
     """
@@ -217,7 +203,7 @@ def binned_scatter_ax(ax, x_vals, y_vals, label_x, label_y,
 # =============================================================================
 # Load and prepare panel
 # =============================================================================
-merged_path = load_file(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
 print("Loading:", merged_path)
 
 df = pd.read_csv(merged_path, low_memory=False)
@@ -234,7 +220,7 @@ all_analysis_cols = [
 ]
 for col in all_analysis_cols:
     if col in df.columns:
-        df[col] = to_num(df[col])
+        df[col] = to_numeric_series(df[col])
 
 print(f"Panel loaded: {df.shape[0]:,} rows | "
       f"{df['fips'].nunique():,} counties | "
@@ -404,7 +390,7 @@ MH_COL = "poor_mental_health_days"
 
 df_b = df[df["year"].between(*PANEL_YEARS)].copy()
 df_b["cafo_per10k"] = (df_b[CAFO_TOTAL] / df_b[POP_COL].replace(0, np.nan)) * 10_000
-df_b[MH_COL] = to_num(df_b[MH_COL])
+df_b[MH_COL] = to_numeric_series(df_b[MH_COL])
 
 # Summarize per county
 county_stats = (
@@ -522,7 +508,7 @@ corr_outcomes = {
 }
 
 corr_cols   = {lbl: col for lbl, col in corr_outcomes.items() if col in df_panel.columns}
-corr_data   = pd.DataFrame({lbl: to_num(df_panel[col]) for lbl, col in corr_cols.items()})
+corr_data   = pd.DataFrame({lbl: to_numeric_series(df_panel[col]) for lbl, col in corr_cols.items()})
 corr_matrix = corr_data.corr(method="spearman", min_periods=200)
 
 mask_upper = np.triu(np.ones(corr_matrix.shape, dtype=bool), k=1)
@@ -917,7 +903,7 @@ for _ri, (_xlab, _xcol) in enumerate(_FSIS_SUBTYPES.items()):
         if _ycol not in _df_fsis_i.columns:
             _ax.set_visible(False)
             continue
-        _y_vals = to_num(_df_fsis_i[_ycol])
+        _y_vals = to_numeric_series(_df_fsis_i[_ycol])
         binned_scatter_ax(
             _ax,
             x_vals=_x_vals,
@@ -973,7 +959,7 @@ for _ri, _animal in enumerate(_ANIMALS_J):
             _ax.set_visible(False)
             continue
         _x = log_per10k(_df_j[_col], _df_j[POP_COL])
-        _y = to_num(_df_j[_DESPAIR_COL])
+        _y = to_numeric_series(_df_j[_DESPAIR_COL])
         _color = CAFO_TYPE_COLORS.get(_animal, BLUE)
         binned_scatter_ax(
             _ax,

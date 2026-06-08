@@ -66,11 +66,6 @@ FOCUS_OUTCOMES = {
 }
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-def log_per10k(series, pop):
-    x   = pd.to_numeric(series, errors="coerce")
-    pop = pd.to_numeric(pop,    errors="coerce").replace(0, np.nan)
-    return np.log1p((x / pop) * 10_000)
-
 def mean_ci(series, alpha=0.05):
     """Return (mean, lower_95_ci, upper_95_ci) for a numeric series."""
     s = pd.to_numeric(series, errors="coerce").dropna()

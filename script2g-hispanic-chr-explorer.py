@@ -53,12 +53,6 @@ print(f"Restricted to 2010–2015: {len(df):,} rows | {df['fips'].nunique():,} c
 POP_COL  = "population"
 HISP_COL = "%_hispanic"
 
-# ── Helper: log per 10k ───────────────────────────────────────────────────────
-def log_per10k(series, pop):
-    x   = pd.to_numeric(series, errors="coerce")
-    pop = pd.to_numeric(pop,    errors="coerce").replace(0, np.nan)
-    return np.log1p((x / pop) * 10_000)
-
 # ── Treatment variables (log per 10k) ─────────────────────────────────────────
 df["cafo_total_log"]      = log_per10k(df["cafo_total_ops_all_animals"], df[POP_COL])
 df["large_cafo_log"]      = log_per10k(

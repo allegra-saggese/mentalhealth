@@ -37,11 +37,6 @@ POP_COL      = "population"
 CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-def log_per10k(series, pop):
-    x   = pd.to_numeric(series, errors="coerce")
-    pop = pd.to_numeric(pop,    errors="coerce").replace(0, np.nan)
-    return np.log1p((x / pop) * 10_000)
-
 def top_n_counties(df_yr, val_col, n=20, label_col="county_label"):
     """Return top-N rows by val_col, with a formatted county label."""
     sub = df_yr[[val_col, label_col, POP_COL]].copy()
