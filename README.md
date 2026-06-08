@@ -8,9 +8,10 @@ This project combines US health, crime, population, and agriculture data into on
 ## Requirements
 
 - Python 3.11
-- Core packages (set in `packages.py`): `pandas`, `numpy`, `glob`, `re`, `matplotlib`, `seaborn`, `sklearn`
-- Optional: `plotly` (used in `script2d` and `script2e` for choropleth maps; scripts degrade gracefully if unavailable)
-- Helper utilities in `functions.py`: FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `normalize_panel_key()`, `to_numeric_series()`
+- Core packages (set in `packages.py`): `pandas`, `numpy`, `glob`, `re`, `matplotlib`, `seaborn`
+- ML packages (`sklearn`, `statsmodels`): only required for `script3-ridge.py`; imported there directly
+- Optional: `plotly` + `kaleido` (used in `script2b`, `script2c`, `script2h` for choropleth maps; scripts degrade gracefully if unavailable)
+- Helper utilities in `functions.py`: FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `normalize_panel_key()`, `to_numeric_series()`, `log_per10k()`, `load_county_geojson()`
 - **USDA NASS API key** required for `script0b` — set env var `USDA_NASS_API_KEY`
 - **HUD API token** required for `script0f` FSIS pipeline — set env var `HUD_API_TOKEN`
 
@@ -21,8 +22,6 @@ This project combines US health, crime, population, and agriculture data into on
 | `script0a`, `script0b`, `script0d` | `repo = "/Users/allegrasaggese/Documents/GitHub/mentalhealth"` | GitHub repo root for sys.path |
 | `script0b` | `donor_path = ".../2026-02-23_ag_annual_df.csv"` | Local backfill CSV for 2012/2017 USDA data |
 | `script0d` | `interim_override = "/Users/allegrasaggese/Dropbox/..."` | Local Dropbox copy for crime QA outputs |
-| `script2a` | `MERGED_DIR`, `OUT_QA_DIR` | Absolute paths — update before running on a new machine |
-
 **Fix `db_base` in `packages.py` first.** All directory paths in all other scripts are derived from `db_data = db_base/Data` and will resolve correctly once the root is set.
 
 ---
@@ -91,12 +90,14 @@ Each script reads from `Data/raw/` and writes a dated CSV to `Data/clean/`.
 
 | Script | Purpose | Output location |
 |--------|---------|-----------------|
-| `script2a-qa-cdc-population-sensecheck.py` | Validates CDC crude rate vs. census-population recomputation; exports QA diagnostics | `Data/merged/figs/panel-sumstats-by-farms/` |
-| `script2b-qa-correlations.py` | Pairwise correlation tables (Pearson + Spearman), FSIS 12-column QA, QA memo | `Data/merged/figs/panel-sumstats-by-farms/` |
-| `script2c-qa-usda-aggregate.py` | FSIS size-bin counts vs. poor mental health days scatter (2017 cross-section) | `Data/merged/figs/panel-sumstats-by-farms/plots/` |
-| `script2d-aggregate-visuals.py` | Large missingness/trend/binned-scatter/state-level visualization batch | `Data/merged/figs/` subfolders |
-| `script2e-summary-stats.py` | Summary statistics, CAFO unit cross-check vs. pre-merged compact file, county choropleth maps, chicken scatter facets | `Data/merged/figs/panel-sumstats-by-farms/` |
-| `script2f-final-visuals.py` | **Core analytical figures**: binned scatter (A1/A2/A3), county time-series (B), outcome cross-correlation heatmap (C) | `Data/merged/figs/core-visuals/` |
+| `script2a-qa.py` | **QA pipeline (3 sections):** (1) CDC crude-rate sense check + re-export of merged panel with diagnostic columns; (2) pairwise correlation tables (Pearson + Spearman), FSIS 12-column QA, QA memo; (3) FSIS size-bin counts vs. poor mental health days scatter (2017 cross-section) | `Data/merged/figs/panel-sumstats-by-farms/` |
+| `script2b-aggregate-visuals.py` | Large missingness/trend/binned-scatter/state-level visualization batch | `Data/merged/figs/` subfolders |
+| `script2c-summary-stats.py` | Summary statistics, CAFO unit cross-check vs. pre-merged compact file, county choropleth maps, chicken scatter facets | `Data/merged/figs/panel-sumstats-by-farms/` |
+| `script2d-final-visuals.py` | **Core analytical figures**: binned scatter (A1/A2/A3), county time-series (B), outcome cross-correlation heatmap (C), violin/box plots (D/E), choropleth maps (F1/F2) | `Data/merged/figs/core-visuals/` |
+| `script2e-cafo-composition.py` | CAFO geographic concentration: top-20 county rankings, stacked size-composition bars | `Data/merged/figs/cafo-composition/` |
+| `script2f-threshold-presence.py` | CAFO threshold/presence analysis: binary presence vs. outcomes, dose-response tiers, small vs. large CAFO comparison | `Data/merged/figs/threshold-presence/` |
+| `script2g-hispanic-chr-explorer.py` | Hispanic population as confounder: CHR correlation heatmap, outcome profiles by %Hispanic quartile, partial scatter residualized on %Hispanic | `Data/merged/figs/hispanic-chr/` |
+| `script2h-choropleth-maps.py` | **Choropleth map pipeline (3 sections):** (1) FSIS establishment counts by type (2017–2023); (2) mental health outcome values by year; (3) agricultural first-difference maps for identifying variation | `figs/fsis-choropleth/`, `figs/mental-outcome-coverage-maps/`, `figs/ag-first-diff-maps/` |
 
 ### Stage 3 — Analysis
 
@@ -123,7 +124,7 @@ Size thresholds are applied per animal type using USDA NASS inventory bin codes.
 | Layer chickens | 7 | 9 |
 | Cattle / Hogs | 6 | 7 |
 
-**CAFO values are operation counts, not animal head counts.** Confirmed by `script2e` cross-check against the pre-merged compact file.
+**CAFO values are operation counts, not animal head counts.** Confirmed by `script2c` cross-check against the pre-merged compact file.
 
 ### CDC Mortality Suppression (script0c, script1c)
 CDC suppresses crude rates when deaths < 10 per cell. This causes ~85–93% missingness in `crude_rate_*` for rural counties — **this is expected, not a bug**. Raw death counts are always retained. The derived `cdc_in_query` flag distinguishes counties absent from the CDC WONDER download (unknown) from those explicitly returning Deaths = 0 (ambiguous zero — rate set to NaN).
@@ -132,14 +133,14 @@ CDC suppresses crude rates when deaths < 10 per cell. This causes ~85–93% miss
 County Health Rankings variables are included if: present in >=11 annual files (majority rule) OR present in >=8 files with >=80% average fill. Duplicate column names across years are resolved by keeping the most complete version.
 
 ### Analytical Panel Window
-Based on coverage audits (`script1b`, `script2b`):
+Based on coverage audits (`script1b`, `script2a`):
 - `poor_mental_health_days` (CHR): usable from 2010 onward (~90% fill)
 - `frequent_mental_distress` (CHR): 2016+ only — not suitable for pre-2016 panels
 - FSIS establishments: **2017 cross-section only**
 - **Recommended window: 2010–2015** (adequate MH coverage, CAFO census year 2012, pre-FSIS)
 
 ### CAFO Per-Capita Transformation
-Raw CAFO operation counts are heavily right-skewed and mechanically correlated with county size. Standard transformation for all scatter plots and regressions: **log(cafo_total_ops / population x 10,000 + 1)**. Implemented in `script2f` via `log_per10k()`.
+Raw CAFO operation counts are heavily right-skewed and mechanically correlated with county size. Standard transformation for all scatter plots and regressions: **log(cafo_total_ops / population x 10,000 + 1)**. Implemented via `log_per10k()` in `functions.py` (shared across all viz scripts).
 
 ---
 
@@ -156,7 +157,7 @@ Raw CAFO operation counts are heavily right-skewed and mechanically correlated w
 All files are date-stamped. Use `latest_file_glob(merged_dir, "*_full_merged.csv")` from `functions.py` to auto-select the most recent version.
 
 ### Core analytical figures (`Data/merged/figs/core-visuals/`)
-Produced by `script2f`:
+Produced by `script2d-final-visuals.py`:
 | File | Description |
 |------|-------------|
 | `*_A1_cafo_total_vs_outcomes_*.png` | Binned scatter: total CAFO (log per-capita) vs. 6 outcomes, pooled 2010–2015 |
