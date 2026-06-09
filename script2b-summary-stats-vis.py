@@ -4,8 +4,10 @@
 Summary statistics and aggregate visualization pipeline for merged county-year data.
 Combines broad missingness/trend/composition analysis with targeted CAFO/FSIS/MH sumstats.
 Outputs:
-  - figs/                          missingness, violin, trend, binned scatter, state trend plots
-  - figs/panel-sumstats-by-farms/  coverage, CAFO/FSIS/MH sumstats, county + state maps
+  - output/figs/                          missingness plots, violin, trend, binned scatter, state trend
+  - output/tables/                        missingness/summary stat CSVs
+  - output/figs/panel-sumstats-by-farms/  CAFO/FSIS/MH maps and plots
+  - output/tables/panel-sumstats-by-farms/ CAFO/FSIS/MH coverage/sumstat CSVs
 """
 
 from packages import *
@@ -20,14 +22,13 @@ except Exception:
 # ---------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------
-merged_dir = os.path.join(db_data, "merged")
-clean_dir  = os.path.join(db_data, "clean")
-figs_dir   = os.environ.get("MENTAL_FIGS_DIR", os.path.join(merged_dir, "figs"))
-# panel-sumstats-by-farms: targeted CAFO/FSIS/MH summary tables and maps
-out_dir    = os.path.join(figs_dir, "panel-sumstats-by-farms")
-maps_dir   = os.path.join(out_dir, "maps")
-plots_dir  = os.path.join(out_dir, "plots")
-for _d in [figs_dir, out_dir, maps_dir, plots_dir]:
+merged_dir   = os.path.join(db_data, "merged")
+clean_dir    = os.path.join(db_data, "clean")
+# figs_dir and tables_dir come from packages
+out_dir      = os.path.join(figs_dir, "panel-sumstats-by-farms")
+maps_dir     = os.path.join(out_dir, "maps")
+plots_dir    = os.path.join(out_dir, "plots")
+for _d in [figs_dir, tables_dir, out_dir, maps_dir, plots_dir]:
     os.makedirs(_d, exist_ok=True)
 
 today_str       = date.today().strftime("%Y-%m-%d")
@@ -107,7 +108,7 @@ def write_csv_bundle(base_name, tables):
     tables: dict{name -> DataFrame}
     """
     for name, obj in tables.items():
-        path = os.path.join(figs_dir, f"{today_str}_{base_name}_{name}.csv")
+        path = os.path.join(tables_dir, f"{today_str}_{base_name}_{name}.csv")
         if isinstance(obj, pd.Series):
             obj = obj.to_frame("value")
         obj.to_csv(path, index=False)
@@ -247,7 +248,7 @@ df = df.sort_values(["fips", "year"]).reset_index(drop=True)
 
 dup_mask = df.duplicated(subset=["fips", "year"], keep=False)
 if dup_mask.any():
-    dup_path = os.path.join(figs_dir, f"{today_str}_merged_duplicate_fips_year_rows.csv")
+    dup_path = os.path.join(tables_dir, f"{today_str}_merged_duplicate_fips_year_rows.csv")
     df.loc[dup_mask].to_csv(dup_path, index=False)
     print("Saved duplicate-key rows:", dup_path)
     df = df.drop_duplicates(subset=["fips", "year"], keep="first").copy()

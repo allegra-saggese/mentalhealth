@@ -14,7 +14,8 @@ Research motivation:
   - Controlling for %_hispanic in scatter plots tests whether observed CAFO-health
     correlations are spurious proxies for Hispanic population share.
 
-Outputs saved to: Dropbox/Mental/Data/merged/figs/hispanic-chr/
+Outputs saved to: Dropbox/Mental/Data/output/figs/hispanic-chr/ (PNGs)
+                  Dropbox/Mental/Data/output/tables/hispanic-chr/ (CSV summary)
 
 Figures:
   S_chr_correlation_heatmap.png  — Spearman correlation heatmap, 15 CHR health vars
@@ -36,9 +37,11 @@ from scipy import stats
 from scipy.stats import spearmanr
 
 # ── Directories ───────────────────────────────────────────────────────────────
-merged_dir = os.path.join(db_data, "merged")
-out_dir    = os.path.join(db_data, "merged", "figs", "hispanic-chr")
-os.makedirs(out_dir, exist_ok=True)
+merged_dir      = os.path.join(db_data, "merged")
+out_dir         = os.path.join(figs_dir, "hispanic-chr")
+tables_chr_dir  = os.path.join(tables_dir, "hispanic-chr")
+for _d in (out_dir, tables_chr_dir):
+    os.makedirs(_d, exist_ok=True)
 today_str  = date.today().strftime("%Y-%m-%d")
 
 # ── Load panel ────────────────────────────────────────────────────────────────
@@ -439,7 +442,7 @@ for col, label in zip(CHR_HEALTH.values(), CHR_HEALTH.keys()):
     records.append(row)
 
 stats_df = pd.DataFrame(records)
-csv_path = os.path.join(out_dir, f"{today_str}_W_chr_summary_by_hispanic_quartile.csv")
+csv_path = os.path.join(tables_chr_dir, f"{today_str}_W_chr_summary_by_hispanic_quartile.csv")
 stats_df.to_csv(csv_path, index=False)
 print("Saved:", csv_path)
 

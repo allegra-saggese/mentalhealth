@@ -14,7 +14,7 @@ outcomes. Instead we test:
   (c) Does the signal concentrate in large-size operations rather than small?
   (d) Does FSIS slaughterhouse/processing presence drive the effect?
 
-Outputs saved to: Dropbox/Mental/Data/merged/figs/threshold-presence/
+Outputs saved to: Dropbox/Mental/Data/output/figs/threshold-presence/
 
 Figures:
   O_presence_vs_absence.png   — Mean outcomes ± 95% CI: large CAFO presence (0/1)
@@ -34,7 +34,7 @@ import scipy.stats as stats
 
 # ── Directories ──────────────────────────────────────────────────────────────
 merged_dir = os.path.join(db_data, "merged")
-out_dir    = os.path.join(db_data, "merged", "figs", "threshold-presence")
+out_dir    = os.path.join(figs_dir, "threshold-presence")
 os.makedirs(out_dir, exist_ok=True)
 today_str  = date.today().strftime("%Y-%m-%d")
 

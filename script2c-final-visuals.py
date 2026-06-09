@@ -29,7 +29,8 @@ Figures produced:
     F2 — Choropleth map: Poor Mental Health Days, rural US counties, 2012.
          (F maps saved as both interactive HTML and static PNG)
 
-Outputs to: Dropbox/Mental/Data/merged/figs/core-visuals/
+Outputs to: Dropbox/Mental/Data/output/figs/core-visuals/ (PNGs/HTML)
+            Dropbox/Mental/Data/output/tables/core-visuals/ (CSV)
 
 Dependencies: packages.py, functions.py (shared project utilities)
 """
@@ -48,9 +49,11 @@ except Exception:
 # =============================================================================
 # Configuration
 # =============================================================================
-merged_dir = os.path.join(db_data, "merged")
-out_dir = os.path.join(merged_dir, "figs", "core-visuals")
-os.makedirs(out_dir, exist_ok=True)
+merged_dir      = os.path.join(db_data, "merged")
+out_dir         = os.path.join(figs_dir, "core-visuals")
+tables_core_dir = os.path.join(tables_dir, "core-visuals")
+for _d in (out_dir, tables_core_dir):
+    os.makedirs(_d, exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")
 
 PANEL_YEARS = (2010, 2015)   # window where MH outcome coverage is adequate
@@ -489,7 +492,7 @@ selection_meta = (
     .sort_values("state_fips")
 )
 selection_meta.to_csv(
-    os.path.join(out_dir, f"{today_str}_B_county_selection_metadata.csv"), index=False
+    os.path.join(tables_core_dir, f"{today_str}_B_county_selection_metadata.csv"), index=False
 )
 
 
@@ -536,7 +539,7 @@ plt.tight_layout()
 c_path = os.path.join(out_dir, f"{today_str}_C_outcome_crosscorrelation.png")
 fig.savefig(c_path, dpi=200, bbox_inches="tight")
 plt.close(fig)
-corr_matrix.to_csv(os.path.join(out_dir, f"{today_str}_C_outcome_crosscorrelation.csv"))
+corr_matrix.to_csv(os.path.join(tables_core_dir, f"{today_str}_C_outcome_crosscorrelation.csv"))
 print("Saved:", c_path)
 
 # =============================================================================

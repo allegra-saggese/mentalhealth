@@ -9,19 +9,19 @@ GeoJSON are loaded once and shared across sections.
   Section 1 — FSIS establishment counts (2017–2023)
     Faceted 2×4 choropleths for total, slaughterhouse, meat, and poultry
     establishments per 10k population. Four figures × (HTML + PNG).
-    Outputs → figs/fsis-choropleth/
+    Outputs → output/figs/fsis-choropleth/
 
   Section 2 — Mental health outcome values
     1×5 faceted choropleths showing actual outcome values (not coverage flags)
     across 5 representative years. Consistent color scale within each outcome.
     Five figures × (HTML + PNG).
-    Outputs → figs/mental-outcome-coverage-maps/
+    Outputs → output/figs/mental-outcome-coverage-maps/
 
   Section 3 — Agricultural first-difference maps
     Faceted choropleths of Δ(CAFO total ops) and Δ(FSIS slaughterhouse
     establishments) at the county-year level, to diagnose identifying variation
     for panel econometrics. Includes a year-level summary CSV.
-    Outputs → figs/ag-first-diff-maps/
+    Outputs → output/figs/ag-first-diff-maps/ (PNGs), output/tables/ag-first-diff-maps/ (CSV)
 
 Dependencies: packages.py, functions.py (log_per10k, load_county_geojson,
               COUNTY_GEOJSON_URL, latest_file_glob, normalize_panel_key)
@@ -43,11 +43,12 @@ except Exception:
     px = None
 
 # ── Directories ───────────────────────────────────────────────────────────────
-merged_dir        = os.path.join(db_data, "merged")
-fsis_choro_dir    = os.path.join(merged_dir, "figs", "fsis-choropleth")
-mental_maps_dir   = os.path.join(merged_dir, "figs", "mental-outcome-coverage-maps")
-first_diff_dir    = os.path.join(merged_dir, "figs", "ag-first-diff-maps")
-for d in (fsis_choro_dir, mental_maps_dir, first_diff_dir):
+merged_dir           = os.path.join(db_data, "merged")
+fsis_choro_dir       = os.path.join(figs_dir, "fsis-choropleth")
+mental_maps_dir      = os.path.join(figs_dir, "mental-outcome-coverage-maps")
+first_diff_dir       = os.path.join(figs_dir, "ag-first-diff-maps")
+first_diff_table_dir = os.path.join(tables_dir, "ag-first-diff-maps")
+for d in (fsis_choro_dir, mental_maps_dir, first_diff_dir, first_diff_table_dir):
     os.makedirs(d, exist_ok=True)
 
 POP_COL = "population"
@@ -401,7 +402,7 @@ for spec in MAP_SPECS:
         print(f"  PNG export failed ({e})")
 
 if summary_frames:
-    summary_path = os.path.join(first_diff_dir, f"{today_str}_ag_first_diff_year_summary.csv")
+    summary_path = os.path.join(first_diff_table_dir, f"{today_str}_ag_first_diff_year_summary.csv")
     pd.concat(summary_frames, ignore_index=True).to_csv(summary_path, index=False)
     print("  Saved first-difference year summary:", summary_path)
 

@@ -23,18 +23,20 @@ all three sections.
     Faceted scatter of establishment counts by size bucket vs. outcome (2017 cross-section).
     Outputs: fsis_size_bins_vs_poor_mental_health_2017_*.{csv,png}
 
-All outputs → Dropbox/Mental/Data/merged/figs/panel-sumstats-by-farms/
+Tables  → Dropbox/Mental/Data/output/tables/panel-sumstats-by-farms/
+Figures → Dropbox/Mental/Data/output/figs/panel-sumstats-by-farms/plots/
 """
 
 from packages import *
 from functions import *
 
 # ── Directories ───────────────────────────────────────────────────────────────
-merged_dir = os.path.join(db_data, "merged")
-qa_dir     = os.path.join(merged_dir, "figs", "panel-sumstats-by-farms")
-plots_dir  = os.path.join(qa_dir, "plots")
-os.makedirs(qa_dir,    exist_ok=True)
-os.makedirs(plots_dir, exist_ok=True)
+merged_dir     = os.path.join(db_data, "merged")
+qa_dir         = os.path.join(tables_dir, "panel-sumstats-by-farms")
+plots_dir      = os.path.join(qa_dir, "plots")          # CSV plot data
+figs_plots_dir = os.path.join(figs_dir, "panel-sumstats-by-farms", "plots")  # PNG
+for _d in (qa_dir, plots_dir, figs_plots_dir):
+    os.makedirs(_d, exist_ok=True)
 
 # ── Column name constants ─────────────────────────────────────────────────────
 CDC_DEATHS  = "deaths_cdc_county_year_deathsofdespair"
@@ -426,7 +428,7 @@ else:
     g.set_titles("{col_name}")
     g.fig.suptitle("County-Level FSIS Size-Bin Counts vs Poor Mental Health (2017)", y=1.03)
 
-    fig_png = os.path.join(plots_dir, f"{today_str}_fsis_size_bins_vs_poor_mental_health_2017_facets.png")
+    fig_png = os.path.join(figs_plots_dir, f"{today_str}_fsis_size_bins_vs_poor_mental_health_2017_facets.png")
     g.savefig(fig_png, dpi=240, bbox_inches="tight")
     plt.close(g.fig)
 

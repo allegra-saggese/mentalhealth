@@ -24,3 +24,6 @@ db_data        = os.path.join(db_base, "Data")
 db_me          = os.path.join(db_base, "allegra-dropbox-copy")
 interim        = os.path.join(db_me, "interim-data")
 diagnostic_dir = os.path.join(db_data, "clean", "diagnostic")  # QA + intermediates
+output_dir     = os.path.join(db_data, "output")
+figs_dir       = os.path.join(db_data, "output", "figs")
+tables_dir     = os.path.join(db_data, "output", "tables")

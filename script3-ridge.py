@@ -21,11 +21,13 @@ valid but reflects census-period averages.
 Deaths of despair rate: derived from raw death counts / county population
 (not CDC-suppressed). Fill reflects county-year reporting completeness.
 
-Outputs → Dropbox/Mental/Data/merged/figs/script3/
+Figures → Dropbox/Mental/Data/output/figs/script3/
   X1_lasso_heatmap.png          LASSO control selection matrix
   X2_coef_plot.png              Panel OLS: treatment × outcome grid (Var A + Var B)
   X3_event_study.png            DiD event study: CAFO entry + consolidation
   X4_robustness_plot.png        Placebo, Hispanic quartile, regional splits
+
+Tables → Dropbox/Mental/Data/output/tables/script3/
   Block1_lasso_selection.csv    Raw LASSO selection table
   Block2_panel_ols_results.csv  Full regression results (102 regressions)
   Block3_event_study_results.csv Event study coefficients
@@ -44,9 +46,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 # ── Directories ───────────────────────────────────────────────────────────────
-merged_dir = os.path.join(db_data, "merged")
-out_dir    = os.path.join(db_data, "merged", "figs", "script3")
-os.makedirs(out_dir, exist_ok=True)
+merged_dir      = os.path.join(db_data, "merged")
+out_dir         = os.path.join(figs_dir, "script3")
+tables_s3_dir   = os.path.join(tables_dir, "script3")
+for _d in (out_dir, tables_s3_dir):
+    os.makedirs(_d, exist_ok=True)
 today_str  = date.today().strftime("%Y-%m-%d")
 
 # ── Load panel ────────────────────────────────────────────────────────────────
@@ -223,7 +227,7 @@ for outcome_key, outcome_col in OUTCOMES.items():
           f"N={mask.sum():,}  selected={len(selected)}/{len(CONTROL_COLS)} controls")
 
 sel_df = pd.DataFrame(selection_matrix).T    # rows = outcomes, cols = controls
-sel_df.to_csv(os.path.join(out_dir, f"{today_str}_Block1_lasso_selection.csv"))
+sel_df.to_csv(os.path.join(tables_s3_dir, f"{today_str}_Block1_lasso_selection.csv"))
 
 # Figure X1: LASSO heatmap
 fig, ax = plt.subplots(figsize=(14, 5))
@@ -311,7 +315,7 @@ for var_label, df_var, treatments in [
                   f"β={res['beta']:+.4f}  p={res['pval']:.3f}{sig}  N={res['N']:,}")
 
 results_df = pd.DataFrame(results_rows)
-csv_path = os.path.join(out_dir, f"{today_str}_Block2_panel_ols_results.csv")
+csv_path = os.path.join(tables_s3_dir, f"{today_str}_Block2_panel_ols_results.csv")
 results_df.to_csv(csv_path, index=False)
 print("Saved:", csv_path)
 
@@ -477,7 +481,7 @@ es_entry   = run_event_study(df_a, entry_events,  FOCUS_OUTCOME, "CAFO Entry",
 es_consol  = run_event_study(df_a, consol_events, FOCUS_OUTCOME, "CAFO Consolidation",
                               ctrl_cols=ctrl_focus)
 es_df = pd.concat([es_entry, es_consol], ignore_index=True)
-es_csv = os.path.join(out_dir, f"{today_str}_Block3_event_study_results.csv")
+es_csv = os.path.join(tables_s3_dir, f"{today_str}_Block3_event_study_results.csv")
 es_df.to_csv(es_csv, index=False)
 print("Saved:", es_csv)
 
@@ -574,7 +578,7 @@ if "region" in df_a.columns:
             robust_rows.append({"group": "Region", "label": str(reg), **res})
 
 robust_df = pd.DataFrame(robust_rows)
-csv_path  = os.path.join(out_dir, f"{today_str}_Block4_robustness_results.csv")
+csv_path  = os.path.join(tables_s3_dir, f"{today_str}_Block4_robustness_results.csv")
 robust_df.to_csv(csv_path, index=False)
 print("Saved:", csv_path)
 

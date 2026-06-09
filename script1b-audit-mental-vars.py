@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Mental-health coverage and panel-integrity audit for the merged county-year panel.
-Outputs to: Dropbox/Mental/Data/merged/figs/panel-sumstats-by-farms
+Outputs to: Dropbox/Mental/Data/output/tables/panel-sumstats-by-farms
 
 Quick purpose:
 - Audits panel key integrity (`fips, year`) and source-duplication markers.
@@ -19,7 +19,7 @@ from functions import *
 # Paths / config
 # ---------------------------------------------------------------------
 merged_dir = os.path.join(db_data, "merged")
-out_dir = os.path.join(merged_dir, "figs", "panel-sumstats-by-farms")
+out_dir = os.path.join(tables_dir, "panel-sumstats-by-farms")
 os.makedirs(out_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")

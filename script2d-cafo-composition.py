@@ -4,7 +4,7 @@
 script2g-cafo-composition.py
 
 CAFO composition and geographic concentration visualizations.
-Outputs saved to: Dropbox/Mental/Data/merged/figs/cafo-composition/
+Outputs saved to: Dropbox/Mental/Data/output/figs/cafo-composition/
 
 Figures produced:
   K1_cattle_top20_by_year.png     — Top 20 counties: total cattle ops per 10k, each census year
@@ -24,7 +24,7 @@ from functions import *
 
 # ── Directories ──────────────────────────────────────────────────────────────
 merged_dir = os.path.join(db_data, "merged")
-out_dir    = os.path.join(db_data, "merged", "figs", "cafo-composition")
+out_dir    = os.path.join(figs_dir, "cafo-composition")
 os.makedirs(out_dir, exist_ok=True)
 today_str  = date.today().strftime("%Y-%m-%d")
 

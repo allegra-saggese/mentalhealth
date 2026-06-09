@@ -523,10 +523,11 @@ def load_county_geojson(merged_dir=None):
     if merged_dir is None:
         raise RuntimeError("Could not load county GeoJSON from URL; pass merged_dir for fallback.")
 
+    db_data_local = os.path.expanduser("~/Dropbox/Mental/Data")
     html_candidates = (
-        sorted(glob.glob(os.path.join(merged_dir, "figs", "core-visuals", "*_F2_poor_mental_health_map_2012.html")), reverse=True)
-        + sorted(glob.glob(os.path.join(merged_dir, "figs", "core-visuals", "*_F1_cafo_intensity_map_2012.html")), reverse=True)
-        + sorted(glob.glob(os.path.join(merged_dir, "figs", "fsis-choropleth", "*.html")), reverse=True)
+        sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "core-visuals", "*_F2_poor_mental_health_map_2012.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "core-visuals", "*_F1_cafo_intensity_map_2012.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "fsis-choropleth", "*.html")), reverse=True)
     )
 
     decoder = json.JSONDecoder()
