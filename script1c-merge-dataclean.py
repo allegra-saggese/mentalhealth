@@ -14,11 +14,14 @@ Panel frame: ALL counties where rural-key non_large_metro == 1.
 Key design decisions:
 - CAFO (USDA Agricultural Census): zero-fill for census-covered years.
   Absence in the census = confirmed zero operations, not a missing observation.
-  Years not yet covered (2022+) remain NaN until the raw .dta is added.
+  Years not yet covered (2022+) remain NaN
+  
 - CDC deaths-of-despair: three-state missingness flag (cdc_in_query,
   deaths_is_zero, crude_rate_from_census_pop). See inline comments.
+
 - CHR (County Health Rankings): CHR rate-only variables get imputed count
   columns (*_count_imputed). Num/denom variables get a *_ratio_flag QA column.
+  
 - FSIS (slaughterhouses): available 2017–present only; panel years 2017–2023
   overlap with the analysis window.
 """
@@ -28,7 +31,7 @@ from functions import *
 import re
 
 
-# Directories
+# set directories
 clean_dir = os.path.join(db_data, "clean")
 merged_dir = os.path.join(db_data, "merged")
 
@@ -160,11 +163,14 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
         print("Skip CAFO animal-size block: missing fips/year")
         return None
 
-    needed = {"commodity_desc", "class_desc", "small", "medium", "large"}
+    needed = {"commodity_desc", "class_desc", "small", "medium", "large_imputed"}
     missing_needed = sorted(list(needed - set(df.columns)))
     if missing_needed:
         print(f"Skip CAFO animal-size block: missing required columns {missing_needed}")
         return None
+
+    # Use large_imputed (gap-corrected large farm count) as the authoritative large column.
+    df = df.rename(columns={"large_imputed": "large"})
 
     df["commodity_desc"] = (
         df["commodity_desc"]
