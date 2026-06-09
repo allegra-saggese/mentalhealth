@@ -39,13 +39,13 @@ from packages import *
 
 
 # other folders
-inf = os.path.join(db_data, "raw") # input 
-outf = os.path.join(db_data, "clean") #output
-
-# write extension artifacts to interim (defined in packages.py)
-qa_dir = os.path.join(interim, "qa-crime")
+inf           = os.path.join(db_data, "raw")
+outf          = os.path.join(db_data, "clean")
+build_dir     = os.path.join(db_data, "clean", "build")
+qa_dir        = os.path.join(db_data, "clean", "qa")
 local_ext_dir = os.path.join(interim, "crime-disagg-extension")
-os.makedirs(qa_dir, exist_ok=True)
+os.makedirs(build_dir,     exist_ok=True)
+os.makedirs(qa_dir,        exist_ok=True)
 os.makedirs(local_ext_dir, exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")
 RUN_CRIME_DISAGG_EXTENSION = os.getenv("RUN_CRIME_DISAGG_EXTENSION", "0").strip().lower() in {"1", "true", "yes", "y"}
@@ -263,11 +263,11 @@ collapsed_fips_only["total_incidents"] = collapsed_fips_only[crime_cols_present]
 
 # output creation
 crime_w_demog = f"{today_str}_crime_demog_final.csv"
-cdpath = os.path.join(outf, crime_w_demog)
+cdpath = os.path.join(build_dir, crime_w_demog)
 combined_df.to_csv(cdpath, index=False)
 
 
-crime_flat= f"{today_str}_crime_fips_level_final.csv"
+crime_flat = f"{today_str}_crime_fips_level_final.csv"
 cpath = os.path.join(outf, crime_flat)
 collapsed_fips_only.to_csv(cpath, index=False)
 print("Saved:", cdpath)

@@ -134,8 +134,8 @@ def _filter_to_analysis_rows(df_raw):
 
 
 def _find_cached_raw(year, raw_dir):
-    """Return path to the most recent cached raw API CSV for this year, or None."""
-    matches = sorted(glob.glob(os.path.join(raw_dir, f"*_usda_{year}_api_*raw*.csv")))
+    """Return path to the most recent cached ops-inventory raw CSV for this year, or None."""
+    matches = sorted(glob.glob(os.path.join(raw_dir, f"*_usda_{year}_api_cafo_ops_inventory_raw*.csv")))
     return matches[-1] if matches else None
 
 
@@ -325,6 +325,8 @@ _ANIMAL_REMAP = {v: k for k, v in CANONICAL_ANIMAL_TYPES.items()}
 
 ALL_CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 agfolder = os.path.join(inf, "usda")
+os.makedirs(build_dir, exist_ok=True)
+os.makedirs(qa_dir,    exist_ok=True)
 print("Loading NASS CAFO data for all census years:")
 raw_frames = []
 for _yr in ALL_CENSUS_YEARS:
@@ -353,6 +355,39 @@ print(f"  {len(combined):,} inventory-bin rows after harmonize + filter + dedup"
 
 combined = combined.loc[:, ~combined.columns.duplicated()].copy()
 print(f"Proceeding with API-sourced data for all census years {ALL_CENSUS_YEARS}.")
+
+# ---- Load head-count totals (HEAD, domain=TOTAL) for county-level density measure ----
+print("Loading head-count totals for all census years:")
+_head_raw_frames = [_load_or_pull_heads(_yr, agfolder) for _yr in ALL_CENSUS_YEARS]
+_head_raw_frames = [f for f in _head_raw_frames if not f.empty]
+if _head_raw_frames:
+    _heads_combined = pd.concat(_head_raw_frames, ignore_index=True)
+    _heads_combined.columns = [c.lower().strip() for c in _heads_combined.columns]
+    for _c in ["commodity_desc", "class_desc"]:
+        if _c in _heads_combined.columns:
+            _heads_combined[_c] = _heads_combined[_c].astype("string").str.strip().str.lower()
+    _heads_combined = generate_fips(_heads_combined, state_col="state_fips_code", city_col="county_code")
+    if "FIPS_generated" in _heads_combined.columns and "fips_generated" not in _heads_combined.columns:
+        _heads_combined = _heads_combined.rename(columns={"FIPS_generated": "fips_generated"})
+    elif "FIPS_generated" in _heads_combined.columns and "fips_generated" in _heads_combined.columns:
+        _heads_combined = _heads_combined.drop(columns=["FIPS_generated"])
+    _heads_combined["fips_generated"] = _heads_combined["fips_generated"].astype("string").str.zfill(5)
+    _heads_combined["year"] = pd.to_numeric(_heads_combined["year"], errors="coerce").astype("Int64")
+    _heads_combined["total_heads"] = pd.to_numeric(
+        _heads_combined["value"].astype("string")
+        .str.replace(",", "", regex=False).str.strip()
+        .replace({"(d)": pd.NA, "(z)": pd.NA, "": pd.NA}),
+        errors="coerce",
+    )
+    heads_agg = (
+        _heads_combined[_heads_combined["commodity_desc"].isin(["cattle", "chickens", "hogs"])]
+        .groupby(["fips_generated", "year", "commodity_desc"], as_index=False)["total_heads"]
+        .sum(min_count=1)
+    )
+    print(f"  head-count totals: {len(heads_agg):,} rows (fips × year × commodity)")
+else:
+    heads_agg = pd.DataFrame(columns=["fips_generated", "year", "commodity_desc", "total_heads"])
+    print("  WARNING: no head-count data loaded; total_heads will be NA in compact output")
 
 # Quick eyeball QA: row counts by year and unit
 chk = combined.copy()
@@ -508,14 +543,12 @@ name_mismatch   = df_big[
 missing_fips_key = df_big[df_big["_merge"] != "both"].copy()
 
 clean_ag_census = f"{today_str}_ag_annual_df.csv"
-ag_path         = os.path.join(outf, clean_ag_census)
+ag_path          = os.path.join(build_dir, clean_ag_census)
 df_big.to_csv(ag_path, index=False)
 print("Saved iterated AG panel:", ag_path)
 
-review_outf = interim
-os.makedirs(review_outf, exist_ok=True)
-mismatch_path   = os.path.join(review_outf, f"{today_str}_ag_fips_name_mismatch.csv")
-missing_key_path = os.path.join(review_outf, f"{today_str}_ag_fips_missing_key.csv")
+mismatch_path    = os.path.join(qa_dir, f"{today_str}_ag_fips_name_mismatch.csv")
+missing_key_path = os.path.join(qa_dir, f"{today_str}_ag_fips_missing_key.csv")
 name_mismatch.to_csv(mismatch_path, index=False)
 missing_fips_key.to_csv(missing_key_path, index=False)
 print("Saved county-name mismatch rows for manual review:", mismatch_path)
@@ -817,7 +850,7 @@ if not cattle_compact.empty:
             (cattle_wide[lhs] - cattle_wide["canonical_ops_incl_calves"]).abs() / cattle_wide["canonical_ops_incl_calves"] * 100, np.nan,
         )
 
-    cattle_overlap_path = os.path.join(outf, f"{today_str}_qa_cattle_class_overlap_county_year.csv")
+    cattle_overlap_path = os.path.join(qa_dir, f"{today_str}_qa_cattle_class_overlap_county_year.csv")
     cattle_wide.to_csv(cattle_overlap_path, index=False)
 
     year_diag = (
@@ -836,7 +869,7 @@ if not cattle_compact.empty:
     year_diag["ratio_allclass_sum_to_canonical_sum"] = np.where(
         year_diag["canonical_sum"] > 0, year_diag["all_class_sum"] / year_diag["canonical_sum"], np.nan,
     )
-    cattle_overlap_year_path = os.path.join(outf, f"{today_str}_qa_cattle_class_overlap_by_year.csv")
+    cattle_overlap_year_path = os.path.join(qa_dir, f"{today_str}_qa_cattle_class_overlap_by_year.csv")
     year_diag.to_csv(cattle_overlap_year_path, index=False)
     print("Saved cattle overlap QA (county-year):", cattle_overlap_path)
     print("Saved cattle overlap QA (year-level):", cattle_overlap_year_path)
@@ -862,7 +895,7 @@ qa_coverage["coverage_pct"] = np.where(
 )
 qa_coverage["suppressed_ops_estimate"] = qa_coverage["nass_total_ops"] - qa_coverage["bin_sum"]
 
-coverage_path = os.path.join(outf, f"{today_str}_qa_cafo_bin_coverage_vs_nass_total.csv")
+coverage_path = os.path.join(qa_dir, f"{today_str}_qa_cafo_bin_coverage_vs_nass_total.csv")
 qa_coverage.to_csv(coverage_path, index=False)
 
 coverage_year = (
@@ -878,7 +911,7 @@ coverage_year["ratio_bin_to_nass"] = np.where(
     coverage_year["nass_total_total"] > 0,
     coverage_year["bin_sum_total"] / coverage_year["nass_total_total"], np.nan,
 )
-coverage_year_path = os.path.join(outf, f"{today_str}_qa_cafo_bin_coverage_by_year_commodity.csv")
+coverage_year_path = os.path.join(qa_dir, f"{today_str}_qa_cafo_bin_coverage_by_year_commodity.csv")
 coverage_year.to_csv(coverage_year_path, index=False)
 print("Saved bin coverage QA (county-year):", coverage_path)
 print("Saved bin coverage QA (year-level):", coverage_year_path)
@@ -893,10 +926,8 @@ print(coverage_year[["year", "commodity_desc", "class_desc", "median_coverage_pc
 # gap = nass_total_ops - bin_sum > 0 means suppressed farms exist; we attribute them to large.
 # Tiers (census years only): clean = gap>0 known; dark = nass_total_ops NA; none = no gap.
 
-CANONICAL_CLASSES = {"cattle": "incl calves", "hogs": "all classes", "chickens": "layers"}
-
 _imp_frames = []
-for _commodity, _canon_class in CANONICAL_CLASSES.items():
+for _animal, (_commodity, _canon_class) in CANONICAL_ANIMAL_TYPES.items():
     _sc = summary_compact[
         (summary_compact["commodity_desc"] == _commodity)
         & (summary_compact["class_desc"] == _canon_class)
@@ -934,7 +965,7 @@ for _commodity, _canon_class in CANONICAL_CLASSES.items():
 if _imp_frames:
     _imp_merge = pd.concat(_imp_frames, ignore_index=True)
 
-    imp_path  = os.path.join(outf, f"{today_str}_qa_suppressed_bin_imputation.csv")
+    imp_path  = os.path.join(qa_dir, f"{today_str}_qa_suppressed_bin_imputation.csv")
     _imp_merge.to_csv(imp_path, index=False)
 
     _tier_summary = (
@@ -942,7 +973,7 @@ if _imp_frames:
         .groupby(["year", "commodity_desc", "class_desc", "imputation_tier"], as_index=False)
         .agg(n_counties=("fips_generated", "count"))
     )
-    tier_path = os.path.join(outf, f"{today_str}_qa_imputation_tier_summary.csv")
+    tier_path = os.path.join(qa_dir, f"{today_str}_qa_imputation_tier_summary.csv")
     _tier_summary.to_csv(tier_path, index=False)
     print("Saved suppression imputation QA:", imp_path)
     print("Saved imputation tier summary:", tier_path)
@@ -971,11 +1002,6 @@ else:
     summary_compact["imputation_tier"]  = "none"
     print("No imputation applied (no canonical class rows found or no census years in data).")
 
-summary_compact["any_large_cafo"] = (summary_compact["large_imputed"] > 0).astype("Int8")
-summary_compact["any_medium_or_large_cafo"] = (
-    (summary_compact["medium"] + summary_compact["large_imputed"]) > 0
-).astype("Int8")
-
 print("Stage 2 mapped rows:", int(df2["size_source"].notna().sum()))
 print("Stage 2 size class counts:")
 print(df2["size_class"].value_counts(dropna=False))
@@ -986,16 +1012,73 @@ print(summary_compact["year"].min(), summary_compact["year"].max())
 
 
 # =============================================================================
-# PART 11 : EXPORT
+# PART 11 : FINALIZE COMPACT — REMAP, DROP IMPUTATION COLS, MERGE HEADS
+# =============================================================================
+# Keep only the 5 canonical (commodity_desc, class_desc) pairs; remap commodity_desc
+# to the canonical animal label; drop class_desc and imputation diagnostic columns.
+# gap=0 confirmed for all census years/commodities — large already holds the correct count.
+
+_canonical_pairs_set = set(CANONICAL_ANIMAL_TYPES.values())
+_sc_mask = pd.MultiIndex.from_frame(summary_compact[["commodity_desc", "class_desc"]]).isin(
+    pd.MultiIndex.from_tuples(sorted(_canonical_pairs_set))
+)
+summary_compact = summary_compact[_sc_mask].copy()
+
+summary_compact["commodity_desc"] = [
+    _ANIMAL_REMAP.get((r_comm, r_class), r_comm)
+    for r_comm, r_class in zip(summary_compact["commodity_desc"], summary_compact["class_desc"])
+]
+summary_compact = summary_compact.drop(columns=["class_desc"])
+
+_drop_cols = [c for c in ["large_imputed", "large_was_imputed", "imputation_tier", "gap"]
+              if c in summary_compact.columns]
+summary_compact = summary_compact.drop(columns=_drop_cols)
+
+summary_compact["any_large_cafo"] = (
+    pd.to_numeric(summary_compact["large"], errors="coerce") > 0
+).astype("Int8")
+summary_compact["any_medium_or_large_cafo"] = (
+    (pd.to_numeric(summary_compact["medium"], errors="coerce")
+     + pd.to_numeric(summary_compact["large"], errors="coerce")) > 0
+).astype("Int8")
+
+# Merge total_heads; beef and dairy use total cattle heads for their county/year
+_heads_parent_map = {"cattle": "cattle", "beef": "cattle", "dairy": "cattle",
+                     "hogs": "hogs", "chickens": "chickens"}
+summary_compact["_commodity_parent"] = summary_compact["commodity_desc"].map(_heads_parent_map)
+if not heads_agg.empty:
+    summary_compact = summary_compact.merge(
+        heads_agg.rename(columns={"commodity_desc": "_commodity_parent"}),
+        on=["fips_generated", "year", "_commodity_parent"],
+        how="left",
+    )
+    # Forward-fill total_heads from census years to intervening years
+    summary_compact = summary_compact.sort_values(
+        ["fips_generated", "commodity_desc", "year"]
+    ).reset_index(drop=True)
+    summary_compact["total_heads"] = (
+        summary_compact.groupby(["fips_generated", "commodity_desc"])["total_heads"]
+        .transform("ffill")
+    )
+else:
+    summary_compact["total_heads"] = pd.NA
+summary_compact = summary_compact.drop(columns=["_commodity_parent"])
+
+print(f"Compact final: {len(summary_compact):,} rows × {summary_compact.shape[1]} cols")
+print("Compact animal types:", sorted(summary_compact["commodity_desc"].dropna().unique().tolist()))
+
+
+# =============================================================================
+# PART 12 : EXPORT
 # =============================================================================
 
 clean_cafo_row     = f"{today_str}_cafo_annual_df.csv"
 clean_cafo_long    = f"{today_str}_cafo_ops_by_size_long.csv"
 clean_cafo_compact = f"{today_str}_cafo_ops_by_size_compact.csv"
 
-cafo_row_path     = os.path.join(outf, clean_cafo_row)
-cafo_long_path    = os.path.join(outf, clean_cafo_long)
-cafo_compact_path = os.path.join(outf, clean_cafo_compact)
+cafo_row_path     = os.path.join(build_dir, clean_cafo_row)
+cafo_long_path    = os.path.join(build_dir, clean_cafo_long)
+cafo_compact_path = os.path.join(outf,      clean_cafo_compact)
 
 df2.to_csv(cafo_row_path, index=False)
 summary.to_csv(cafo_long_path, index=False)

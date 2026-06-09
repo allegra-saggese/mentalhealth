@@ -20,20 +20,22 @@ import pandas as pd
 from functions import latest_file_by_regex, first_non_null
 
 
-db_base = os.path.expanduser("~/Dropbox/Mental")
-db_data = os.path.join(db_base, "Data")
+db_base   = os.path.expanduser("~/Dropbox/Mental")
+db_data   = os.path.join(db_base, "Data")
 clean_dir = os.path.join(db_data, "clean")
-qa_dir = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
+build_dir = os.path.join(db_data, "clean", "build")
+qa_dir    = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
 
 os.makedirs(clean_dir, exist_ok=True)
-os.makedirs(qa_dir, exist_ok=True)
+os.makedirs(build_dir, exist_ok=True)
+os.makedirs(qa_dir,    exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
 
 
 def _latest_est_year_all_path() -> str:
     return latest_file_by_regex(
-        clean_dir,
+        build_dir,
         r"^(\d{4}-\d{2}-\d{2})_fsis_establishment_year_all\.csv$",
     )
 
@@ -188,7 +190,7 @@ def main():
     interim_cols = [c for c in interim_cols if c in est_year.columns]
     interim = est_year[interim_cols].copy()
 
-    interim_out = os.path.join(clean_dir, f"{today_str}_fsis_establishment_year_fips_size_type_interim.csv")
+    interim_out = os.path.join(build_dir, f"{today_str}_fsis_establishment_year_fips_size_type_interim.csv")
     interim.to_csv(interim_out, index=False)
 
     # Build county-year summary from establishments with FIPS.
@@ -235,7 +237,7 @@ def main():
         .reset_index(drop=True)
     )
 
-    final_out = os.path.join(clean_dir, f"{today_str}_fsis_county_year_fips_est_size_type_summary.csv")
+    final_out = os.path.join(build_dir, f"{today_str}_fsis_county_year_fips_est_size_type_summary.csv")
     county_summary.to_csv(final_out, index=False)
 
     # Small QA artifact for quick sanity checks

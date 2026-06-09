@@ -21,14 +21,16 @@ from functions import first_non_null, normalize_fips5
 
 
 # Paths (kept aligned with project conventions in packages.py)
-db_base = os.path.expanduser("~/Dropbox/Mental")
-db_data = os.path.join(db_base, "Data")
-raw_dir = os.path.join(db_data, "raw", "fsis")
+db_base   = os.path.expanduser("~/Dropbox/Mental")
+db_data   = os.path.join(db_base, "Data")
+raw_dir   = os.path.join(db_data, "raw", "fsis")
 clean_dir = os.path.join(db_data, "clean")
-qa_dir = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
+build_dir = os.path.join(db_data, "clean", "build")
+qa_dir    = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
 
 os.makedirs(clean_dir, exist_ok=True)
-os.makedirs(qa_dir, exist_ok=True)
+os.makedirs(build_dir, exist_ok=True)
+os.makedirs(qa_dir,    exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
 
@@ -988,12 +990,12 @@ def main():
         est_year = est_geo.drop(columns=["row_id"])
 
     # Save establishment-year outputs
-    est_all_out = os.path.join(clean_dir, f"{today_str}_fsis_establishment_year_all.csv")
+    est_all_out = os.path.join(build_dir, f"{today_str}_fsis_establishment_year_all.csv")
     est_year.to_csv(est_all_out, index=False)
     print("Saved:", est_all_out)
 
     est_slaughter = est_year.loc[est_year["slaughterhouse_present_year"] == 1].copy()
-    est_slaughter_out = os.path.join(clean_dir, f"{today_str}_fsis_establishment_year_slaughterhouse.csv")
+    est_slaughter_out = os.path.join(build_dir, f"{today_str}_fsis_establishment_year_slaughterhouse.csv")
     est_slaughter.to_csv(est_slaughter_out, index=False)
     print("Saved:", est_slaughter_out)
 
@@ -1055,7 +1057,7 @@ def main():
             ]
         ]
 
-    county_out = os.path.join(clean_dir, f"{today_str}_fsis_county_year_slaughterhouse_presence.csv")
+    county_out = os.path.join(build_dir, f"{today_str}_fsis_county_year_slaughterhouse_presence.csv")
     county_year.to_csv(county_out, index=False)
     print("Saved:", county_out)
 

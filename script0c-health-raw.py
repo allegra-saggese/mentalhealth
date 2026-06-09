@@ -36,11 +36,13 @@ from packages import *
 
 
 # folders
-inf = os.path.join(db_data, "raw")
-outf = os.path.join(db_data, "clean")
-qa_dir = os.path.join(interim, "qa-health")
+inf           = os.path.join(db_data, "raw")
+outf          = os.path.join(db_data, "clean")
+build_dir     = os.path.join(db_data, "clean", "build")
+qa_dir        = os.path.join(db_data, "clean", "qa")
 local_ext_dir = os.path.join(interim, "health-disagg-extension")
-os.makedirs(qa_dir, exist_ok=True)
+os.makedirs(build_dir,     exist_ok=True)
+os.makedirs(qa_dir,        exist_ok=True)
 os.makedirs(local_ext_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
@@ -484,7 +486,7 @@ print("Saved QA:", overlap_path)
 _add_fill("mh_cdc_merged_final", wide_mh_full)
 _add_key_qa("mh_cdc_merged_final", wide_mh_full, ["fips", "year"])
 
-final_out = os.path.join(outf, f"{today_str}_mh_mortality_fips_yr.csv")
+final_out = os.path.join(build_dir, f"{today_str}_mh_mortality_fips_yr.csv")
 wide_mh_full.to_csv(final_out, index=False)
 print("Saved:", final_out)
 

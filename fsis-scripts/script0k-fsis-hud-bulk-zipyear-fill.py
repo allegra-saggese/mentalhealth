@@ -21,11 +21,13 @@ import requests
 from functions import normalize_zip5, first_non_null, STATE_ABBR_TO_FIPS2
 
 
-db_base = os.path.expanduser("~/Dropbox/Mental")
-db_data = os.path.join(db_base, "Data")
+db_base   = os.path.expanduser("~/Dropbox/Mental")
+db_data   = os.path.join(db_base, "Data")
 clean_dir = os.path.join(db_data, "clean")
-qa_dir = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
-os.makedirs(qa_dir, exist_ok=True)
+build_dir = os.path.join(db_data, "clean", "build")
+qa_dir    = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
+os.makedirs(build_dir, exist_ok=True)
+os.makedirs(qa_dir,    exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
 HUD_URL = "https://www.huduser.gov/hudapi/public/usps"
@@ -43,15 +45,15 @@ def _latest_source_path() -> str:
         re.compile(r"^(\d{4}-\d{2}-\d{2})_fsis_establishment_year_fips_size_type_interim\.csv$"),
     ]
     candidates = []
-    for fn in os.listdir(clean_dir):
+    for fn in os.listdir(build_dir):
         for idx, pat in enumerate(pats):
             m = pat.match(fn)
             if m:
                 priority = 0 if idx == 0 else 1
-                candidates.append((m.group(1), priority, os.path.join(clean_dir, fn)))
+                candidates.append((m.group(1), priority, os.path.join(build_dir, fn)))
                 break
     if not candidates:
-        raise FileNotFoundError(f"No FSIS interim file found in {clean_dir}")
+        raise FileNotFoundError(f"No FSIS interim file found in {build_dir}")
     candidates.sort(key=lambda x: (x[0], -x[1]))
     newest_date = candidates[-1][0]
     same_date = [c for c in candidates if c[0] == newest_date]
@@ -366,11 +368,11 @@ def main():
     out["hud_bulk_query_quarter_used"] = pd.to_numeric(out["hud_bulk_query_quarter_used_lookup"], errors="coerce").astype("Int64")
     out["hud_bulk_year_status"] = out["hud_bulk_year_status_lookup"].astype("string")
 
-    interim_out = os.path.join(clean_dir, f"{today_str}_fsis_establishment_year_fips_size_type_interim_hudbulk.csv")
+    interim_out = os.path.join(build_dir, f"{today_str}_fsis_establishment_year_fips_size_type_interim_hudbulk.csv")
     out.to_csv(interim_out, index=False)
 
     county = _build_county_year(out)
-    county_out = os.path.join(clean_dir, f"{today_str}_fsis_county_year_fips_est_size_type_summary_hudbulk.csv")
+    county_out = os.path.join(build_dir, f"{today_str}_fsis_county_year_fips_est_size_type_summary_hudbulk.csv")
     county.to_csv(county_out, index=False)
 
     pre_missing = int(df["fips_code"].isna().sum())
