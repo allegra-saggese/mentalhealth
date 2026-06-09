@@ -48,7 +48,7 @@ CENSUS_POP  = "population_population_full"
 MIN_CORR_N = 200
 
 # ── Load merged panel once ────────────────────────────────────────────────────
-merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_panel.csv")
 df = pd.read_csv(merged_path, low_memory=False)
 df = normalize_panel_key(df)
 df = df.loc[:, ~df.columns.duplicated()].copy()

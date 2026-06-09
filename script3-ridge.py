@@ -54,7 +54,7 @@ for _d in (out_dir, tables_s3_dir):
 today_str  = date.today().strftime("%Y-%m-%d")
 
 # ── Load panel ────────────────────────────────────────────────────────────────
-df_raw = pd.read_csv(latest_file_glob(merged_dir, "*_full_merged.csv"), low_memory=False)
+df_raw = pd.read_csv(latest_file_glob(merged_dir, "*_panel.csv"), low_memory=False)
 df_raw = df_raw[df_raw["rural"] == 1].copy()
 print(f"Rural panel: {len(df_raw):,} rows | {df_raw['fips'].nunique():,} counties | "
       f"years {int(df_raw['year'].min())}–{int(df_raw['year'].max())}")

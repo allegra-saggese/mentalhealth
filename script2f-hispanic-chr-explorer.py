@@ -45,7 +45,7 @@ for _d in (out_dir, tables_chr_dir):
 today_str  = date.today().strftime("%Y-%m-%d")
 
 # ── Load panel ────────────────────────────────────────────────────────────────
-df_raw = pd.read_csv(latest_file_glob(merged_dir, "*_full_merged.csv"), low_memory=False)
+df_raw = pd.read_csv(latest_file_glob(merged_dir, "*_panel.csv"), low_memory=False)
 print(f"Panel loaded: {len(df_raw):,} rows | {df_raw['fips'].nunique():,} counties | "
       f"years {int(df_raw['year'].min())}–{int(df_raw['year'].max())}")
 

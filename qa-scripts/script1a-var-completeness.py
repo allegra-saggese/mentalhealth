@@ -65,7 +65,7 @@ def fill_pct(series):
 # ---------------------------------------------------------------------
 # Load merged panel
 # ---------------------------------------------------------------------
-merged_path = latest_file(merged_dir, "*_full_merged.csv")
+merged_path = latest_file(merged_dir, "*_panel.csv")
 df = pd.read_csv(merged_path, low_memory=False)
 df = normalize_key(df)
 df = df.loc[:, ~df.columns.duplicated()].copy()

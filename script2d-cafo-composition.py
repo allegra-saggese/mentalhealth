@@ -29,7 +29,7 @@ os.makedirs(out_dir, exist_ok=True)
 today_str  = date.today().strftime("%Y-%m-%d")
 
 # ── Load panel ───────────────────────────────────────────────────────────────
-df = pd.read_csv(latest_file_glob(merged_dir, "*_full_merged.csv"), low_memory=False)
+df = pd.read_csv(latest_file_glob(merged_dir, "*_panel.csv"), low_memory=False)
 print(f"Panel loaded: {len(df):,} rows | {df['fips'].nunique():,} counties | "
       f"years {int(df['year'].min())}–{int(df['year'].max())}")
 

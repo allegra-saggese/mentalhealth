@@ -4,7 +4,7 @@
 Created on Mon Jun 30 18:55:21 2025
 
 Quick purpose:
-- Scans each `*_full_merged*.csv` file in `Data/merged`
+- Scans each `*_panel*.csv` file in `Data/merged`
 - Finds population-related columns and summarizes fill/zeros/range
 - Compares alternate population columns to a reference column within each file
 - Writes three QA outputs (summary, pairwise comparison, and catalog) to interim-data
@@ -24,7 +24,7 @@ os.makedirs(out_dir, exist_ok=True)
 
 
 def _find_merged_files():
-    files = sorted(glob.glob(os.path.join(merged_dir, "*_full_merged*.csv")))
+    files = sorted(glob.glob(os.path.join(merged_dir, "*_panel*.csv")))
     if not files:
         raise FileNotFoundError(f"No merged files found in {merged_dir}")
     return files

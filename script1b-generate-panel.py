@@ -45,14 +45,10 @@ MERGE_DESCRIPTORS = {
     "population_full",
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
-CAFO_COMMODITIES = ("cattle", "hogs", "chickens")
-# Use canonical class definitions to avoid double-counting overlapping
-# commodity subclasses when collapsing to county-year totals.
-CAFO_CANONICAL_CLASS = {
-    "cattle": "incl calves",
-    "hogs": "all classes",
-    "chickens": "layers",
-}
+# Non-overlapping types used for aggregate totals (beef/dairy are subsets of cattle).
+CAFO_COMMODITIES_TOTAL = ("cattle", "hogs", "chickens")
+# Full 5-type set from script0b compact output.
+CAFO_COMMODITIES_ALL   = ("cattle", "beef", "dairy", "hogs", "chickens")
 
 
 def _ensure_key(df):
@@ -147,10 +143,13 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
 
 def _build_cafo_animal_size_panel(path, allowed_keys):
     """
-    Build county-year CAFO animal x size columns from the compact CAFO file.
-    Keeps existing CAFO total-size columns intact by adding a separate block.
-    Uses canonical class definitions per commodity to avoid overlapping-class
-    double counting (e.g., cattle incl calves vs beef/milk cow subclasses).
+    Build county-year CAFO animal × size columns from the compact CAFO file.
+    The compact (script0b) outputs one row per (fips, year, commodity_desc) with
+    commodity_desc already remapped to one of: cattle, beef, dairy, hogs, chickens.
+    No class_desc column exists — the remap encodes it into commodity_desc.
+
+    Totals use only cattle/hogs/chickens to avoid double-counting (beef and dairy
+    are disjoint subsets of cattle incl calves).
     """
     try:
         df = read_and_prepare(path)
@@ -163,38 +162,21 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
         print("Skip CAFO animal-size block: missing fips/year")
         return None
 
-    needed = {"commodity_desc", "class_desc", "small", "medium", "large_imputed"}
-    missing_needed = sorted(list(needed - set(df.columns)))
+    needed = {"commodity_desc", "small", "medium", "large"}
+    missing_needed = sorted(needed - set(df.columns))
     if missing_needed:
         print(f"Skip CAFO animal-size block: missing required columns {missing_needed}")
         return None
 
-    # Use large_imputed (gap-corrected large farm count) as the authoritative large column.
-    df = df.rename(columns={"large_imputed": "large"})
-
-    df["commodity_desc"] = (
-        df["commodity_desc"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
-    )
-    df = df[df["commodity_desc"].isin(CAFO_COMMODITIES)].copy()
+    df["commodity_desc"] = df["commodity_desc"].astype("string").str.strip().str.lower()
+    df = df[df["commodity_desc"].isin(CAFO_COMMODITIES_ALL)].copy()
     if df.empty:
         print("Skip CAFO animal-size block: no rows after commodity filter")
-        return None
-    df["class_desc"] = df["class_desc"].astype("string").str.strip().str.lower()
-    # Save pre-canonical copy (class_desc already standardized) for beef/dairy extraction below.
-    df_all_classes = df.copy()
-    expected_class = df["commodity_desc"].map(CAFO_CANONICAL_CLASS)
-    df = df[df["class_desc"] == expected_class].copy()
-    if df.empty:
-        print("Skip CAFO animal-size block: no rows after canonical class filter")
         return None
 
     for size_col in ("small", "medium", "large"):
         df[size_col] = pd.to_numeric(df[size_col], errors="coerce")
 
-    # Restrict to rural keys used in merged panel.
     df = df.merge(allowed_keys, on=["fips", "year"], how="inner")
     if df.empty:
         print("Skip CAFO animal-size block: no rows after rural-key filter")
@@ -211,61 +193,38 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
         values=["small", "medium", "large"],
         aggfunc="sum",
     )
-
-    # Flatten pivot columns -> cafo_{commodity}_{size}
-    wide.columns = [
-        f"cafo_{commodity}_{size}" for size, commodity in wide.columns
-    ]
+    wide.columns = [f"cafo_{commodity}_{size}" for size, commodity in wide.columns]
     wide = wide.reset_index()
 
-    # Ensure stable set of output columns even if some commodity is absent.
-    animal_size_cols = []
-    for commodity in CAFO_COMMODITIES:
-        for size in ("small", "medium", "large"):
-            col = f"cafo_{commodity}_{size}"
-            animal_size_cols.append(col)
-            if col not in wide.columns:
-                wide[col] = pd.NA
+    # Ensure stable column set even if a commodity is absent in a given run.
+    all_animal_size_cols = [
+        f"cafo_{c}_{s}" for c in CAFO_COMMODITIES_ALL for s in ("small", "medium", "large")
+    ]
+    for col in all_animal_size_cols:
+        if col not in wide.columns:
+            wide[col] = pd.NA
+    wide[all_animal_size_cols] = wide[all_animal_size_cols].apply(pd.to_numeric, errors="coerce")
 
-    wide[animal_size_cols] = wide[animal_size_cols].apply(pd.to_numeric, errors="coerce")
-    wide["cafo_total_ops_all_animals"] = wide[animal_size_cols].sum(axis=1, min_count=1)
-    chickens_cols = [f"cafo_chickens_{s}" for s in ("small", "medium", "large")]
-    wide["cafo_total_ops_chickens"] = wide[chickens_cols].sum(axis=1, min_count=1)
+    # Aggregate totals: cattle + hogs + chickens only (beef/dairy are subsets of cattle).
+    total_size_cols = [f"cafo_{c}_{s}" for c in CAFO_COMMODITIES_TOTAL for s in ("small", "medium", "large")]
+    wide["cafo_total_ops_all_animals"] = wide[total_size_cols].sum(axis=1, min_count=1)
+    wide["cafo_total_ops_chickens"] = (
+        wide[[f"cafo_chickens_{s}" for s in ("small", "medium", "large")]].sum(axis=1, min_count=1)
+    )
 
-    # --- Beef and dairy sub-panels ---
-    # "cattle incl calves" ≠ beef + dairy: it also includes calves, steers, bulls, and feedlot.
-    # Beef and dairy are disjoint subsets of incl calves. Add them as separate columns so
-    # the analysis can distinguish beef vs dairy operations without double-counting in totals.
-    df_cattle = df_all_classes[df_all_classes["commodity_desc"] == "cattle"].copy()
-    df_cattle = df_cattle.merge(allowed_keys, on=["fips", "year"], how="inner")
-    for size_col in ("small", "medium", "large"):
-        df_cattle[size_col] = pd.to_numeric(df_cattle[size_col], errors="coerce")
-
-    beef_dairy_cols = []
-    for label, class_val in [("cattle_beef", "cows, beef"), ("cattle_dairy", "cows, milk")]:
-        sub = df_cattle[df_cattle["class_desc"] == class_val].copy()
-        for size in ("small", "medium", "large"):
-            col = f"cafo_{label}_{size}"
-            beef_dairy_cols.append(col)
-            if not sub.empty and sub[size].notna().any():
-                grp = (
-                    sub.groupby(["fips", "year"], as_index=False)[size]
-                    .sum(min_count=1)
-                    .rename(columns={size: col})
-                )
-                wide = wide.merge(grp[["fips", "year", col]], on=["fips", "year"], how="left")
-            else:
-                wide[col] = pd.NA
-        wide[f"cafo_{label}_total"] = (
-            wide[[f"cafo_{label}_{s}" for s in ("small", "medium", "large")]]
-            .apply(pd.to_numeric, errors="coerce")
-            .sum(axis=1, min_count=1)
+    # Per-type totals for beef and dairy.
+    for animal in ("beef", "dairy"):
+        wide[f"cafo_{animal}_total"] = (
+            wide[[f"cafo_{animal}_{s}" for s in ("small", "medium", "large")]].sum(axis=1, min_count=1)
         )
-        beef_dairy_cols.append(f"cafo_{label}_total")
 
-    keep_cols = ["fips", "year", *animal_size_cols, "cafo_total_ops_all_animals",
-                 "cafo_total_ops_chickens", *beef_dairy_cols]
-    wide = wide[keep_cols].copy()
+    keep_cols = [
+        "fips", "year",
+        *all_animal_size_cols,
+        "cafo_total_ops_all_animals", "cafo_total_ops_chickens",
+        "cafo_beef_total", "cafo_dairy_total",
+    ]
+    wide = wide[[c for c in keep_cols if c in wide.columns]].copy()
     print(f"Use CAFO animal-size block: {wide.shape}")
     return wide
 
@@ -692,7 +651,7 @@ today_str = date.today().strftime("%Y-%m-%d")
 _ratio_flag_cols = [c for c in merged_all.columns if c.endswith("_ratio_flag")]
 if _ratio_flag_cols:
     _qa_df = merged_all[["fips", "year"] + _ratio_flag_cols].copy()
-    _qa_path = os.path.join(merged_dir, f"{today_str}_ratio_flags_qa.csv")
+    _qa_path = os.path.join(tables_dir, f"{today_str}_ratio_flags_qa.csv")
     os.makedirs(merged_dir, exist_ok=True)
     _qa_df.to_csv(_qa_path, index=False)
     print(f"Ratio flags archived: {_qa_path} ({len(_ratio_flag_cols)} columns)")
@@ -831,26 +790,25 @@ print(f"Columns renamed: {len(_rmap)}. Final shape: {merged_all.shape}")
 
 
 # Export
-out_name = f"{today_str}_full_merged.csv"
-out_path = os.path.join(merged_dir, out_name)
+out_path = os.path.join(merged_dir, f"{today_str}_panel.csv")
 os.makedirs(merged_dir, exist_ok=True)
 merged_all.to_csv(out_path, index=False)
 print("Saved:", out_path)
 
 
 # Spliced exports
-slice_2005_2010 = merged_all[merged_all["year"].between(2005, 2010, inclusive="both")].copy()
-slice_2010_2020 = merged_all[merged_all["year"].between(2010, 2020, inclusive="both")].copy()
-slice_census_years = merged_all[merged_all["year"].isin([2002, 2007, 2012, 2017, 2022])].copy()
+slice_2005_2010  = merged_all[merged_all["year"].between(2005, 2010, inclusive="both")].copy()
+slice_2010_2020  = merged_all[merged_all["year"].between(2010, 2020, inclusive="both")].copy()
+slice_census_yrs = merged_all[merged_all["year"].isin([2002, 2007, 2012, 2017, 2022])].copy()
 
-slice_2005_2010_path = os.path.join(merged_dir, f"{today_str}_full_merged_2005_2010.csv")
-slice_2010_2020_path = os.path.join(merged_dir, f"{today_str}_full_merged_2010_2020.csv")
-slice_census_path = os.path.join(merged_dir, f"{today_str}_full_merged_census_years.csv")
+slice_05_10_path    = os.path.join(merged_dir, f"{today_str}_panel_05_10.csv")
+slice_10_20_path    = os.path.join(merged_dir, f"{today_str}_panel_10_20.csv")
+slice_census_path   = os.path.join(merged_dir, f"{today_str}_panel_census_years.csv")
 
-slice_2005_2010.to_csv(slice_2005_2010_path, index=False)
-slice_2010_2020.to_csv(slice_2010_2020_path, index=False)
-slice_census_years.to_csv(slice_census_path, index=False)
+slice_2005_2010.to_csv(slice_05_10_path, index=False)
+slice_2010_2020.to_csv(slice_10_20_path, index=False)
+slice_census_yrs.to_csv(slice_census_path, index=False)
 
-print("Saved:", slice_2005_2010_path, "| rows:", len(slice_2005_2010))
-print("Saved:", slice_2010_2020_path, "| rows:", len(slice_2010_2020))
-print("Saved:", slice_census_path, "| rows:", len(slice_census_years))
+print("Saved:", slice_05_10_path,  "| rows:", len(slice_2005_2010))
+print("Saved:", slice_10_20_path,  "| rows:", len(slice_2010_2020))
+print("Saved:", slice_census_path, "| rows:", len(slice_census_yrs))

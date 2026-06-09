@@ -206,7 +206,7 @@ def binned_scatter_ax(ax, x_vals, y_vals, label_x, label_y,
 # =============================================================================
 # Load and prepare panel
 # =============================================================================
-merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_panel.csv")
 print("Loading:", merged_path)
 
 df = pd.read_csv(merged_path, low_memory=False)

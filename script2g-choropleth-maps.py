@@ -54,7 +54,7 @@ for d in (fsis_choro_dir, mental_maps_dir, first_diff_dir, first_diff_table_dir)
 POP_COL = "population"
 
 # ── Load merged panel ─────────────────────────────────────────────────────────
-merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_panel.csv")
 df_raw = pd.read_csv(merged_path, low_memory=False)
 df_raw = normalize_panel_key(df_raw)
 df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()

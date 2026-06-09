@@ -237,7 +237,7 @@ def save_county_map_one_year(df_year, value_col, year, title_prefix, out_prefix)
 
 # 1) Load merged panel
 # ---------------------------------------------------------------------
-merged_path = latest_file_glob(merged_dir, "*_full_merged.csv")
+merged_path = latest_file_glob(merged_dir, "*_panel.csv")
 print("Using merged file:", merged_path)
 
 df = pd.read_csv(merged_path, low_memory=False)
