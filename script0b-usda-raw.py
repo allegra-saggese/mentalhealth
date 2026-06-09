@@ -484,29 +484,10 @@ if "fips_generated" not in ag_raw_df.columns:
 ag_raw_df["fips_generated"] = ag_raw_df["fips_generated"].astype("string").str.zfill(5)
 ag_raw_df["year"] = pd.to_numeric(ag_raw_df["year"], errors="coerce").astype("Int64")
 
-base_years = [2002, 2007, 2012, 2017]
-n_forward  = 4
-year_col   = "year"
-
-new_frames = []
-for b in base_years:
-    base = ag_raw_df[ag_raw_df[year_col] == b].copy()
-    if base.empty:
-        continue
-    for y in range(b + 1, b + 1 + n_forward):
-        new_frames.append(base.assign(**{year_col: y}))
-
-new_rows = pd.concat(new_frames, ignore_index=True) if new_frames else pd.DataFrame(columns=ag_raw_df.columns)
-df_big   = pd.concat([ag_raw_df, new_rows], ignore_index=True)
-
-len_df_big_predupe = len(df_big)
-len_it_rows        = len(new_rows)
-df_big             = df_big.drop_duplicates(ignore_index=True)
-len_raw_df         = len(ag_raw_df)
-len_df_big_post_dupe = len(df_big)
-
-print("No duplicates found in final dataframe? ",
-      (len_df_big_post_dupe == len_df_big_predupe == (len_it_rows + len_raw_df)))
+# Census-year data only — forward-fill to inter-census years is handled in
+# script1b-generate-panel.py, keeping the compact as raw source data.
+df_big = ag_raw_df.drop_duplicates(ignore_index=True).copy()
+print(f"Census-only compact rows: {len(df_big):,} (years: {sorted(df_big['year'].dropna().unique().tolist())})")
 
 if "_merge" in df_big.columns:
     df_big = df_big.drop(columns=["_merge"])
@@ -1046,14 +1027,9 @@ if not heads_agg.empty:
         on=["fips_generated", "year", "_commodity_parent"],
         how="left",
     )
-    # Forward-fill total_heads from census years to intervening years
     summary_compact = summary_compact.sort_values(
         ["fips_generated", "commodity_desc", "year"]
     ).reset_index(drop=True)
-    summary_compact["total_heads"] = (
-        summary_compact.groupby(["fips_generated", "commodity_desc"])["total_heads"]
-        .transform("ffill")
-    )
 else:
     summary_compact["total_heads"] = pd.NA
 summary_compact = summary_compact.drop(columns=["_commodity_parent"])

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Oct 21 01:10:00 2025
-
 Builds one county-year merged panel from the latest version of each clean file.
 
 Panel frame: ALL counties where rural-key non_large_metro == 1.
@@ -12,18 +10,39 @@ Panel frame: ALL counties where rural-key non_large_metro == 1.
   (or 0 for CAFO counts, see zero-fill section below).
 
 Key design decisions:
-- CAFO (USDA Agricultural Census): zero-fill for census-covered years.
-  Absence in the census = confirmed zero operations, not a missing observation.
-  Years not yet covered (2022+) remain NaN
-  
+
+- CAFO (USDA Agricultural Census) — FORWARD FILL:
+  The USDA Agricultural Census is conducted every five years (2002, 2007, 2012,
+  2017, 2022). The clean compact (script0b) contains only those five census years.
+  To produce a year-on-year panel, census values are forward-filled to all
+  intervening years: 2002 values carry through 2003–2006, 2007 values through
+  2008–2011, and so on. This is the intended imputation strategy — each census
+  is treated as the best available observation until the next one supersedes it.
+
+  Two additional CAFO adjustments applied after forward-fill:
+    (a) Zero-fill: rural counties absent from the USDA Census in a census year
+        are confirmed zero-operation counties (the census is exhaustive). Those
+        county-years are filled with 0 before forward-filling, so the zero
+        propagates correctly to inter-census years.
+    (b) Non-census years for truly absent counties remain NaN until a census
+        year establishes a value, at which point forward-fill takes over.
+
 - CDC deaths-of-despair: three-state missingness flag (cdc_in_query,
   deaths_is_zero, crude_rate_from_census_pop). See inline comments.
 
 - CHR (County Health Rankings): CHR rate-only variables get imputed count
   columns (*_count_imputed). Num/denom variables get a *_ratio_flag QA column.
-  
-- FSIS (slaughterhouses): available 2017–present only; panel years 2017–2023
-  overlap with the analysis window.
+
+- FSIS (slaughterhouses): available 2017–present only. Exported separately as
+  panel_fsis.csv (2017+); main panel.csv drops FSIS columns entirely so the
+  full time-series is not truncated.
+
+Outputs (all to Data/merged/):
+  panel.csv               — full panel, all years, no FSIS columns
+  panel_05_10.csv         — 2005–2010 slice
+  panel_10_20.csv         — 2010–2020 slice
+  panel_census_years.csv  — USDA census years only (2002, 2007, 2012, 2017, 2022)
+  panel_fsis.csv          — 2017+ with FSIS columns
 """
 
 from packages import *
@@ -300,14 +319,16 @@ if cafo_commodity_size is not None and not cafo_commodity_size.empty:
 #
 # Text/metadata columns (commodity descriptor, county name, class) are left
 # as NaN: there is no meaningful string value for a zero-operations county.
+# USDA Agricultural Census years — the only years where county-level absence
+# is a confirmed zero (not a missing observation). Non-census years have NaN.
+_CAFO_CENSUS_YEARS = {2002, 2007, 2012, 2017, 2022}
+
 _CAFO_TEXT_COLS = {
     f"county_fips_name_{BASE_DESCRIPTOR}",
     f"commodity_desc_{BASE_DESCRIPTOR}",
     f"class_desc_{BASE_DESCRIPTOR}",
 }
-_cafo_covered_years = set(
-    merged_all.loc[merged_all["cafo_total_ops_all_animals"].notna(), "year"].unique()
-)
+_cafo_covered_years = _CAFO_CENSUS_YEARS
 _cafo_fill_cols = [
     c for c in merged_all.columns
     if (BASE_DESCRIPTOR in c or c.startswith("cafo_"))
@@ -322,7 +343,7 @@ merged_all.loc[_zero_fill_mask, _cafo_fill_cols] = 0
 print(
     f"CAFO zero-fill: {int(_zero_fill_mask.sum()):,} county-years → 0 "
     f"(rural counties absent from USDA Census = confirmed no operations). "
-    f"Years covered by CAFO data: {sorted(_cafo_covered_years)}."
+    f"Census years: {sorted(_CAFO_CENSUS_YEARS)}."
 )
 
 # Forward-fill CAFO values across inter-census years.

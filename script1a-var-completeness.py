@@ -19,7 +19,7 @@ from functions import *
 # Paths / config
 # ---------------------------------------------------------------------
 merged_dir = os.path.join(db_data, "merged")
-out_dir = os.path.join(tables_dir, "panel-sumstats-by-farms")
+out_dir = os.path.join(tables_dir, "panel-qa")
 os.makedirs(out_dir, exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
