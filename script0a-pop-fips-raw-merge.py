@@ -20,7 +20,7 @@ from urllib.request import urlopen, Request
 
 # make sure repo root is on sys.path (parent of functions.py / packages/)
 import os
-repo = os.path.dirname(os.path.abspath(__file__))
+repo = os.path.dirname(os.path.abspath(__file__)) # ROOT PATH - CAN SET MANUAL HERE 
 if repo not in sys.path:
     sys.path.append(repo)
 
@@ -35,13 +35,13 @@ from packages import *
 
 # other folders
 inf = os.path.join(db_data, "raw") # input 
-outf = os.path.join(db_data, "clean") #outpit
+outf = os.path.join(db_data, "clean") # outpit
 
 
 
 # ----------------------- DATA PART 1 : LOAD FIPS DATA  -------------------- -#
 
-## UPLOAD ALL CENSUS DATA - ALL YEARS, RAW 
+## UPLOAD ALL CENSUS DATA - all years, raw, matching the folder name (population)
 rawpop = os.path.join(inf, "population")
 file_list = sorted(
     glob.glob(os.path.join(rawpop, "*.csv")) +
@@ -51,6 +51,7 @@ file_list = sorted(
 dfs = []
 pop_sources = {}
 
+# loop read in of files 
 for file in file_list:
     try:
         df = read_csv_with_fallback(file)
@@ -69,9 +70,10 @@ df_pop_1990s = pick_source_by_fragment(pop_sources, "cc-est-1990-2000")
     
 ## UPLOAD ALL FIPS DATA 
 rawfips = os.path.join(inf, "fips")
-fipsfiles = glob.glob(os.path.join(rawfips, "foruse_*.txt"))
+fipsfiles = glob.glob(os.path.join(rawfips, "foruse_*.txt")) # all .txt 
 
-# identify which type of separator exists for each file 
+
+# identify which type of separator exists for each file  (tab, comma, etc.)
 pipe_files, comma_files, ws_files = [], [], []
 for p in fipsfiles:
     d = sniff_delimiter(p)
@@ -122,7 +124,7 @@ fips_90["county_code"] = fips_90["county_code"].replace(25, 86)
 fips_90["county"] = fips_90["county"].replace("Miami-Dade County", "Dade County")
 
 
-# add in counties that were merged/lost for the 2000 census 
+# add in counties that were merged/lost for the 2000 census - from manual review
 new_row1 = {
     "FIPS": 30113,
     "state_code": 30,
@@ -142,7 +144,7 @@ fips_90 = pd.concat([fips_90, pd.DataFrame([new_row1, new_row2])], ignore_index=
 fips_90_expanded = expand_years_cross(fips_90, range(1990, 2000))
 
 
-# comma file (2010)
+# upload the comma file (fips from 2010)
 if not comma_files:
     raise FileNotFoundError("No comma-delimited 2010 FIPS file found in raw/fips")
 comma_2010 = [p for p in comma_files if "2010" in os.path.basename(p).lower()]
@@ -150,7 +152,7 @@ comma_target = comma_2010[0] if comma_2010 else comma_files[0]
 fips_10 = pd.read_table(comma_target, sep=",", engine="python", encoding="latin1", on_bad_lines="warn")
 
 
-# GET ALL FIPS <> CTY <> YEAR CODES FROM RAW DATA 
+# generate the FIPS code by merging state code + county code;  with year, standardizing format 
 generate_fips(fips_10, state_col="STATEFP", city_col="COUNTYFP")
 
 # collapse on subfips because I want to eliminate this categorization
@@ -268,7 +270,6 @@ fips_annual_full.loc[
 # recheck missing percentage and its zero! move on 
 
 
-
 # remove state-level rows (keeping DC), standardize keys, and normalize DC FIPS
 fips_annual_full_v2 = drop_state_level_rows_except_dc(fips_annual_full)
 fips_annual_full_v2 = standardize_county_identifiers(fips_annual_full_v2, fips_as_string=False)
@@ -294,20 +295,20 @@ fips_for_pop = fips_annual_full_v2[["fips", "county", "state_code", "county_code
 # export clean data
 clean_dir = os.path.join(db_data, "clean")
 today_str = date.today().strftime("%Y-%m-%d")
-clean_fips_df = f"{today_str}_fips_full.csv"
+clean_fips_df = f"{today_str}_FIPS_key.csv"
 out_path = os.path.join(clean_dir, clean_fips_df)
 
-# export to csv in clean folder
+## export to csv in clean folder
 fips_annual_full_v2.to_csv(out_path, index=False)
 
-# clean up
+# clean up (remove interim data)
 del fips_00, fips_00_expanded, fips_10, fips_10_expanded, fips_20 
 del fips_20_expanded, fips_90, fips_90_expanded, fips_annual_full
 del fips_annual_full_v2, missing_pct, mt_fips, new_row1, new_row2, rawfips
 del rows_with_missing, boston_fips
 
 
-# ----------------------- DATA PART 4 : ADD POPULATION IN  -------------------- -#
+# ----------------------- DATA PART 4 : CENSUS POPULATION DATA  -------------------- -#
 # Now we add the population data into the fips data for the final key 
 
 
@@ -835,6 +836,52 @@ def fetch_ag_data(years_to_pull):
     return pulled
 
 
+def fetch_ag_totals(years_to_pull):
+    """Pull NASS county-level total operations (domain_desc=TOTAL, domaincat_desc=NOT SPECIFIED)
+    for cattle/chickens/hogs. These are the QA denominators: bin_sum should be <= this per
+    county-year-class. Kept separate from fetch_ag_data because _keep_inventory_domaincat
+    would strip these rows out of the main pull."""
+    if not years_to_pull:
+        return pd.DataFrame()
+
+    rate_sleep = 0.4
+    frames = []
+    for yr in years_to_pull:
+        for cmd in ["CATTLE", "CHICKENS", "HOGS"]:
+            time.sleep(rate_sleep)
+            params = {
+                "key": NASS_API_KEY,
+                "source_desc": "CENSUS",
+                "agg_level_desc": "COUNTY",
+                "sector_desc": "ANIMALS & PRODUCTS",
+                "commodity_desc": cmd,
+                "unit_desc": "OPERATIONS",
+                "statisticcat_desc": "INVENTORY",
+                "domain_desc": "TOTAL",
+                "year": yr,
+            }
+            try:
+                count = functions.nass_get_counts(NASS_BASE, params)
+            except RuntimeError as e:
+                print(f"  Skipping total-ops for {cmd} {yr}: {e}")
+                continue
+            if not count:
+                print(f"  No total-ops rows found for {cmd} {yr}")
+                continue
+            try:
+                df_pull = functions.nass_get_data(NASS_BASE, params)
+            except RuntimeError as e:
+                print(f"  Failed total-ops pull for {cmd} {yr}: {e}")
+                continue
+            if not df_pull.empty:
+                frames.append(_harmonize_api_to_dta_schema(df_pull))
+                print(f"  Pulled {len(df_pull):,} total-ops rows: {cmd} {yr}")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 # Load .dta files as the authoritative baseline for historical Census years.
 # Then append API rows only for missing Census years (currently 2022).
 agfolder = os.path.join(inf, "usda")
@@ -853,12 +900,18 @@ print(f"Loaded {len(combined_dta):,} rows from {len(agfiles)} local .dta files: 
 dta_years = sorted(pd.to_numeric(combined_dta["year"], errors="coerce").dropna().astype(int).unique().tolist())
 years_to_pull_api = [yr for yr in API_SUPPLEMENT_YEARS if yr not in dta_years]
 combined_api = pd.DataFrame()
+combined_api_totals = pd.DataFrame()
 if USE_API_SUPPLEMENT and years_to_pull_api:
     try:
         combined_api = fetch_ag_data(years_to_pull_api)
         print(f"Loaded {len(combined_api):,} filtered rows from USDA NASS API for years {years_to_pull_api}")
     except RuntimeError as e:
         print(f"API fetch failed (non-fatal — proceeding with .dta baseline only): {e}")
+    try:
+        combined_api_totals = fetch_ag_totals(years_to_pull_api)
+        print(f"Loaded {len(combined_api_totals):,} total-ops QA rows from NASS API for years {years_to_pull_api}")
+    except RuntimeError as e:
+        print(f"API totals fetch failed (non-fatal): {e}")
 elif USE_API_SUPPLEMENT:
     print(f"API supplement skipped: local .dta already covers requested years {API_SUPPLEMENT_YEARS}.")
 
@@ -1113,8 +1166,76 @@ for c in [
 # picking commodities of interest
 comms_of_interest = ["cattle", "chickens", "hogs"]
 
+# ---- Extract NASS-reported total operations (QA denominator) ----
+# NASS reports one aggregate operations count per county-year-commodity-class with
+# domain_desc="total", domaincat_desc="not specified" — no size breakdown.
+# These rows are in df_cafo for .dta years but filtered out downstream by the
+# domaincat_desc.str.startswith("inventory") condition. We capture them here.
+# Restrict to actual census years only: forward-fill duplicates the rows to
+# intervening years, but the total is only valid as of the census year.
+CENSUS_YEARS = {2002, 2007, 2012, 2017, 2022}
 
-# within each of the commodities, there are sub-categories, so we map these classes 
+_total_canonical_classes = {
+    "cattle":   {"incl calves", "cows, beef", "cows, milk"},
+    "chickens": {"broilers", "layers"},
+    "hogs":     {"all classes"},
+}
+_total_canonical_pairs = pd.MultiIndex.from_tuples(
+    [(c, cl) for c, cls in _total_canonical_classes.items() for cl in cls]
+)
+
+df_nass_totals = df_cafo[
+    (df_cafo["commodity_desc"].isin(comms_of_interest))
+    & (df_cafo["unit_desc"] == "operations")
+    & (df_cafo["statisticcat_desc"] == "inventory")
+    & (df_cafo["domain_desc"] == "total")
+    & (df_cafo["domaincat_desc"] == "not specified")
+    & (df_cafo["year"].isin(CENSUS_YEARS))
+].copy()
+df_nass_totals = df_nass_totals[
+    pd.MultiIndex.from_frame(df_nass_totals[["commodity_desc", "class_desc"]]).isin(_total_canonical_pairs)
+].copy()
+
+# Append 2022 API totals (not in df_cafo because _keep_inventory_domaincat stripped them)
+if not combined_api_totals.empty:
+    _api_tot = combined_api_totals.copy()
+    for _c in ["domaincat_desc", "unit_desc", "statisticcat_desc", "domain_desc", "commodity_desc", "class_desc"]:
+        if _c in _api_tot.columns:
+            _api_tot[_c] = _api_tot[_c].astype("string").str.strip().str.lower()
+    _api_tot = _api_tot[
+        (_api_tot["unit_desc"] == "operations")
+        & (_api_tot["statisticcat_desc"] == "inventory")
+        & (_api_tot["domain_desc"] == "total")
+        & (_api_tot["domaincat_desc"] == "not specified")
+    ].copy()
+    if not _api_tot.empty:
+        _api_tot = generate_fips(_api_tot, state_col="state_fips_code", city_col="county_code")
+        if "FIPS_generated" in _api_tot.columns and "fips_generated" not in _api_tot.columns:
+            _api_tot = _api_tot.rename(columns={"FIPS_generated": "fips_generated"})
+        _api_tot["fips_generated"] = _api_tot["fips_generated"].astype("string").str.zfill(5)
+        _api_tot["year"] = pd.to_numeric(_api_tot["year"], errors="coerce").astype("Int64")
+        _api_tot = _api_tot[
+            pd.MultiIndex.from_frame(_api_tot[["commodity_desc", "class_desc"]]).isin(_total_canonical_pairs)
+        ].copy()
+        df_nass_totals = pd.concat([df_nass_totals, _api_tot], ignore_index=True)
+
+df_nass_totals["nass_total_ops"] = pd.to_numeric(
+    df_nass_totals["value"].astype("string")
+    .str.replace(",", "", regex=False).str.strip()
+    .replace({"(d)": pd.NA, "(z)": pd.NA, "": pd.NA}),
+    errors="coerce",
+)
+nass_totals_agg = (
+    df_nass_totals
+    .groupby(["fips_generated", "year", "commodity_desc", "class_desc"], as_index=False)["nass_total_ops"]
+    .sum(min_count=1)
+)
+print(f"NASS total-ops QA rows: {len(nass_totals_agg)} "
+      f"| years: {sorted(df_nass_totals['year'].dropna().unique().tolist())}")
+# ---- end total-ops extraction ----
+
+
+# within each of the commodities, there are sub-categories, so we map these classes
 class_keep_map = {
     "cattle": {
         "incl calves",
@@ -1306,7 +1427,7 @@ for col, (med, lrg) in col_thresholds.items():
     df2.loc[take, "size_class"] = codes[take].apply(categorize_code, args=(med, lrg))
     df2.loc[take, "size_source"] = col
 
-# Keep operations counts in each inventory bin 
+# Keep operations counts in each inventory bin — non-numeric values become NaN.
 df2["ops_in_bin"] = pd.to_numeric(
     df2["value"]
     .astype("string")
@@ -1322,10 +1443,10 @@ df2["is_medium_or_large_cafo_row"] = (
     df2["size_class"].isin(["medium", "large"]) & df2["size_source"].notna()
 ).astype("Int8")
 
-# Compact long summary: county-year-commodity-class-size 
+# Compact long summary: county-year-commodity-class-size
+_summary_src = df2[df2["size_source"].notna()]
 summary = (
-    df2[df2["size_source"].notna()]
-    .groupby(
+    _summary_src.groupby(
         [
             "year",
             "fips_generated",
@@ -1337,15 +1458,17 @@ summary = (
             "size_class",
         ],
         as_index=False,
-    )["ops_in_bin"]
-    .sum(min_count=1)
-    .rename(columns={"ops_in_bin": "sum_ops"})
+    ).agg(
+        sum_ops=("ops_in_bin", lambda x: x.sum(min_count=1)),
+    )
 )
 
 # County-year compact table with small/medium/large columns
+_PIVOT_IDX = ["year", "fips_generated", "county_fips_name", "commodity_desc", "class_desc"]
+
 summary_compact = (
     summary.pivot_table(
-        index=["year", "fips_generated", "county_fips_name", "commodity_desc", "class_desc"],
+        index=_PIVOT_IDX,
         columns="size_class",
         values="sum_ops",
         aggfunc="sum",
@@ -1357,10 +1480,7 @@ summary_compact.columns.name = None
 for size_col in ["small", "medium", "large"]:
     if size_col not in summary_compact.columns:
         summary_compact[size_col] = 0
-summary_compact["any_large_cafo"] = (summary_compact["large"] > 0).astype("Int8")
-summary_compact["any_medium_or_large_cafo"] = (
-    (summary_compact["medium"] + summary_compact["large"]) > 0
-).astype("Int8")
+# any_large_cafo and any_medium_or_large_cafo are set after imputation below.
 
 # QA: cattle canonical vs subgroup overlap diagnostic at county-year level
 # Purpose: verify whether cattle subclasses can be summed without overlap.
@@ -1440,6 +1560,195 @@ if not cattle_compact.empty:
     print("Cattle all-class vs canonical (year-level ratio):")
     print(year_diag[["year", "ratio_allclass_sum_to_canonical_sum"]].to_string(index=False))
 
+
+# ---- QA: bin_sum vs. NASS-reported total operations ----
+# NASS suppresses operation counts by omitting rows entirely (no (D) marker).
+# bin_sum <= nass_total because suppressed bins have no row in the data.
+# gap = nass_total - bin_sum is the count of farms in suppressed bins.
+# Coverage = bin_sum / nass_total tells us how much of the true count we capture.
+summary_compact["bin_sum"] = (
+    summary_compact[["small", "medium", "large"]]
+    .apply(pd.to_numeric, errors="coerce")
+    .sum(axis=1, min_count=1)
+)
+
+qa_coverage = summary_compact[summary_compact["year"].isin(CENSUS_YEARS)].copy()
+qa_coverage = qa_coverage.merge(
+    nass_totals_agg,
+    on=["fips_generated", "year", "commodity_desc", "class_desc"],
+    how="left",
+)
+_nass_total_float = pd.to_numeric(qa_coverage["nass_total_ops"], errors="coerce")
+qa_coverage["coverage_pct"] = np.where(
+    _nass_total_float.notna() & (_nass_total_float > 0),
+    qa_coverage["bin_sum"] / _nass_total_float * 100,
+    np.nan,
+)
+qa_coverage["suppressed_ops_estimate"] = qa_coverage["nass_total_ops"] - qa_coverage["bin_sum"]
+
+coverage_path = os.path.join(outf, f"{today_str}_qa_cafo_bin_coverage_vs_nass_total.csv")
+qa_coverage.to_csv(coverage_path, index=False)
+
+coverage_year = (
+    qa_coverage.groupby(["year", "commodity_desc", "class_desc"], as_index=False)
+    .agg(
+        n_counties=("fips_generated", "count"),
+        bin_sum_total=("bin_sum", "sum"),
+        nass_total_total=("nass_total_ops", "sum"),
+        pct_counties_with_nass_total=("nass_total_ops", lambda x: x.notna().mean() * 100),
+        median_coverage_pct=("coverage_pct", "median"),
+    )
+)
+coverage_year["ratio_bin_to_nass"] = np.where(
+    coverage_year["nass_total_total"] > 0,
+    coverage_year["bin_sum_total"] / coverage_year["nass_total_total"],
+    np.nan,
+)
+coverage_year_path = os.path.join(outf, f"{today_str}_qa_cafo_bin_coverage_by_year_commodity.csv")
+coverage_year.to_csv(coverage_year_path, index=False)
+print("Saved bin coverage QA (county-year):", coverage_path)
+print("Saved bin coverage QA (year-level):", coverage_year_path)
+print("\nBin coverage ratio (bin_sum / nass_total) by year and commodity:")
+print(coverage_year[["year", "commodity_desc", "class_desc", "median_coverage_pct", "ratio_bin_to_nass"]].to_string(index=False))
+# ---- end bin coverage QA ----
+
+
+# ----------------------- ANALYSIS PART 2B: SUPPRESSED BIN IMPUTATION -------------------- #
+# NASS suppresses operation-count bins by omitting rows entirely (no (D) marker in ops data).
+# We detect suppression via the gap: gap = nass_total_ops - bin_sum.
+# gap > 0 means the missing rows contain real farms; we attribute the full gap to the large bin
+# (most defensible assumption: small and medium bins are heavily populated and less likely to be
+# suppressed; if only the large bin is suppressed, all missing farms are large-operation farms).
+#
+# Imputation tiers (census years only — forward-filled years inherit from preceding census year):
+#   clean:   nass_total_ops known AND gap > 0 → large_imputed = large + gap (exact, deterministic)
+#   dark:    nass_total_ops is NA → gap unknown; large_imputed = large (unchanged)
+#   none:    gap <= 0 or gap is 0 → full coverage; large_imputed = large
+#
+# Applied to canonical classes only (the classes that flow into the analysis panel).
+# Non-canonical rows pass through unchanged (large_imputed = large).
+
+CANONICAL_CLASSES = {
+    "cattle":   "incl calves",
+    "hogs":     "all classes",
+    "chickens": "layers",
+}
+
+_imp_frames = []
+for _commodity, _canon_class in CANONICAL_CLASSES.items():
+    _sc = summary_compact[
+        (summary_compact["commodity_desc"] == _commodity)
+        & (summary_compact["class_desc"] == _canon_class)
+        & (summary_compact["year"].isin(CENSUS_YEARS))
+    ].copy()
+    if _sc.empty:
+        continue
+
+    _sc = _sc.merge(
+        nass_totals_agg[
+            (nass_totals_agg["commodity_desc"] == _commodity)
+            & (nass_totals_agg["class_desc"] == _canon_class)
+        ][["fips_generated", "year", "nass_total_ops"]],
+        on=["fips_generated", "year"],
+        how="left",
+    )
+
+    for _col in ["small", "medium", "large"]:
+        _sc[_col] = pd.to_numeric(_sc[_col], errors="coerce")
+    _sc["nass_total_ops"] = pd.to_numeric(_sc["nass_total_ops"], errors="coerce")
+    _sc["bin_sum_imp"] = _sc[["small", "medium", "large"]].sum(axis=1, min_count=1)
+    _sc["gap"] = _sc["nass_total_ops"] - _sc["bin_sum_imp"]
+
+    _gap_known = _sc["nass_total_ops"].notna() & _sc["gap"].notna()
+    _gap_positive = _gap_known & (_sc["gap"] > 0)
+
+    _sc["imputation_tier"] = "none"
+    _sc.loc[_sc["nass_total_ops"].isna(), "imputation_tier"] = "dark"
+    _sc.loc[_gap_positive, "imputation_tier"] = "clean"
+
+    _sc["large_imputed"] = np.where(
+        _sc["imputation_tier"] == "clean",
+        _sc["large"] + _sc["gap"],
+        _sc["large"],
+    )
+    _sc["large_was_imputed"] = (_sc["imputation_tier"] == "clean").astype("Int8")
+    _imp_frames.append(_sc[["fips_generated", "year", "commodity_desc", "class_desc",
+                             "gap", "imputation_tier", "large_imputed", "large_was_imputed"]])
+
+if _imp_frames:
+    _imp_merge = pd.concat(_imp_frames, ignore_index=True)
+
+    # Save county-year imputation QA
+    imp_path = os.path.join(outf, f"{today_str}_qa_suppressed_bin_imputation.csv")
+    _imp_merge.to_csv(imp_path, index=False)
+
+    # Tier summary by year/commodity
+    _tier_summary = (
+        _imp_merge[_imp_merge["imputation_tier"] != "none"]
+        .groupby(["year", "commodity_desc", "class_desc", "imputation_tier"], as_index=False)
+        .agg(n_counties=("fips_generated", "count"))
+    )
+    tier_path = os.path.join(outf, f"{today_str}_qa_imputation_tier_summary.csv")
+    _tier_summary.to_csv(tier_path, index=False)
+    print("Saved suppression imputation QA:", imp_path)
+    print("Saved imputation tier summary:", tier_path)
+    print("\nImputation tier counts (census years, canonical classes only):")
+    print(_tier_summary.to_string(index=False))
+
+    # Merge imputed columns back into summary_compact
+    summary_compact = summary_compact.merge(
+        _imp_merge,
+        on=["fips_generated", "year", "commodity_desc", "class_desc"],
+        how="left",
+    )
+    # Non-canonical or non-census rows: large_imputed starts as NaN from the merge.
+    # Fill from large for now; forward-fill pass below will overwrite suppressed non-census rows.
+    summary_compact["large_imputed"] = np.where(
+        summary_compact["large_imputed"].isna(),
+        summary_compact["large"],
+        summary_compact["large_imputed"],
+    )
+    summary_compact["large_was_imputed"] = summary_compact["large_was_imputed"].fillna(0).astype("Int8")
+    summary_compact["imputation_tier"] = summary_compact["imputation_tier"].fillna("none")
+
+    # Forward-fill large_imputed to intervening (forward-filled) years.
+    # Non-census years are copies of the preceding census year — their imputed large value
+    # should inherit the census year's imputed count, not fall back to the raw large column.
+    # Set imputed non-census rows to NaN so ffill pulls from the census year value.
+    _ff_mask = (
+        ~summary_compact["year"].isin(CENSUS_YEARS)
+        & (summary_compact["large_was_imputed"] == 1)
+    )
+    summary_compact.loc[_ff_mask, "large_imputed"] = np.nan
+    summary_compact.loc[_ff_mask, "large_was_imputed"] = pd.NA
+
+    summary_compact = summary_compact.sort_values(
+        ["fips_generated", "commodity_desc", "class_desc", "year"]
+    ).reset_index(drop=True)
+
+    _grp = ["fips_generated", "commodity_desc", "class_desc"]
+    summary_compact["large_imputed"] = (
+        summary_compact.groupby(_grp)["large_imputed"].transform("ffill")
+    )
+    summary_compact["large_was_imputed"] = (
+        summary_compact.groupby(_grp)["large_was_imputed"].transform("ffill")
+    )
+    # Any still-NaN after ffill: census-year dark case with no preceding imputed value — keep as NaN
+    # (these are genuinely unresolvable; downstream code should treat NaN as unknown, not zero)
+    summary_compact["large_was_imputed"] = summary_compact["large_was_imputed"].fillna(0).astype("Int8")
+else:
+    summary_compact["large_imputed"] = summary_compact["large"]
+    summary_compact["large_was_imputed"] = 0
+    summary_compact["imputation_tier"] = "none"
+    print("No imputation applied (no canonical class rows found or no census years in data).")
+
+# ---- end suppressed bin imputation ----
+
+# CAFO presence flags — set after imputation so they reflect the imputed large count.
+summary_compact["any_large_cafo"] = (summary_compact["large_imputed"] > 0).astype("Int8")
+summary_compact["any_medium_or_large_cafo"] = (
+    (summary_compact["medium"] + summary_compact["large_imputed"]) > 0
+).astype("Int8")
 
 # QA - print on the missing values, and the total values of the vars for manual inspection
 print("Stage 2 mapped rows:", int(df2["size_source"].notna().sum()))
