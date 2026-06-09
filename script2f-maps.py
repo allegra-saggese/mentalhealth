@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script2h-choropleth-maps.py
+script2f-maps.py
 
 Three sections of county-level choropleth maps, all using Plotly. The panel and
 GeoJSON are loaded once and shared across sections.

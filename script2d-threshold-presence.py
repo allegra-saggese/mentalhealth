@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script2h-threshold-presence.py
+script2d-threshold-presence.py
 
 Motivated by the theory that effects on mental health / deaths of despair stem
 from LARGE CAFO presence and slaughterhouse operations specifically — not simply

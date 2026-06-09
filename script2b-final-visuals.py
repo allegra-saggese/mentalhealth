@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Script 2f: Core descriptive visualizations — CAFO / FSIS exposure vs. outcomes.
+script2b-final-visuals.py
+
+Core descriptive visualizations — CAFO / FSIS exposure vs. outcomes.
 
 Purpose:
     Produces analytically useful figures rather than QA diagnostics.

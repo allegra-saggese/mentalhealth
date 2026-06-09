@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script2i-hispanic-chr-explorer.py
+script2e-hispanic-chr-explorer.py
 
 Explores the broader CHR health landscape across rural US counties, with explicit
 attention to Hispanic population concentration as both a potential confounder and
