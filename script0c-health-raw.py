@@ -38,12 +38,9 @@ from packages import *
 # folders
 inf           = os.path.join(db_data, "raw")
 outf          = os.path.join(db_data, "clean")
-build_dir     = os.path.join(db_data, "clean", "build")
-qa_dir        = os.path.join(db_data, "clean", "qa")
 local_ext_dir = os.path.join(interim, "health-disagg-extension")
-os.makedirs(build_dir,     exist_ok=True)
-os.makedirs(qa_dir,        exist_ok=True)
-os.makedirs(local_ext_dir, exist_ok=True)
+os.makedirs(diagnostic_dir, exist_ok=True)
+os.makedirs(local_ext_dir,  exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
 RUN_CDC_DISAGG_EXTENSION = os.getenv("RUN_CDC_DISAGG_EXTENSION", "0").strip().lower() in {"1", "true", "yes", "y"}
@@ -104,8 +101,8 @@ def _add_key_qa(stage, df, keys):
 def _finalize_qa():
     fill_df = pd.concat(qa_fill_frames, ignore_index=True) if qa_fill_frames else pd.DataFrame()
     key_df = pd.concat(qa_key_frames, ignore_index=True) if qa_key_frames else pd.DataFrame()
-    fill_path = os.path.join(qa_dir, f"{today_str}_qa_health_stage_fill.csv")
-    key_path = os.path.join(qa_dir, f"{today_str}_qa_health_stage_keys.csv")
+    fill_path = os.path.join(diagnostic_dir, f"{today_str}_qa_health_stage_fill.csv")
+    key_path = os.path.join(diagnostic_dir, f"{today_str}_qa_health_stage_keys.csv")
     fill_df.to_csv(fill_path, index=False)
     key_df.to_csv(key_path, index=False)
     print("Saved QA:", fill_path)
@@ -215,7 +212,7 @@ for p in mh_files:
 
 # convert to CSV 
 pd.DataFrame(mh_file_inventory).sort_values("year").to_csv(
-    os.path.join(qa_dir, f"{today_str}_qa_health_mh_file_inventory.csv"), index=False
+    os.path.join(diagnostic_dir, f"{today_str}_qa_health_mh_file_inventory.csv"), index=False
 )
 
 # concat all files 
@@ -247,7 +244,7 @@ presence_df = pd.DataFrame(presence_rows).sort_values(
 )
 
 # ouput this QA file 
-presence_path = os.path.join(qa_dir, f"{today_str}_qa_health_mh_column_presence.csv")
+presence_path = os.path.join(diagnostic_dir, f"{today_str}_qa_health_mh_column_presence.csv")
 presence_df.to_csv(presence_path, index=False)
 print("Saved QA:", presence_path)
 
@@ -411,7 +408,7 @@ cdc_panel.to_csv(cdc_clean_out, index=False)
 print("Saved:", cdc_clean_out)
 
 cdc_inv = pd.DataFrame(cdc_inventory_rows).sort_values("year_from_filename")
-cdc_inv_out = os.path.join(qa_dir, f"{today_str}_qa_cdc_deathsofdespair_file_inventory.csv")
+cdc_inv_out = os.path.join(diagnostic_dir, f"{today_str}_qa_cdc_deathsofdespair_file_inventory.csv")
 cdc_inv.to_csv(cdc_inv_out, index=False)
 print("Saved QA:", cdc_inv_out)
 
@@ -426,7 +423,7 @@ cdc_by_year = (
     )
     .sort_values("year")
 )
-cdc_by_year_out = os.path.join(qa_dir, f"{today_str}_qa_cdc_deathsofdespair_by_year.csv")
+cdc_by_year_out = os.path.join(diagnostic_dir, f"{today_str}_qa_cdc_deathsofdespair_by_year.csv")
 cdc_by_year.to_csv(cdc_by_year_out, index=False)
 print("Saved QA:", cdc_by_year_out)
 
@@ -443,7 +440,7 @@ cdc_key_check = pd.DataFrame(
         }
     ]
 )
-cdc_key_out = os.path.join(qa_dir, f"{today_str}_qa_cdc_deathsofdespair_key_check.csv")
+cdc_key_out = os.path.join(diagnostic_dir, f"{today_str}_qa_cdc_deathsofdespair_key_check.csv")
 cdc_key_check.to_csv(cdc_key_out, index=False)
 print("Saved QA:", cdc_key_out)
 
@@ -479,14 +476,14 @@ overlap_df = (
         overlap_rows=("has_mh", lambda s: int((s & wide_mh_full.loc[s.index, "has_mort"]).sum())),
     )
 )
-overlap_path = os.path.join(qa_dir, f"{today_str}_qa_health_overlap_by_year.csv")
+overlap_path = os.path.join(diagnostic_dir, f"{today_str}_qa_health_overlap_by_year.csv")
 overlap_df.to_csv(overlap_path, index=False)
 print("Saved QA:", overlap_path)
 
 _add_fill("mh_cdc_merged_final", wide_mh_full)
 _add_key_qa("mh_cdc_merged_final", wide_mh_full, ["fips", "year"])
 
-final_out = os.path.join(build_dir, f"{today_str}_mh_mortality_fips_yr.csv")
+final_out = os.path.join(diagnostic_dir, f"{today_str}_mh_mortality_fips_yr.csv")
 wide_mh_full.to_csv(final_out, index=False)
 print("Saved:", final_out)
 

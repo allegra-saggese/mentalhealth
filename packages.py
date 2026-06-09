@@ -19,10 +19,8 @@ from collections import Counter
 from functools import reduce
 
 # All other paths derive from db_base — update this one variable per machine.
-db_base   = os.path.expanduser("~/Dropbox/Mental")
-db_data   = os.path.join(db_base, "Data")
-db_me     = os.path.join(db_base, "allegra-dropbox-copy")
-interim   = os.path.join(db_me, "interim-data")
-# Subdirectories of Data/clean/ for non-panel outputs
-build_dir = os.path.join(db_data, "clean", "build")  # intermediate products
-qa_dir    = os.path.join(db_data, "clean", "qa")     # QA diagnostics
+db_base        = os.path.expanduser("~/Dropbox/Mental")
+db_data        = os.path.join(db_base, "Data")
+db_me          = os.path.join(db_base, "allegra-dropbox-copy")
+interim        = os.path.join(db_me, "interim-data")
+diagnostic_dir = os.path.join(db_data, "clean", "diagnostic")  # QA + intermediates

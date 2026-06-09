@@ -325,8 +325,7 @@ _ANIMAL_REMAP = {v: k for k, v in CANONICAL_ANIMAL_TYPES.items()}
 
 ALL_CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 agfolder = os.path.join(inf, "usda")
-os.makedirs(build_dir, exist_ok=True)
-os.makedirs(qa_dir,    exist_ok=True)
+os.makedirs(diagnostic_dir, exist_ok=True)
 print("Loading NASS CAFO data for all census years:")
 raw_frames = []
 for _yr in ALL_CENSUS_YEARS:
@@ -542,13 +541,8 @@ name_mismatch   = df_big[
 ].copy()
 missing_fips_key = df_big[df_big["_merge"] != "both"].copy()
 
-clean_ag_census = f"{today_str}_ag_annual_df.csv"
-ag_path          = os.path.join(build_dir, clean_ag_census)
-df_big.to_csv(ag_path, index=False)
-print("Saved iterated AG panel:", ag_path)
-
-mismatch_path    = os.path.join(qa_dir, f"{today_str}_ag_fips_name_mismatch.csv")
-missing_key_path = os.path.join(qa_dir, f"{today_str}_ag_fips_missing_key.csv")
+mismatch_path    = os.path.join(diagnostic_dir, f"{today_str}_ag_fips_name_mismatch.csv")
+missing_key_path = os.path.join(diagnostic_dir, f"{today_str}_ag_fips_missing_key.csv")
 name_mismatch.to_csv(mismatch_path, index=False)
 missing_fips_key.to_csv(missing_key_path, index=False)
 print("Saved county-name mismatch rows for manual review:", mismatch_path)
@@ -850,7 +844,7 @@ if not cattle_compact.empty:
             (cattle_wide[lhs] - cattle_wide["canonical_ops_incl_calves"]).abs() / cattle_wide["canonical_ops_incl_calves"] * 100, np.nan,
         )
 
-    cattle_overlap_path = os.path.join(qa_dir, f"{today_str}_qa_cattle_class_overlap_county_year.csv")
+    cattle_overlap_path = os.path.join(diagnostic_dir, f"{today_str}_qa_cattle_class_overlap_county_year.csv")
     cattle_wide.to_csv(cattle_overlap_path, index=False)
 
     year_diag = (
@@ -869,7 +863,7 @@ if not cattle_compact.empty:
     year_diag["ratio_allclass_sum_to_canonical_sum"] = np.where(
         year_diag["canonical_sum"] > 0, year_diag["all_class_sum"] / year_diag["canonical_sum"], np.nan,
     )
-    cattle_overlap_year_path = os.path.join(qa_dir, f"{today_str}_qa_cattle_class_overlap_by_year.csv")
+    cattle_overlap_year_path = os.path.join(diagnostic_dir, f"{today_str}_qa_cattle_class_overlap_by_year.csv")
     year_diag.to_csv(cattle_overlap_year_path, index=False)
     print("Saved cattle overlap QA (county-year):", cattle_overlap_path)
     print("Saved cattle overlap QA (year-level):", cattle_overlap_year_path)
@@ -895,7 +889,7 @@ qa_coverage["coverage_pct"] = np.where(
 )
 qa_coverage["suppressed_ops_estimate"] = qa_coverage["nass_total_ops"] - qa_coverage["bin_sum"]
 
-coverage_path = os.path.join(qa_dir, f"{today_str}_qa_cafo_bin_coverage_vs_nass_total.csv")
+coverage_path = os.path.join(diagnostic_dir, f"{today_str}_qa_cafo_bin_coverage_vs_nass_total.csv")
 qa_coverage.to_csv(coverage_path, index=False)
 
 coverage_year = (
@@ -911,7 +905,7 @@ coverage_year["ratio_bin_to_nass"] = np.where(
     coverage_year["nass_total_total"] > 0,
     coverage_year["bin_sum_total"] / coverage_year["nass_total_total"], np.nan,
 )
-coverage_year_path = os.path.join(qa_dir, f"{today_str}_qa_cafo_bin_coverage_by_year_commodity.csv")
+coverage_year_path = os.path.join(diagnostic_dir, f"{today_str}_qa_cafo_bin_coverage_by_year_commodity.csv")
 coverage_year.to_csv(coverage_year_path, index=False)
 print("Saved bin coverage QA (county-year):", coverage_path)
 print("Saved bin coverage QA (year-level):", coverage_year_path)
@@ -965,7 +959,7 @@ for _animal, (_commodity, _canon_class) in CANONICAL_ANIMAL_TYPES.items():
 if _imp_frames:
     _imp_merge = pd.concat(_imp_frames, ignore_index=True)
 
-    imp_path  = os.path.join(qa_dir, f"{today_str}_qa_suppressed_bin_imputation.csv")
+    imp_path  = os.path.join(diagnostic_dir, f"{today_str}_qa_suppressed_bin_imputation.csv")
     _imp_merge.to_csv(imp_path, index=False)
 
     _tier_summary = (
@@ -973,7 +967,7 @@ if _imp_frames:
         .groupby(["year", "commodity_desc", "class_desc", "imputation_tier"], as_index=False)
         .agg(n_counties=("fips_generated", "count"))
     )
-    tier_path = os.path.join(qa_dir, f"{today_str}_qa_imputation_tier_summary.csv")
+    tier_path = os.path.join(diagnostic_dir, f"{today_str}_qa_imputation_tier_summary.csv")
     _tier_summary.to_csv(tier_path, index=False)
     print("Saved suppression imputation QA:", imp_path)
     print("Saved imputation tier summary:", tier_path)
@@ -1072,18 +1066,6 @@ print("Compact animal types:", sorted(summary_compact["commodity_desc"].dropna()
 # PART 12 : EXPORT
 # =============================================================================
 
-clean_cafo_row     = f"{today_str}_cafo_annual_df.csv"
-clean_cafo_long    = f"{today_str}_cafo_ops_by_size_long.csv"
-clean_cafo_compact = f"{today_str}_cafo_ops_by_size_compact.csv"
-
-cafo_row_path     = os.path.join(build_dir, clean_cafo_row)
-cafo_long_path    = os.path.join(build_dir, clean_cafo_long)
-cafo_compact_path = os.path.join(outf,      clean_cafo_compact)
-
-df2.to_csv(cafo_row_path, index=False)
-summary.to_csv(cafo_long_path, index=False)
+cafo_compact_path = os.path.join(outf, f"{today_str}_cafo_ops_by_size_compact.csv")
 summary_compact.to_csv(cafo_compact_path, index=False)
-
-print("Saved CAFO row-level panel:", cafo_row_path)
-print("Saved CAFO long summary:", cafo_long_path)
 print("Saved CAFO compact summary:", cafo_compact_path)

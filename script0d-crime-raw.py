@@ -41,12 +41,9 @@ from packages import *
 # other folders
 inf           = os.path.join(db_data, "raw")
 outf          = os.path.join(db_data, "clean")
-build_dir     = os.path.join(db_data, "clean", "build")
-qa_dir        = os.path.join(db_data, "clean", "qa")
 local_ext_dir = os.path.join(interim, "crime-disagg-extension")
-os.makedirs(build_dir,     exist_ok=True)
-os.makedirs(qa_dir,        exist_ok=True)
-os.makedirs(local_ext_dir, exist_ok=True)
+os.makedirs(diagnostic_dir, exist_ok=True)
+os.makedirs(local_ext_dir,  exist_ok=True)
 today_str = date.today().strftime("%Y-%m-%d")
 RUN_CRIME_DISAGG_EXTENSION = os.getenv("RUN_CRIME_DISAGG_EXTENSION", "0").strip().lower() in {"1", "true", "yes", "y"}
 
@@ -263,7 +260,7 @@ collapsed_fips_only["total_incidents"] = collapsed_fips_only[crime_cols_present]
 
 # output creation
 crime_w_demog = f"{today_str}_crime_demog_final.csv"
-cdpath = os.path.join(build_dir, crime_w_demog)
+cdpath = os.path.join(diagnostic_dir, crime_w_demog)
 combined_df.to_csv(cdpath, index=False)
 
 
@@ -337,7 +334,7 @@ if RUN_CRIME_DISAGG_EXTENSION:
             ],
             ignore_index=True,
         )
-        qa_bucket_out = os.path.join(qa_dir, f"{today_str}_qa_crime_disagg_bucket_values.csv")
+        qa_bucket_out = os.path.join(diagnostic_dir, f"{today_str}_qa_crime_disagg_bucket_values.csv")
         qa_bucket.to_csv(qa_bucket_out, index=False)
         print("Saved QA:", qa_bucket_out)
 
@@ -353,7 +350,7 @@ if RUN_CRIME_DISAGG_EXTENSION:
                 }
             ]
         )
-        qa_keys_out = os.path.join(qa_dir, f"{today_str}_qa_crime_disagg_key_check.csv")
+        qa_keys_out = os.path.join(diagnostic_dir, f"{today_str}_qa_crime_disagg_key_check.csv")
         qa_keys.to_csv(qa_keys_out, index=False)
         print("Saved QA:", qa_keys_out)
 else:

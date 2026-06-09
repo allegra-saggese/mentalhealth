@@ -30,9 +30,9 @@ from functions import (
 db_base   = os.path.expanduser("~/Dropbox/Mental")
 db_data   = os.path.join(db_base, "Data")
 clean_dir = os.path.join(db_data, "clean")
-build_dir = os.path.join(db_data, "clean", "build")
+diagnostic_dir = os.path.join(db_data, "clean", "diagnostic")
 qa_dir    = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
-os.makedirs(build_dir, exist_ok=True)
+os.makedirs(diagnostic_dir, exist_ok=True)
 os.makedirs(qa_dir,    exist_ok=True)
 
 today_str = date.today().strftime("%Y-%m-%d")
@@ -138,7 +138,7 @@ def _apply_fill(out: pd.DataFrame, candidate_col: str, method_label: str, flag_c
 
 def main():
     src_interim = _latest_file(
-        build_dir,
+        diagnostic_dir,
         r"^(\d{4}-\d{2}-\d{2})_fsis_establishment_year_fips_size_type_interim_hudbulk_manualzip\.csv$",
     )
     src_fips_key = _latest_file(
@@ -445,7 +445,7 @@ def main():
     # ------------------------------------------------------------------
     # Outputs
     # ------------------------------------------------------------------
-    interim_out = os.path.join(build_dir,    f"{today_str}_fsis_establishment_year_fips_size_type_interim_hudbulk_manualzip.csv")
+    interim_out = os.path.join(diagnostic_dir,    f"{today_str}_fsis_establishment_year_fips_size_type_interim_hudbulk_manualzip.csv")
     county_out  = os.path.join(clean_dir, f"{today_str}_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip.csv")
 
     qa_metrics_out = os.path.join(qa_dir, f"{today_str}_fsis_round2_completion_metrics.csv")
