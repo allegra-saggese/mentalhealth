@@ -141,9 +141,9 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
     return out
 
 
-def _build_cafo_animal_size_panel(path, allowed_keys):
+def _build_cafo_commodity_size_panel(path, allowed_keys):
     """
-    Build county-year CAFO animal × size columns from the compact CAFO file.
+    Build county-year CAFO commodity × size columns from the compact CAFO file.
     The compact (script0b) outputs one row per (fips, year, commodity_desc) with
     commodity_desc already remapped to one of: cattle, beef, dairy, hogs, chickens.
     No class_desc column exists — the remap encodes it into commodity_desc.
@@ -154,18 +154,18 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
     try:
         df = read_and_prepare(path)
     except Exception as e:
-        print(f"Skip CAFO animal-size block: failed to read base file ({e})")
+        print(f"Skip CAFO commodity-size block: failed to read base file ({e})")
         return None
 
     df = _ensure_key(df)
     if df is None:
-        print("Skip CAFO animal-size block: missing fips/year")
+        print("Skip CAFO commodity-size block: missing fips/year")
         return None
 
     needed = {"commodity_desc", "small", "medium", "large"}
     missing_needed = sorted(needed - set(df.columns))
     if missing_needed:
-        print(f"Skip CAFO animal-size block: missing required columns {missing_needed}")
+        print(f"Skip CAFO commodity-size block: missing required columns {missing_needed}")
         return None
 
     df["commodity_desc"] = df["commodity_desc"].astype("string").str.strip().str.lower()
@@ -225,7 +225,7 @@ def _build_cafo_animal_size_panel(path, allowed_keys):
         "cafo_beef_total", "cafo_dairy_total",
     ]
     wide = wide[[c for c in keep_cols if c in wide.columns]].copy()
-    print(f"Use CAFO animal-size block: {wide.shape}")
+    print(f"Use CAFO commodity-size block: {wide.shape}")
     return wide
 
 
@@ -283,10 +283,10 @@ merged_all = allowed_keys.copy()
 merged_all["non_large_metro"] = 1
 merged_all = merged_all.merge(base, on=["fips", "year"], how="left")
 
-# Add CAFO animal x size block (in addition to legacy total-size columns).
-cafo_animal_size = _build_cafo_animal_size_panel(latest[BASE_DESCRIPTOR], allowed_keys)
-if cafo_animal_size is not None and not cafo_animal_size.empty:
-    merged_all = merged_all.merge(cafo_animal_size, on=["fips", "year"], how="left")
+# Add CAFO commodity x size block (in addition to legacy total-size columns).
+cafo_commodity_size = _build_cafo_commodity_size_panel(latest[BASE_DESCRIPTOR], allowed_keys)
+if cafo_commodity_size is not None and not cafo_commodity_size.empty:
+    merged_all = merged_all.merge(cafo_commodity_size, on=["fips", "year"], how="left")
 
 # --- CAFO zero-fill for rural counties absent from USDA Census file ---
 # The USDA Agricultural Census is comprehensive: a rural county that does not
@@ -324,6 +324,17 @@ print(
     f"(rural counties absent from USDA Census = confirmed no operations). "
     f"Years covered by CAFO data: {sorted(_cafo_covered_years)}."
 )
+
+# Forward-fill CAFO values across inter-census years.
+# Each USDA Agricultural Census is treated as valid until the next one:
+# e.g., 2003–2006 inherit 2002 census values; 2008–2011 inherit 2007 values.
+# Only forward-fills (no backfill), so pre-2002 years remain NaN.
+merged_all = merged_all.sort_values(["fips", "year"]).reset_index(drop=True)
+merged_all[_cafo_fill_cols] = (
+    merged_all.groupby("fips")[_cafo_fill_cols]
+    .ffill()
+)
+print(f"CAFO forward-fill: {len(_cafo_fill_cols)} columns carried forward to inter-census years.")
 
 
 # Merge remaining selected datasets on top of base keys
@@ -789,21 +800,28 @@ merged_all.rename(columns=_rmap, inplace=True)
 print(f"Columns renamed: {len(_rmap)}. Final shape: {merged_all.shape}")
 
 
-# Export
-out_path = os.path.join(merged_dir, f"{today_str}_panel.csv")
 os.makedirs(merged_dir, exist_ok=True)
-merged_all.to_csv(out_path, index=False)
-print("Saved:", out_path)
 
+# Identify FSIS columns (renamed suffix is _fsis after strip_source_suffixes).
+_fsis_panel_cols = [c for c in merged_all.columns if c.endswith("_fsis")]
 
-# Spliced exports
-slice_2005_2010  = merged_all[merged_all["year"].between(2005, 2010, inclusive="both")].copy()
-slice_2010_2020  = merged_all[merged_all["year"].between(2010, 2020, inclusive="both")].copy()
-slice_census_yrs = merged_all[merged_all["year"].isin([2002, 2007, 2012, 2017, 2022])].copy()
+# --- Panel A: no FSIS, full time range ---
+# Use for any analysis that doesn't require slaughterhouse data.
+# FSIS is only available 2017+; keeping it in the full panel would add ~300 NaN
+# rows per county and imply a shorter effective sample window.
+panel_no_fsis = merged_all.drop(columns=_fsis_panel_cols)
+out_path = os.path.join(merged_dir, f"{today_str}_panel.csv")
+panel_no_fsis.to_csv(out_path, index=False)
+print("Saved:", out_path, "| rows:", len(panel_no_fsis), "| cols:", panel_no_fsis.shape[1])
 
-slice_05_10_path    = os.path.join(merged_dir, f"{today_str}_panel_05_10.csv")
-slice_10_20_path    = os.path.join(merged_dir, f"{today_str}_panel_10_20.csv")
-slice_census_path   = os.path.join(merged_dir, f"{today_str}_panel_census_years.csv")
+# Year slices of the no-FSIS panel
+slice_2005_2010  = panel_no_fsis[panel_no_fsis["year"].between(2005, 2010, inclusive="both")].copy()
+slice_2010_2020  = panel_no_fsis[panel_no_fsis["year"].between(2010, 2020, inclusive="both")].copy()
+slice_census_yrs = panel_no_fsis[panel_no_fsis["year"].isin([2002, 2007, 2012, 2017, 2022])].copy()
+
+slice_05_10_path  = os.path.join(merged_dir, f"{today_str}_panel_05_10.csv")
+slice_10_20_path  = os.path.join(merged_dir, f"{today_str}_panel_10_20.csv")
+slice_census_path = os.path.join(merged_dir, f"{today_str}_panel_census_years.csv")
 
 slice_2005_2010.to_csv(slice_05_10_path, index=False)
 slice_2010_2020.to_csv(slice_10_20_path, index=False)
@@ -812,3 +830,11 @@ slice_census_yrs.to_csv(slice_census_path, index=False)
 print("Saved:", slice_05_10_path,  "| rows:", len(slice_2005_2010))
 print("Saved:", slice_10_20_path,  "| rows:", len(slice_2010_2020))
 print("Saved:", slice_census_path, "| rows:", len(slice_census_yrs))
+
+# --- Panel B: with FSIS, restricted to 2017+ ---
+# Use only for analyses that include slaughterhouse presence/count as a variable.
+# Restricting to 2017+ avoids the all-NaN FSIS rows that dominate earlier years.
+panel_fsis = merged_all[merged_all["year"] >= 2017].copy()
+out_fsis_path = os.path.join(merged_dir, f"{today_str}_panel_fsis.csv")
+panel_fsis.to_csv(out_fsis_path, index=False)
+print("Saved:", out_fsis_path, "| rows:", len(panel_fsis), "| cols:", panel_fsis.shape[1])

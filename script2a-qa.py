@@ -176,14 +176,14 @@ else:
     keep_cols = [c for c in keep_cols if c is not None and c in outliers.columns]
     outliers  = outliers[keep_cols].sort_values("abs_z", ascending=False).head(1000)
 
-    # Re-export merged panel + year slices with diagnostic columns appended
-    df.to_csv(os.path.join(merged_dir, f"{today_str}_full_merged.csv"), index=False)
+    # Re-export panel + year slices with diagnostic columns appended
+    df.to_csv(os.path.join(merged_dir, f"{today_str}_panel.csv"), index=False)
     df[df["year"].between(2005, 2010, inclusive="both")].to_csv(
-        os.path.join(merged_dir, f"{today_str}_full_merged_2005_2010.csv"), index=False)
+        os.path.join(merged_dir, f"{today_str}_panel_05_10.csv"), index=False)
     df[df["year"].between(2010, 2020, inclusive="both")].to_csv(
-        os.path.join(merged_dir, f"{today_str}_full_merged_2010_2020.csv"), index=False)
+        os.path.join(merged_dir, f"{today_str}_panel_10_20.csv"), index=False)
     df[df["year"].isin([2002, 2005, 2007, 2012])].to_csv(
-        os.path.join(merged_dir, f"{today_str}_full_merged_census_years.csv"), index=False)
+        os.path.join(merged_dir, f"{today_str}_panel_census_years.csv"), index=False)
 
     overall.to_csv(os.path.join(qa_dir, f"{today_str}_qa_cdc_cruderate_sensecheck_overall.csv"),        index=False)
     by_year.to_csv(os.path.join(qa_dir, f"{today_str}_qa_cdc_cruderate_sensecheck_by_year.csv"),         index=False)

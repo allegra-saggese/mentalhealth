@@ -35,18 +35,24 @@ MENTAL_KEYWORDS = (
     "drug_overdose",
 )
 
+# Column names as they appear in the renamed panel (script1b strips source suffixes).
+# poor_mental_health_days: raw_value kept (not in CHR_PROPORTION conversion list).
+# frequent_mental_distress, mental_health_providers, excessive_drinking: raw_value
+# dropped by script1b after per100k conversion — use _per100k variants.
 CORE_MENTAL_OUTCOMES = [
-    "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "frequent_mental_distress_raw_value_mentalhealthrank_full",
-    "mental_health_providers_raw_value_mentalhealthrank_full",
-    "excessive_drinking_raw_value_mentalhealthrank_full",
+    "poor_mental_health_days",
+    "frequent_mental_distress_per100k",
+    "mental_health_providers_per100k",
+    "excessive_drinking_per100k",
 ]
 
 CORE_CONTEXT_COLS = [
-    "deaths_cdc_county_year_deathsofdespair",
-    "crude_rate_cdc_county_year_deathsofdespair",
-    "population_population_full",
-    "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "deaths_despair",
+    "crude_rate_despair",
+    "population",
+    # n_unique_establishments_fsis is dropped from panel.csv (FSIS-only panel);
+    # included here so the fill-rate table shows its absence explicitly.
+    "n_unique_establishments_fsis",
 ]
 
 
@@ -111,14 +117,7 @@ src_dup.to_csv(os.path.join(out_dir, "qa_panel_source_duplication_counts.csv"), 
 # ---------------------------------------------------------------------
 # 2) Mental variable inventory (focused)
 # ---------------------------------------------------------------------
-mh_rank_cols = [c for c in df.columns if c.endswith("_mentalhealthrank_full")]
-mh_focus_cols = []
-for c in mh_rank_cols:
-    base = c[: -len("_mentalhealthrank_full")]
-    if any(k in base for k in MENTAL_KEYWORDS):
-        mh_focus_cols.append(c)
-
-mh_focus_cols = sorted(set(mh_focus_cols))
+mh_focus_cols = sorted([c for c in df.columns if any(k in c for k in MENTAL_KEYWORDS)])
 
 inv_rows = []
 for c in mh_focus_cols:
@@ -203,11 +202,11 @@ by_year.to_csv(os.path.join(out_dir, "qa_mental_outcome_core_by_year.csv"), inde
 # ---------------------------------------------------------------------
 pairs = [
     (
-        "poor_mental_health_days_raw_value_mentalhealthrank_full",
+        "poor_mental_health_days",
         "poor_mental_health_days_raw_value_mh_mortality_fips_yr",
     ),
     (
-        "frequent_mental_distress_raw_value_mentalhealthrank_full",
+        "frequent_mental_distress_per100k",
         "frequent_mental_distress_raw_value_mh_mortality_fips_yr",
     ),
 ]
@@ -324,16 +323,16 @@ plt.rcParams.update({
 # in which years. Replaces having to read multiple coverage CSVs manually.
 # -----------------------------------------------------------------------------
 COVERAGE_OUTCOMES = {
-    "Poor Mental Health Days (CHR)": "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "Frequent Mental Distress (CHR)": "frequent_mental_distress_raw_value_mentalhealthrank_full",
-    "Excessive Drinking (CHR)": "excessive_drinking_raw_value_mentalhealthrank_full",
-    "Violent Crime Rate (CHR)": "violent_crime_raw_value_mentalhealthrank_full",
-    "Homicide Rate (CHR)": "homicides_raw_value_mentalhealthrank_full",
-    "Aggravated Assault (UCR)": "aggravated_assault_crime_fips_level_final",
-    "Deaths of Despair Crude Rate (CDC)": "crude_rate_cdc_county_year_deathsofdespair",
+    "Poor Mental Health Days (CHR)": "poor_mental_health_days",
+    "Frequent Mental Distress per 100k (CHR)": "frequent_mental_distress_per100k",
+    "Excessive Drinking per 100k (CHR)": "excessive_drinking_per100k",
+    "Violent Crime Rate (CHR)": "violent_crime",
+    "Homicide Rate (CHR)": "homicides",
+    "Aggravated Assault (UCR)": "aggravated_assault_crime",
+    "Deaths of Despair Crude Rate (CDC)": "crude_rate_despair",
     "CAFO Total Ops": "cafo_total_ops_all_animals",
-    "FSIS Establishments": "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "County Population": "population_population_full",
+    "FSIS Establishments": "n_unique_establishments_fsis",
+    "County Population": "population",
 }
 
 years_all = sorted(df["year"].dropna().astype(int).unique())
@@ -423,26 +422,21 @@ print("Saved: panel balance tables")
 # column in the current pipeline. A separate CDC WONDER pull by ICD-10 cause
 # codes X60-X84 would be required for suicide-specific analysis.
 # -----------------------------------------------------------------------------
-CDC_DEATHS_COL = "deaths_cdc_county_year_deathsofdespair"
-CDC_CRUDE_COL = "crude_rate_cdc_county_year_deathsofdespair"
-CDC_UNRELIABLE_COL = "is_unreliable_cdc_county_year_deathsofdespair"
+# is_unreliable is dropped by script1b's column cleanup (not in the CDC keep-prefix list).
+CDC_DEATHS_COL = "deaths_despair"
+CDC_CRUDE_COL = "crude_rate_despair"
 
-cdc_cols_present = all(c in df.columns for c in [CDC_DEATHS_COL, CDC_CRUDE_COL, CDC_UNRELIABLE_COL])
+cdc_cols_present = all(c in df.columns for c in [CDC_DEATHS_COL, CDC_CRUDE_COL])
 if cdc_cols_present:
     supp_rows = []
     for yr, g in df.groupby("year"):
         deaths = to_num(g[CDC_DEATHS_COL])
         crude = to_num(g[CDC_CRUDE_COL])
-        unreliable = to_num(g[CDC_UNRELIABLE_COL])
         n_with_deaths = int(deaths.notna().sum())
         supp_rows.append({
             "year": int(yr),
             "n_county_rows": int(len(g)),
             "n_with_deaths_data": n_with_deaths,
-            "n_unreliable_flagged": int((unreliable == 1).sum()),
-            "pct_unreliable_of_deaths_obs": (
-                round((unreliable == 1).sum() / n_with_deaths * 100, 1) if n_with_deaths else np.nan
-            ),
             "n_with_crude_rate": int(crude.notna().sum()),
             "pct_crude_rate_coverage": round(crude.notna().mean() * 100, 1),
         })
@@ -464,12 +458,12 @@ else:
 # 2012 chosen as reference: good CAFO coverage (97%) and partial MH coverage.
 # -----------------------------------------------------------------------------
 HIST_OUTCOMES = {
-    "Poor Mental Health Days\n(avg days/month)": "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "Excessive Drinking\n(% adults)": "excessive_drinking_raw_value_mentalhealthrank_full",
-    "Violent Crime Rate\n(per 100k, CHR)": "violent_crime_raw_value_mentalhealthrank_full",
-    "Homicide Rate\n(per 100k, CHR)": "homicides_raw_value_mentalhealthrank_full",
-    "Aggravated Assault\n(UCR raw count)": "aggravated_assault_crime_fips_level_final",
-    "Deaths of Despair\nCrude Rate (per 100k)": "crude_rate_cdc_county_year_deathsofdespair",
+    "Poor Mental Health Days\n(avg days/month)": "poor_mental_health_days",
+    "Excessive Drinking\n(per 100k)": "excessive_drinking_per100k",
+    "Violent Crime Rate\n(per 100k, CHR)": "violent_crime",
+    "Homicide Rate\n(per 100k, CHR)": "homicides",
+    "Aggravated Assault\n(UCR raw count)": "aggravated_assault_crime",
+    "Deaths of Despair\nCrude Rate (per 100k)": "crude_rate_despair",
 }
 
 df_2012 = df[df["year"] == 2012].copy()
@@ -518,7 +512,7 @@ print("Saved:", dist_path)
 # for scatter plots: raw CAFO counts are heavily right-skewed, driven by
 # county population size, and compress most counties to the left of any plot.
 # -----------------------------------------------------------------------------
-POP_COL = "population_population_full"
+POP_COL = "population"
 CAFO_COL = "cafo_total_ops_all_animals"
 
 if POP_COL in df.columns and CAFO_COL in df.columns:
