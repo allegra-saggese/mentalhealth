@@ -245,6 +245,80 @@ def _load_or_pull_year(year, raw_dir):
     return _pull_raw_year(year, raw_dir)
 
 
+# ---- Head-count cache helpers ----
+
+def _find_cached_heads(year, raw_dir):
+    """Return path to cached HEAD TOTAL CSV for this year, or None."""
+    matches = sorted(glob.glob(os.path.join(raw_dir, f"*_usda_{year}_api_heads_total_raw.csv")))
+    return matches[-1] if matches else None
+
+
+def _pull_heads_year(year, raw_dir):
+    """Pull unit=HEAD, domain=TOTAL rows from NASS API for one census year and cache."""
+    from datetime import date as _date
+    today_str  = _date.today().strftime("%Y-%m-%d")
+    rate_sleep = 0.4
+    frames = []
+    for cmd in ["CATTLE", "CHICKENS", "HOGS"]:
+        time.sleep(rate_sleep)
+        params = {
+            "key": NASS_API_KEY,
+            "source_desc": "CENSUS",
+            "agg_level_desc": "COUNTY",
+            "sector_desc": "ANIMALS & PRODUCTS",
+            "commodity_desc": cmd,
+            "unit_desc": "HEAD",
+            "statisticcat_desc": "INVENTORY",
+            "domain_desc": "TOTAL",
+            "year": year,
+        }
+        try:
+            count = functions.nass_get_counts(NASS_BASE, params)
+            if not count:
+                continue
+            df_pull = functions.nass_get_data(NASS_BASE, params)
+            if not df_pull.empty:
+                frames.append(df_pull)
+                print(f"  {year} {cmd} total-heads: {len(df_pull):,} rows")
+        except RuntimeError as e:
+            print(f"  Total-heads error {cmd} {year}: {e}")
+    if not frames:
+        print(f"  WARNING: no head-count rows for {year}")
+        return pd.DataFrame()
+    raw = pd.concat(frames, ignore_index=True)
+    raw.columns = [c.lower().strip() for c in raw.columns]
+    raw = raw.drop_duplicates()
+    out_path = os.path.join(raw_dir, f"{today_str}_usda_{year}_api_heads_total_raw.csv")
+    raw.to_csv(out_path, index=False)
+    print(f"  {year}: saved {len(raw):,} head-count rows → {os.path.basename(out_path)}")
+    return raw
+
+
+def _load_or_pull_heads(year, raw_dir):
+    """Load head totals from cache if available; otherwise pull from API and cache."""
+    cached = _find_cached_heads(year, raw_dir)
+    if cached:
+        print(f"  {year}: loading head totals from cache — {os.path.basename(cached)}")
+        df = pd.read_csv(cached, low_memory=False)
+        df.columns = [c.lower().strip() for c in df.columns]
+        return df
+    print(f"  {year}: no head-count cache — pulling from NASS API ...")
+    return _pull_heads_year(year, raw_dir)
+
+
+# ---- Canonical animal types: (commodity_desc, class_desc) → output commodity_desc label ----
+# cattle = all cattle incl calves (superset); beef and dairy are subsets and intentionally overlap.
+CANONICAL_ANIMAL_TYPES = {
+    "cattle":   ("cattle",   "incl calves"),
+    "beef":     ("cattle",   "cows, beef"),
+    "dairy":    ("cattle",   "cows, milk"),
+    "hogs":     ("hogs",     "all classes"),
+    "chickens": ("chickens", "layers"),
+}
+# Reverse map for remapping after imputation
+_ANIMAL_REMAP = {v: k for k, v in CANONICAL_ANIMAL_TYPES.items()}
+
+
 # =============================================================================
 # PART 2 : LOAD ALL CENSUS YEARS
 # =============================================================================
