@@ -15,16 +15,17 @@ all three sections.
 
   Section 2 — Correlation tables + FSIS column QA + QA memo
     Pairwise Pearson and Spearman correlation tables across three time windows.
-    FSIS 12-column upper-tail range check. Markdown QA memo summarizing results.
+    FSIS 12-column upper-tail range check (uses panel_fsis.csv). Markdown QA memo.
     Outputs: correlation_*.csv, qa_fsis_12_column_check.csv,
-             qa_key_variable_coverage_by_year.csv, qa_memo_panel_sumstats_by_farms.md
+             qa_key_variable_coverage_by_year.csv, qa_memo_panel_qa.md
 
   Section 3 — FSIS size bins vs. poor mental health days (2017)
     Faceted scatter of establishment counts by size bucket vs. outcome (2017 cross-section).
+    Uses panel_fsis.csv (FSIS available 2017+ only).
     Outputs: fsis_size_bins_vs_poor_mental_health_2017_*.{csv,png}
 
-Tables  → Dropbox/Mental/Data/output/tables/panel-sumstats-by-farms/
-Figures → Dropbox/Mental/Data/output/figs/panel-sumstats-by-farms/plots/
+Tables  → Dropbox/Mental/Data/output/tables/panel-qa/
+Figures → Dropbox/Mental/Data/output/figs/panel-qa/plots/
 """
 
 from packages import *
@@ -32,18 +33,18 @@ from functions import *
 
 # ── Directories ───────────────────────────────────────────────────────────────
 merged_dir     = os.path.join(db_data, "merged")
-qa_dir         = os.path.join(tables_dir, "panel-sumstats-by-farms")
-plots_dir      = os.path.join(qa_dir, "plots")          # CSV plot data
-figs_plots_dir = os.path.join(figs_dir, "panel-sumstats-by-farms", "plots")  # PNG
+qa_dir         = os.path.join(tables_dir, "panel-qa")
+plots_dir      = os.path.join(qa_dir, "plots")
+figs_plots_dir = os.path.join(figs_dir, "panel-qa", "plots")
 for _d in (qa_dir, plots_dir, figs_plots_dir):
     os.makedirs(_d, exist_ok=True)
 
 # ── Column name constants ─────────────────────────────────────────────────────
-CDC_DEATHS  = "deaths_cdc_county_year_deathsofdespair"
-CDC_POP     = "population_cdc_county_year_deathsofdespair"
-CDC_CRUDE   = "crude_rate_cdc_county_year_deathsofdespair"
-COUNTY_NAME = "county_name_cdc_county_year_deathsofdespair"
-CENSUS_POP  = "population_population_full"
+CDC_DEATHS  = "deaths_despair"
+CDC_POP     = "population_despair"    # dropped from panel after cleanup; handled gracefully
+CDC_CRUDE   = "crude_rate_despair"
+COUNTY_NAME = "county_name_despair"   # dropped from panel after cleanup; handled gracefully
+CENSUS_POP  = "population"
 
 MIN_CORR_N = 200
 
@@ -56,6 +57,15 @@ df = df.drop_duplicates(subset=["fips", "year"], keep="first").copy()
 df = df.sort_values(["fips", "year"]).reset_index(drop=True)
 print(f"Merged panel: {len(df):,} rows | {df['fips'].nunique():,} counties | "
       f"{int(df['year'].min())}–{int(df['year'].max())}")
+
+# Also load FSIS panel for FSIS-specific sections (2017+ only, 155 cols)
+fsis_path = latest_file_glob(merged_dir, "*_panel_fsis.csv")
+df_fsis = pd.read_csv(fsis_path, low_memory=False)
+df_fsis = normalize_panel_key(df_fsis)
+df_fsis = df_fsis.loc[:, ~df_fsis.columns.duplicated()].copy()
+df_fsis = df_fsis.sort_values(["fips", "year"]).reset_index(drop=True)
+print(f"FSIS panel:   {len(df_fsis):,} rows | {df_fsis['fips'].nunique():,} counties | "
+      f"{int(df_fsis['year'].min())}–{int(df_fsis['year'].max())}")
 
 
 # =============================================================================
@@ -91,14 +101,14 @@ def _summarize_cdc(g):
         "corr_recalc_vs_cdc":            float(recalc.corr(cdc))      if recalc.notna().sum()>1 and cdc.notna().sum()>1 else np.nan,
     })
 
-required = [CDC_DEATHS, CDC_POP, CDC_CRUDE, CENSUS_POP]
+required = [CDC_DEATHS, CDC_CRUDE, CENSUS_POP]
 missing  = [c for c in required if c not in df.columns]
 if missing:
     print(f"WARNING: skipping CDC sense check — missing columns: {missing}")
 else:
-    df["cdc_deaths"]       = to_numeric_series(df[CDC_DEATHS])
-    df["cdc_population"]   = to_numeric_series(df[CDC_POP])
-    df["cdc_crude_rate"]   = to_numeric_series(df[CDC_CRUDE])
+    df["cdc_deaths"]        = to_numeric_series(df[CDC_DEATHS])
+    df["cdc_population"]    = to_numeric_series(df[CDC_POP]) if CDC_POP in df.columns else np.nan
+    df["cdc_crude_rate"]    = to_numeric_series(df[CDC_CRUDE])
     df["census_population"] = to_numeric_series(df[CENSUS_POP])
 
     df["crude_rate_recalc_census_pop"] = np.where(
@@ -182,7 +192,7 @@ else:
         os.path.join(merged_dir, f"{today_str}_panel_05_10.csv"), index=False)
     df[df["year"].between(2010, 2020, inclusive="both")].to_csv(
         os.path.join(merged_dir, f"{today_str}_panel_10_20.csv"), index=False)
-    df[df["year"].isin([2002, 2005, 2007, 2012])].to_csv(
+    df[df["year"].isin([2002, 2007, 2012, 2017, 2022])].to_csv(
         os.path.join(merged_dir, f"{today_str}_panel_census_years.csv"), index=False)
 
     overall.to_csv(os.path.join(qa_dir, f"{today_str}_qa_cdc_cruderate_sensecheck_overall.csv"),        index=False)
@@ -203,26 +213,24 @@ cafo_cols = [
     "cafo_total_ops_all_animals", "cafo_total_ops_chickens",
 ]
 mental_cols = [
-    "poor_mental_health_days_raw_value_mentalhealthrank_full",
-    "frequent_mental_distress_raw_value_mentalhealthrank_full",
-    "poor_mental_health_days_raw_value_mh_mortality_fips_yr",
-    "frequent_mental_distress_raw_value_mh_mortality_fips_yr",
+    "poor_mental_health_days",
+    "frequent_mental_distress_per100k",
 ]
-mortality_cols = ["mortality_total_deaths_mh_mortality_fips_yr"]
-population_cols = ["population_population_full"]
+mortality_cols = []
+population_cols = ["population"]
 fsis_12_cols = [
-    "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_unique_est_size_combos_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_slaughterhouse_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_processing_present_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_meat_slaughter_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_poultry_slaughter_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_1_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_2_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_3_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_4_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_5_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_missing_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_unique_establishments_fsis",
+    "n_unique_est_size_combos_fsis",
+    "n_slaughterhouse_present_establishments_fsis",
+    "n_processing_present_establishments_fsis",
+    "n_meat_slaughter_establishments_fsis",
+    "n_poultry_slaughter_establishments_fsis",
+    "n_size_bucket_1_fsis",
+    "n_size_bucket_2_fsis",
+    "n_size_bucket_3_fsis",
+    "n_size_bucket_4_fsis",
+    "n_size_bucket_5_fsis",
+    "n_size_bucket_missing_fsis",
 ]
 
 all_cols      = [*cafo_cols, *mental_cols, *mortality_cols, *population_cols, *fsis_12_cols]
@@ -250,17 +258,24 @@ for yr, g in df.groupby("year", as_index=False):
     for c in [
         "cafo_total_ops_all_animals",
         "cafo_total_ops_chickens",
-        "poor_mental_health_days_raw_value_mentalhealthrank_full",
-        "frequent_mental_distress_raw_value_mentalhealthrank_full",
-        "mortality_total_deaths_mh_mortality_fips_yr",
-        "n_unique_establishments_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-        "population_population_full",
+        "poor_mental_health_days",
+        "frequent_mental_distress_per100k",
+        "deaths_despair",
+        "population",
     ]:
         if c in g.columns:
             row[f"fill_pct__{c}"] = float(g[c].notna().mean() * 100)
     coverage_rows.append(row)
-pd.DataFrame(coverage_rows).sort_values("year").to_csv(
-    os.path.join(qa_dir, "qa_key_variable_coverage_by_year.csv"), index=False)
+# Append FSIS coverage for 2017+ from the FSIS panel
+fsis_cov = []
+for yr, g in df_fsis.groupby("year", as_index=False):
+    fsis_cov.append({"year": int(yr),
+                     "fill_pct__n_unique_establishments_fsis":
+                         float(g["n_unique_establishments_fsis"].notna().mean() * 100)
+                     if "n_unique_establishments_fsis" in g.columns else np.nan})
+fsis_cov_df = pd.DataFrame(fsis_cov)
+cov_df = pd.DataFrame(coverage_rows).sort_values("year").merge(fsis_cov_df, on="year", how="left")
+cov_df.to_csv(os.path.join(qa_dir, "qa_key_variable_coverage_by_year.csv"), index=False)
 
 # FSIS 12-column upper-tail QA
 def _safe_float(v):
@@ -271,9 +286,9 @@ def _safe_float(v):
 
 fsis_q_rows = []
 for c in fsis_12_cols:
-    if c not in df.columns:
+    if c not in df_fsis.columns:
         continue
-    s      = to_numeric_series(df[c])
+    s      = to_numeric_series(df_fsis[c])
     nonmiss = s.notna().sum()
     p99    = _safe_float(s.quantile(0.99)) if nonmiss else np.nan
     vmax   = _safe_float(s.max())          if nonmiss else np.nan
@@ -371,7 +386,7 @@ memo_lines = [
     "- `correlation_long_*.csv`, `correlation_top30_*.csv`, `correlation_matrix_*.csv`",
     "- `qa_fsis_12_column_check.csv`, `qa_key_variable_coverage_by_year.csv`",
 ]
-with open(os.path.join(qa_dir, "qa_memo_panel_sumstats_by_farms.md"), "w", encoding="utf-8") as f:
+with open(os.path.join(qa_dir, "qa_memo_panel_qa.md"), "w", encoding="utf-8") as f:
     f.write("\n".join(memo_lines) + "\n")
 
 print(f"  Outputs saved to: {qa_dir}")
@@ -382,20 +397,20 @@ print(f"  Outputs saved to: {qa_dir}")
 # =============================================================================
 print("\n--- Section 3: FSIS size bins vs. poor mental health days (2017) ---")
 
-mental_col = "poor_mental_health_days_raw_value_mentalhealthrank_full"
+mental_col = "poor_mental_health_days"
 size_cols  = [
-    "n_size_bucket_1_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_2_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_3_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_4_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
-    "n_size_bucket_5_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
+    "n_size_bucket_1_fsis",
+    "n_size_bucket_2_fsis",
+    "n_size_bucket_3_fsis",
+    "n_size_bucket_4_fsis",
+    "n_size_bucket_5_fsis",
 ]
 
-missing_cols = [c for c in [mental_col, *size_cols] if c not in df.columns]
+missing_cols = [c for c in [mental_col, *size_cols] if c not in df_fsis.columns]
 if missing_cols:
     print(f"  WARNING: skipping — missing columns: {missing_cols}")
 else:
-    df_2017 = df[df["year"] == 2017].copy()
+    df_2017 = df_fsis[df_fsis["year"] == 2017].copy()
     df_2017[mental_col] = to_numeric_series(df_2017[mental_col])
     for c in size_cols:
         df_2017[c] = to_numeric_series(df_2017[c]).fillna(0)  # NA = 0 establishments in bin
