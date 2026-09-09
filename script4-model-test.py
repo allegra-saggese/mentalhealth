@@ -1,0 +1,564 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+script4-model-test.py
+
+Purpose:
+    (a) Replicate, independently, the dairy-CAFO finding described in the
+        external memo `GalinaAnalysis/2026-08-25-claude-cafo-patterns/cafo_memo.html`
+        (Dropbox — NOT part of this repo, NOT modified or read programmatically
+        by this script; only its written conclusions are being checked against).
+        Three specs, in the same progression as that memo:
+          1. Cross-section (pooled, state + year FE)         -> should be null/favorable
+          2. Within-county (county + year FE)                -> sign should flip negative
+          3. Event study around first large-dairy-CAFO entry -> dynamic, growing effect
+    (b) Ridge-regression cross-check: does an atheoretical, regularized regression
+        over the full control/treatment pool pick out the same dairy-CAFO
+        relationship, independent of the TWFE causal design? Run twice —
+        pooled (raw) and within-transformed (county+year demeaned) — since the
+        memo's own point is that pooled and within give different answers.
+
+    This script is intentionally scoped to (a) and (b) only. Callaway-Sant'Anna
+    staggered DiD and interacted/heterogeneous treatment definitions are a
+    separate, still-under-discussion follow-on (see QA/plans/).
+
+Sample: rural counties only (non_large_metro == 1 via `rural` col), 2000-2023.
+
+Figures -> Dropbox/Mental/Data/output/figs/script4/
+  Y1_dairy_levels_vs_within.png     Cross-section vs within-county coefficient comparison
+  Y2_dairy_event_study.png          Event-study around first large-dairy-CAFO entry
+  Y3_ridge_pooled_vs_within.png     Ridge coefficients, pooled vs within-transformed
+
+Tables -> Dropbox/Mental/Data/output/tables/script4/
+  Block1_dairy_levels_vs_within.csv
+  Block2_dairy_event_study.csv
+  Block3_ridge_pooled_vs_within.csv
+"""
+
+from packages import *
+from functions import *
+import statsmodels.api as sm
+from sklearn.linear_model import RidgeCV
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+
+# ── Directories ──────────────────────────────────────────────────────────────
+merged_dir    = os.path.join(db_data, "merged")
+out_dir       = os.path.join(figs_dir, "script4")
+tables_s4_dir = os.path.join(tables_dir, "script4")
+for _d in (out_dir, tables_s4_dir):
+    os.makedirs(_d, exist_ok=True)
+today_str = date.today().strftime("%Y-%m-%d")
+
+POP_COL = "population"
+
+# ── Load panel ───────────────────────────────────────────────────────────────
+df_raw = pd.read_csv(latest_file_glob(merged_dir, "*_panel.csv"), low_memory=False)
+df_raw = df_raw[df_raw["rural"] == 1].copy()
+df_raw["state_fips"] = df_raw["fips"].astype("string").str[:2]
+print(f"Rural panel: {len(df_raw):,} rows | {df_raw['fips'].nunique():,} counties | "
+      f"years {int(df_raw['year'].min())}-{int(df_raw['year'].max())}")
+
+# ── Outcomes (hard MH + despair + crime, per team discussion) ────────────────
+OUTCOMES = {
+    "Poor MH Days":            "poor_mental_health_days",
+    "Frequent Mental Distress":"frequent_mental_distress_per100k",
+    "Deaths of Despair":       "crude_rate_despair",
+    "Violent Crime (CHR)":     "violent_crime",
+    "Aggravated Assault":      "aggravated_assault_per100k",
+    "Total Incidents (NIBRS)": "total_incidents_per100k",
+}
+
+# Control pool — same demographic/health controls used elsewhere in the repo
+# (script3-ridge.py CONTROL_COLS), reused here for consistency across scripts.
+CONTROL_COLS = [
+    "adult_obesity_per100k", "adult_smoking_per100k", "unemployment_per100k",
+    "children_in_poverty_per100k", "uninsured_adults_per100k",
+    "median_household_income", "income_inequality",
+    "%_hispanic", "%_non-hispanic_african_american", "%_65_and_older", "%_female",
+    "mental_health_providers_per100k", "primary_care_physicians_per100k",
+    "food_insecurity_per100k", "physical_inactivity_per100k",
+    "poor_physical_health_days", "teen_births_per100k", "low_birthweight_per100k",
+    "premature_death", "preventable_hospital_stays", "some_college_per100k",
+    "children_in_single-parent_households_per100k", "diabetes_prevalence_per100k",
+    "air_pollution_-_particulate_matter", "social_associations_per100k",
+]
+
+# =============================================================================
+# Helpers — generic two-way FE machinery (mirrors script3-ridge.py's approach,
+# parameterized for cluster variable + confidence level so we can match the
+# external memo's spec exactly for the replication, rather than this repo's
+# usual default of county-clustered / 95% CI).
+# =============================================================================
+
+def within_transform(df, y_col, x_cols, entity="fips", time="year"):
+    """Two-way within estimator: demean by entity then by time period."""
+    keep = [y_col] + x_cols + [entity, time]
+    out = df[keep].dropna().copy()
+    for col in [y_col] + x_cols:
+        grand_mean  = out[col].mean()
+        entity_mean = out.groupby(entity)[col].transform("mean")
+        time_mean   = out.groupby(time)[col].transform("mean")
+        out[col]    = out[col] - entity_mean - time_mean + grand_mean
+    return out
+
+
+def run_fe_ols(df, treatment_col, outcome_col, control_cols, entity="fips", time="year",
+               cluster_col="state_fips", z=1.96, label=""):
+    """
+    Two-way FE (within transformation) OLS with clustered SEs.
+    z=1.96 -> 95% CI (this repo's convention); pass z=1.645 for 90% CI (memo's spec).
+    """
+    x_cols = [treatment_col] + [c for c in control_cols if c != treatment_col]
+    keep_extra = [cluster_col] if cluster_col not in (entity, time) else []
+    dm = within_transform(df[[*{outcome_col, *x_cols, entity, time, *keep_extra}]],
+                           outcome_col, x_cols, entity=entity, time=time)
+    if cluster_col not in dm.columns and cluster_col in df.columns:
+        dm = dm.join(df[cluster_col])
+    if len(dm) < 200:
+        print(f"    [{label}] too few obs ({len(dm)}), skip")
+        return None
+    Y = dm[outcome_col]
+    X = sm.add_constant(dm[x_cols], has_constant="add")
+    groups = dm[cluster_col] if cluster_col in dm.columns else dm[entity]
+    try:
+        res = sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": groups})
+    except Exception as e:
+        print(f"    [{label}] OLS failed: {e}")
+        return None
+    beta, se = res.params.get(treatment_col, np.nan), res.bse.get(treatment_col, np.nan)
+    return {"beta": beta, "se": se, "ci_lo": beta - z*se, "ci_hi": beta + z*se,
+            "pval": res.pvalues.get(treatment_col, np.nan), "N": int(res.nobs), "r2": res.rsquared}
+
+
+def run_pooled_ols(df, treatment_col, outcome_col, control_cols, fe_cols,
+                    cluster_col="state_fips", z=1.96, label=""):
+    """
+    Pooled OLS with dummy FE (e.g. state + year) rather than county FE —
+    used for the cross-sectional / "levels" replication (memo Section 2).
+    """
+    x_cols = [treatment_col] + [c for c in control_cols if c != treatment_col]
+    cols_needed = list(set([outcome_col, *x_cols, cluster_col, *fe_cols]))
+    sub = df[cols_needed].dropna(subset=[outcome_col, treatment_col]).copy()
+    if len(sub) < 200:
+        print(f"    [{label}] too few obs, skip")
+        return None
+    X = sub[x_cols].copy()
+    for fe in fe_cols:
+        # .astype("string") -> get_dummies returns nullable "boolean" dtype, which
+        # statsmodels/numpy cannot cast to a numeric array alongside float64 columns
+        # ("Pandas data cast to numpy dtype of object"). Force plain float dummies.
+        dummies = pd.get_dummies(sub[fe].astype("string"), prefix=fe, drop_first=True).astype(float)
+        X = pd.concat([X, dummies], axis=1)
+    X = X.apply(pd.to_numeric, errors="coerce")
+    keep_mask = X.notna().all(axis=1) & sub[outcome_col].notna()
+    X, y, groups = X[keep_mask], sub.loc[keep_mask, outcome_col], sub.loc[keep_mask, cluster_col]
+    X = sm.add_constant(X, has_constant="add")
+    try:
+        res = sm.OLS(y, X).fit(cov_type="cluster", cov_kwds={"groups": groups})
+    except Exception as e:
+        print(f"    [{label}] pooled OLS failed: {e}")
+        return None
+    beta, se = res.params.get(treatment_col, np.nan), res.bse.get(treatment_col, np.nan)
+    return {"beta": beta, "se": se, "ci_lo": beta - z*se, "ci_hi": beta + z*se,
+            "pval": res.pvalues.get(treatment_col, np.nan), "N": int(res.nobs), "r2": res.rsquared}
+
+
+def build_entry_cohort(df, size_cols, census_years, entity="fips", time="year"):
+    """
+    Generic "first large-CAFO entry" cohort builder for a given animal type.
+    size_cols: list of column(s) whose sum defines "large ops of this type"
+               (kept as a list so callers can sum multiple size/animal columns
+               if ever extended beyond dairy).
+    Returns (df_cens, entry_events) where entry_events has one row per county
+    that goes from 0 -> >0 large ops between consecutive Census waves,
+    excluding counties already treated at the first available wave
+    (always-treated, per memo's convention).
+    """
+    d = df.copy()
+    d["_large_total"] = d[size_cols].sum(axis=1, min_count=1)
+    d_cens = d[d[time].isin(census_years)].sort_values([entity, time]).copy()
+    d_cens["_large_lag"] = d_cens.groupby(entity)["_large_total"].shift(1)
+
+    entry = (
+        (d_cens["_large_total"] > 0) &
+        (d_cens["_large_lag"] == 0) &
+        d_cens["_large_lag"].notna()
+    )
+    entry_events = d_cens[entry][[entity, time]].rename(columns={time: "event_year"})
+    return d, entry_events
+
+
+def run_event_study(df_full, events_df, outcome_col, control_cols=None,
+                     entity="fips", time="year", cluster_col="state_fips",
+                     n_leads=10, n_lags=9, z=1.645, label=""):
+    """
+    TWFE event-study regression. Omitted category: t_rel = -1.
+    Control group: never-treated + not-yet-treated counties (pooled).
+    z=1.645 -> 90% CI, matching the external memo's reported spec.
+    """
+    control_cols = control_cols or []
+    treated_fips = set(events_df[entity].unique())
+    first_event = events_df.groupby(entity)["event_year"].min().reset_index()
+
+    keep_cols = list(set([outcome_col, entity, time, cluster_col, *control_cols]))
+    d = df_full[keep_cols].merge(first_event, on=entity, how="left")
+    never_fips = set(df_full[entity].unique()) - treated_fips
+
+    d["t_rel"] = np.where(d["event_year"].notna(), d[time] - d["event_year"], np.nan)
+    d_treated = d[d[entity].isin(treated_fips) & d["t_rel"].between(-n_leads, n_lags)].copy()
+    d_never = d[d[entity].isin(never_fips)].copy()
+    d_never["t_rel"] = np.nan
+    d_pool = pd.concat([d_treated, d_never], ignore_index=True)
+
+    if d_pool[outcome_col].notna().sum() < 200:
+        print(f"    [{label}] too few obs, skip")
+        return pd.DataFrame()
+
+    rel_times = [t for t in range(-n_leads, n_lags + 1) if t != -1]
+    for t in rel_times:
+        d_pool[f"d_t{t:+d}"] = (d_pool["t_rel"] == t).astype(float)
+    dummy_cols = [f"d_t{t:+d}" for t in rel_times]
+    x_cols = dummy_cols + control_cols
+
+    dm = within_transform(d_pool, outcome_col, x_cols, entity=entity, time=time)
+    if cluster_col not in dm.columns:
+        dm = dm.join(d_pool[cluster_col])
+    if len(dm) < 200:
+        return pd.DataFrame()
+
+    Y = dm[outcome_col]
+    X = sm.add_constant(dm[x_cols], has_constant="add")
+
+    # With few entry cohorts (here: 4 non-2002 Census waves) and outcomes that
+    # only start partway through the panel (e.g. CHR mental-health vars from
+    # 2010), extreme leads/lags can be populated by only ONE cohort in ANY
+    # given calendar year -- making that event-time dummy perfectly collinear
+    # with the year FE it's demeaned against. Plain OLS does not detect this;
+    # it silently returns a minimum-norm solution that (mis)assigns the same
+    # combined effect across the collinear dummies (visible as identical
+    # beta/SE across adjacent relative-time points). pyfixest (used in the
+    # external memo) drops these automatically -- we do the same explicitly,
+    # dropping the least-supported dummy one at a time until full rank.
+    dropped_t = []
+    active_dummies = list(dummy_cols)
+    while True:
+        cols_now = active_dummies + control_cols
+        X_now = sm.add_constant(dm[cols_now], has_constant="add")
+        rank = np.linalg.matrix_rank(X_now.values)
+        if rank >= X_now.shape[1] or not active_dummies:
+            break
+        support = dm[active_dummies].abs().sum().sort_values()
+        weakest = support.index[0]
+        dropped_t.append(int(weakest.replace("d_t", "")))
+        active_dummies.remove(weakest)
+    if dropped_t:
+        print(f"    [{label}] dropped {len(dropped_t)} unidentified (collinear) "
+              f"event-time dummy(ies): t_rel={sorted(dropped_t)}")
+
+    x_cols_final = active_dummies + control_cols
+    X = sm.add_constant(dm[x_cols_final], has_constant="add")
+    try:
+        res = sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": dm[cluster_col]})
+    except Exception as e:
+        print(f"    [{label}] event-study OLS failed: {e}")
+        return pd.DataFrame()
+
+    rows = []
+    for t in rel_times:
+        col = f"d_t{t:+d}"
+        if col in res.params.index:
+            beta, se = res.params[col], res.bse[col]
+            rows.append({"t_rel": t, "beta": beta, "se": se,
+                         "ci_lo": beta - z*se, "ci_hi": beta + z*se,
+                         "pval": res.pvalues[col], "outcome": label})
+        else:
+            rows.append({"t_rel": t, "beta": np.nan, "se": np.nan,
+                         "ci_lo": np.nan, "ci_hi": np.nan,
+                         "pval": np.nan, "outcome": label})
+    rows.append({"t_rel": -1, "beta": 0.0, "se": 0.0, "ci_lo": 0.0, "ci_hi": 0.0,
+                 "pval": np.nan, "outcome": label})
+    return pd.DataFrame(rows).sort_values("t_rel")
+
+
+# =============================================================================
+# PART (a): Replicate the dairy-CAFO finding
+# =============================================================================
+print("\n" + "="*78)
+print("PART (a): Dairy CAFO replication — levels, within, event study")
+print("="*78)
+
+CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
+DAIRY_LARGE_COL = "cafo_dairy_large"
+
+df_dairy, dairy_entry = build_entry_cohort(
+    df_raw, size_cols=[DAIRY_LARGE_COL], census_years=CENSUS_YEARS,
+)
+df_dairy["dairy_large_present"] = (df_dairy[DAIRY_LARGE_COL].fillna(0) > 0).astype(float)
+print(f"Dairy entry events: {len(dairy_entry):,} county-census-year obs "
+      f"({dairy_entry['fips'].nunique():,} unique counties)")
+
+# --- Block 1: levels vs within, binary presence -----------------------------
+levels_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    ctrl = [c for c in CONTROL_COLS if c in df_dairy.columns]
+
+    pooled = run_pooled_ols(
+        df_dairy, "dairy_large_present", outcome_col, ctrl,
+        fe_cols=["state_fips", "year"], z=1.96, label=f"pooled|{outcome_key}",
+    )
+    within = run_fe_ols(
+        df_dairy, "dairy_large_present", outcome_col, ctrl,
+        cluster_col="state_fips", z=1.96, label=f"within|{outcome_key}",
+    )
+    for spec_name, res in [("Pooled (state+year FE)", pooled), ("Within (county+year FE)", within)]:
+        if res is None:
+            continue
+        levels_rows.append({"outcome": outcome_key, "spec": spec_name, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {spec_name:26s} | {outcome_key:26s} beta={res['beta']:+.4f}  "
+              f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
+
+levels_df = pd.DataFrame(levels_rows)
+levels_csv = os.path.join(tables_s4_dir, f"{today_str}_Block1_dairy_levels_vs_within.csv")
+levels_df.to_csv(levels_csv, index=False)
+print("Saved:", levels_csv)
+
+# Figure Y1: levels vs within comparison
+fig, ax = plt.subplots(figsize=(9, 6))
+spec_colors = {"Pooled (state+year FE)": "#4393c3", "Within (county+year FE)": "#d6604d"}
+y_labels, y_pos = [], []
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    sub = levels_df[levels_df["outcome"] == outcome_key]
+    for j, spec in enumerate(spec_colors):
+        row = sub[sub["spec"] == spec]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+        yy = i * 3 + j * 0.9
+        ax.errorbar(row["beta"], yy, xerr=[[row["beta"]-row["ci_lo"]], [row["ci_hi"]-row["beta"]]],
+                    fmt="o", color=spec_colors[spec], ms=6, capsize=3, elinewidth=1.2,
+                    markeredgecolor="white")
+        if row["pval"] < 0.05:
+            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=spec_colors[spec])
+    y_labels.append(outcome_key)
+    y_pos.append(i * 3 + 0.45)
+ax.axvline(0, color="black", lw=0.8, ls=":")
+ax.set_yticks(y_pos)
+ax.set_yticklabels(y_labels, fontsize=9)
+ax.set_xlabel("beta (large dairy CAFO presence)", fontsize=9)
+legend_handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=8, label=k)
+                  for k, c in spec_colors.items()]
+ax.legend(handles=legend_handles, fontsize=8, loc="best")
+ax.set_title(
+    "Dairy CAFO presence: pooled (cross-sectional) vs within-county coefficients\n"
+    "Replication check against external memo Sections 2-3 | * = p < 0.05",
+    fontsize=10,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y1_dairy_levels_vs_within.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
+
+# --- Block 2: event study around dairy entry --------------------------------
+print("\nEvent study (state-clustered SEs, 90% CI, to match memo spec)...")
+es_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    ctrl = [c for c in CONTROL_COLS if c in df_dairy.columns]
+    es = run_event_study(
+        df_dairy, dairy_entry, outcome_col, control_cols=ctrl,
+        cluster_col="state_fips", n_leads=10, n_lags=9, z=1.645, label=outcome_key,
+    )
+    if not es.empty:
+        es_rows.append(es)
+
+es_df = pd.concat(es_rows, ignore_index=True) if es_rows else pd.DataFrame()
+es_csv = os.path.join(tables_s4_dir, f"{today_str}_Block2_dairy_event_study.csv")
+es_df.to_csv(es_csv, index=False)
+print("Saved:", es_csv)
+
+# Figure Y2: event study grid, one panel per outcome
+n_out = len(OUTCOMES)
+n_cols_es = 3
+n_rows_es = int(np.ceil(n_out / n_cols_es))
+fig, axes = plt.subplots(n_rows_es, n_cols_es, figsize=(n_cols_es*5, n_rows_es*4))
+axes = axes.flatten()
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    ax = axes[i]
+    sub = es_df[es_df["outcome"] == outcome_key].sort_values("t_rel") if not es_df.empty else pd.DataFrame()
+    if sub.empty:
+        ax.text(0.5, 0.5, "Insufficient data", transform=ax.transAxes, ha="center")
+        ax.set_title(outcome_key, fontsize=9)
+        continue
+    ax.axhline(0, color="black", lw=0.8, ls="--")
+    ax.axvline(-0.5, color="grey", lw=0.8, ls=":", alpha=0.6)
+    ax.errorbar(sub["t_rel"], sub["beta"], yerr=[sub["beta"]-sub["ci_lo"], sub["ci_hi"]-sub["beta"]],
+                fmt="o", color="#762a83", ms=5, capsize=3, elinewidth=1)
+    pre = sub[sub["t_rel"] < 0]
+    if len(pre) >= 2:
+        ax.text(0.04, 0.94, f"pre max|b|={pre['beta'].abs().max():.3f}",
+                transform=ax.transAxes, fontsize=7, va="top",
+                bbox=dict(boxstyle="round,pad=0.25", fc="white", alpha=0.75))
+    ax.set_title(outcome_key, fontsize=9, fontweight="bold")
+    ax.set_xlabel("years relative to first large dairy CAFO", fontsize=7)
+    ax.tick_params(labelsize=7)
+for j in range(n_out, len(axes)):
+    axes[j].set_visible(False)
+fig.suptitle(
+    "Event study: first large dairy CAFO entry (Census wave) -> outcomes\n"
+    "Rural US counties | county + year FE, state-clustered SEs, 90% CI | omitted: t=-1\n"
+    "Replication check against external memo Section 4",
+    fontsize=10, y=1.02,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y2_dairy_event_study.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
+
+
+# =============================================================================
+# PART (b): Ridge regression cross-check (pooled vs within-transformed)
+# =============================================================================
+print("\n" + "="*78)
+print("PART (b): Ridge cross-check — does regularized regression agree?")
+print("="*78)
+
+# Build the CAFO/FSIS treatment pool (log-per-10k, same transform used
+# throughout the repo) alongside the demographic control pool.
+def _log_per10k(series, pop):
+    x = pd.to_numeric(series, errors="coerce")
+    p = pd.to_numeric(pop, errors="coerce").replace(0, np.nan)
+    return np.log1p((x / p) * 10_000)
+
+CAFO_RAW_COLS = {
+    "cafo_dairy_log":    ["cafo_dairy_small", "cafo_dairy_medium", "cafo_dairy_large"],
+    "cafo_dairy_large_log": ["cafo_dairy_large"],
+    "cafo_beef_log":     ["cafo_beef_small", "cafo_beef_medium", "cafo_beef_large"],
+    "cafo_beef_large_log": ["cafo_beef_large"],
+    "cafo_hogs_log":     ["cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large"],
+    "cafo_hogs_large_log": ["cafo_hogs_large"],
+    "cafo_chickens_log": ["cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large"],
+    "cafo_chickens_large_log": ["cafo_chickens_large"],
+}
+FSIS_RAW_COLS = {
+    "fsis_total_log":     "n_unique_establishments_fsis",
+    "fsis_slaughter_log": "n_slaughterhouse_present_establishments_fsis",
+}
+
+df_ridge = df_raw.copy()
+for new_col, src in CAFO_RAW_COLS.items():
+    cols = [c for c in src if c in df_ridge.columns]
+    total = df_ridge[cols].sum(axis=1, min_count=1) if cols else np.nan
+    df_ridge[new_col] = _log_per10k(total, df_ridge[POP_COL])
+for new_col, src_col in FSIS_RAW_COLS.items():
+    df_ridge[new_col] = _log_per10k(df_ridge[src_col], df_ridge[POP_COL]) if src_col in df_ridge.columns else np.nan
+
+TREATMENT_PREDICTORS = list(CAFO_RAW_COLS.keys()) + list(FSIS_RAW_COLS.keys())
+CONTROL_PREDICTORS   = [c for c in CONTROL_COLS if c in df_ridge.columns]
+ALL_PREDICTORS       = TREATMENT_PREDICTORS + CONTROL_PREDICTORS
+
+def run_ridge(X_df, y, alphas=np.logspace(-3, 3, 25)):
+    """
+    Standardized RidgeCV. Drops any predictor column that is entirely NaN
+    over this outcome's sample *before* imputing (SimpleImputer silently
+    drops such columns from its output, which would otherwise desync
+    ridge.coef_ from the column index).
+    """
+    all_nan = X_df.columns[X_df.isna().all()].tolist()
+    if all_nan:
+        print(f"    (dropping {len(all_nan)} all-NaN predictor(s) for this outcome: {all_nan})")
+    use_cols = [c for c in X_df.columns if c not in all_nan]
+    X_use = X_df[use_cols]
+
+    imp = SimpleImputer(strategy="mean")
+    scl = StandardScaler()
+    X_imp = scl.fit_transform(imp.fit_transform(X_use))
+    y_arr = y.values
+    ridge = RidgeCV(alphas=alphas, cv=5)
+    ridge.fit(X_imp, y_arr)
+    coefs = pd.Series(ridge.coef_, index=use_cols).reindex(X_df.columns)  # NaN for dropped cols
+    return coefs, ridge.alpha_, ridge.score(X_imp, y_arr)
+
+ridge_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    if outcome_col not in df_ridge.columns:
+        continue
+    mask = df_ridge[outcome_col].notna()
+    sub = df_ridge.loc[mask].copy()
+    if mask.sum() < 200:
+        print(f"  [{outcome_key}] too few obs, skip")
+        continue
+
+    # Drop predictors with zero coverage in this outcome's sample up front —
+    # within_transform's dropna() otherwise zeroes out every row the moment
+    # any single column (e.g. FSIS, not merged into this panel build) is 100% NaN.
+    valid_predictors = [c for c in ALL_PREDICTORS if sub[c].notna().any()]
+    dropped = sorted(set(ALL_PREDICTORS) - set(valid_predictors))
+    if dropped:
+        print(f"    (no coverage at all for: {dropped} — excluded from both specs)")
+
+    # --- Pooled (raw levels) ---
+    X_pooled = sub[valid_predictors]
+    coefs_pooled, alpha_pooled, r2_pooled = run_ridge(X_pooled, sub[outcome_col])
+    for pred, coef in coefs_pooled.reindex(ALL_PREDICTORS).items():
+        ridge_rows.append({"outcome": outcome_key, "predictor": pred, "spec": "Pooled",
+                            "std_coef": coef, "alpha": alpha_pooled, "r2": r2_pooled})
+
+    # --- Within-transformed (county + year demeaned) ---
+    dm = within_transform(sub, outcome_col, valid_predictors)
+    if len(dm) >= 200:
+        coefs_within, alpha_within, r2_within = run_ridge(dm[valid_predictors], dm[outcome_col])
+        for pred, coef in coefs_within.reindex(ALL_PREDICTORS).items():
+            ridge_rows.append({"outcome": outcome_key, "predictor": pred, "spec": "Within",
+                                "std_coef": coef, "alpha": alpha_within, "r2": r2_within})
+    else:
+        print(f"  [{outcome_key}] within-transformed N too small ({len(dm)}), pooled only")
+
+    dairy_pooled = coefs_pooled.get("cafo_dairy_large_log", np.nan)
+    dairy_within = coefs_within.get("cafo_dairy_large_log", np.nan) if len(dm) >= 200 else np.nan
+    print(f"  {outcome_key:26s} | dairy_large_log std-coef  pooled={dairy_pooled:+.4f}  "
+          f"within={dairy_within:+.4f}  (alpha_pooled={alpha_pooled:.3g})")
+
+ridge_df = pd.DataFrame(ridge_rows)
+ridge_csv = os.path.join(tables_s4_dir, f"{today_str}_Block3_ridge_pooled_vs_within.csv")
+ridge_df.to_csv(ridge_csv, index=False)
+print("Saved:", ridge_csv)
+
+# Figure Y3: ridge coefficients, dairy vars highlighted, pooled vs within
+if not ridge_df.empty:
+    n_out = ridge_df["outcome"].nunique()
+    fig, axes = plt.subplots(1, n_out, figsize=(5.5*n_out, 8), sharey=False)
+    if n_out == 1:
+        axes = [axes]
+    for ax, outcome_key in zip(axes, OUTCOMES.keys()):
+        sub = ridge_df[ridge_df["outcome"] == outcome_key]
+        if sub.empty:
+            continue
+        pooled = sub[sub["spec"] == "Pooled"].set_index("predictor")["std_coef"]
+        within = sub[sub["spec"] == "Within"].set_index("predictor")["std_coef"]
+        order = pooled.abs().sort_values(ascending=True).index
+        y_pos = np.arange(len(order))
+        colors = ["#762a83" if "dairy" in p else "#999999" for p in order]
+        ax.barh(y_pos - 0.18, pooled.reindex(order), height=0.34, color=colors, alpha=0.6, label="Pooled")
+        if not within.empty:
+            ax.barh(y_pos + 0.18, within.reindex(order), height=0.34, color=colors, alpha=1.0, label="Within")
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(order, fontsize=6)
+        ax.axvline(0, color="black", lw=0.7)
+        ax.set_title(outcome_key, fontsize=9, fontweight="bold")
+        ax.set_xlabel("standardized ridge coefficient", fontsize=8)
+        ax.legend(fontsize=7)
+    fig.suptitle(
+        "Ridge cross-check: standardized coefficients across CAFO/FSIS + demographic controls\n"
+        "Purple bars = dairy CAFO predictors | Pooled (raw) vs Within (county+year demeaned)",
+        fontsize=10, y=1.02,
+    )
+    plt.tight_layout()
+    path = os.path.join(out_dir, f"{today_str}_Y3_ridge_pooled_vs_within.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved:", path)
+
+print(f"\nAll script4 outputs saved to:\n  figs:   {out_dir}\n  tables: {tables_s4_dir}")
