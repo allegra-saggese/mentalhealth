@@ -18,27 +18,44 @@ Purpose:
         pooled (raw) and within-transformed (county+year demeaned) — since the
         memo's own point is that pooled and within give different answers.
 
-    This script is intentionally scoped to (a) and (b) only. Callaway-Sant'Anna
-    staggered DiD and interacted/heterogeneous treatment definitions are a
-    separate, still-under-discussion follow-on (see QA/plans/).
+    (e) Control specification curve + covariate importance ranking: instead of
+        picking one control vector X_i by hand, (i) run the within (county+year
+        FE) dairy regression with log_pop always included plus every possible
+        subset of a 9-variable core control set (512 combinations per outcome),
+        to see how much the dairy coefficient moves depending on which controls
+        are in X_i; (ii) rank covariates (including dairy itself) by Ridge and
+        Random Forest importance on a wider ~20-variable set, so dairy's own
+        predictive weight can be compared directly against standard controls.
+
+    Callaway-Sant'Anna staggered DiD and interacted/heterogeneous treatment
+    definitions are a separate, still-under-discussion follow-on (see QA/plans/).
 
 Sample: rural counties only (non_large_metro == 1 via `rural` col), 2000-2023.
 
 Figures -> Dropbox/Mental/Data/output/figs/script4/
-  Y1_dairy_levels_vs_within.png     Cross-section vs within-county coefficient comparison
-  Y2_dairy_event_study.png          Event-study around first large-dairy-CAFO entry
-  Y3_ridge_pooled_vs_within.png     Ridge coefficients, pooled vs within-transformed
+  Y1_dairy_levels_vs_within.png       Cross-section vs within-county coefficient comparison
+  Y1b_dairy_isolated_vs_conditional.png  Dairy alone vs. dairy + beef/hogs/chickens jointly
+  Y2_dairy_event_study.png            Event-study around first large-dairy-CAFO entry
+  Y3_ridge_pooled_vs_within.png       Ridge coefficients, pooled vs within-transformed
+  Y4_spec_curve.png                   Dairy beta across all 512 control combinations, w/ 95% CI
+  Y5_covariate_ranking.png            Ridge + Random Forest importance, dairy included
 
 Tables -> Dropbox/Mental/Data/output/tables/script4/
   Block1_dairy_levels_vs_within.csv
+  Block1b_dairy_isolated_vs_conditional.csv
   Block2_dairy_event_study.csv
+  Block2b_dairy_event_study_joint_tests.csv
   Block3_ridge_pooled_vs_within.csv
+  Block4_spec_curve.csv
+  Block5_covariate_ranking.csv
 """
 
 from packages import *
 from functions import *
+import itertools
 import statsmodels.api as sm
 from sklearn.linear_model import RidgeCV
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
@@ -752,5 +769,183 @@ if not ridge_df.empty:
     fig.savefig(path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", path)
+
+# =============================================================================
+# PART (e): Control specification curve + covariate importance ranking
+#
+# Instead of asserting one control vector X_i by hand, test how much the
+# dairy coefficient depends on which controls are in X_i (specification
+# curve), and separately rank covariates -- WITH dairy itself included -- by
+# predictive importance (Ridge, Random Forest), so dairy's own weight can be
+# compared directly against standard demographic/health controls.
+# =============================================================================
+print("\n" + "="*78)
+print("PART (e): Control specification curve + covariate importance ranking")
+print("="*78)
+
+df_raw["log_pop"] = np.log(df_raw[POP_COL].where(df_raw[POP_COL] > 0))
+
+# --- Block 5a: specification curve -------------------------------------------
+# log_pop always in X_i; every possible subset of this 9-variable core set
+# added on top (2^9 = 512 combinations per outcome). All 9 chosen for
+# >=92% coverage in the 2010-2023 window (see coverage table reviewed with
+# the team) so the combinations aren't themselves driven by missingness.
+CORE_9 = [
+    "adult_obesity_per100k", "uninsured_adults_per100k", "unemployment_per100k",
+    "children_in_poverty_per100k", "%_female", "%_65_and_older", "%_hispanic",
+    "median_household_income", "some_college_per100k",
+]
+CORE_9 = [c for c in CORE_9 if c in df_raw.columns]
+
+spec_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    if outcome_col not in df_raw.columns:
+        continue
+    for r in range(0, len(CORE_9) + 1):
+        for combo in itertools.combinations(CORE_9, r):
+            controls = ["log_pop"] + list(combo)
+            res = run_fe_ols(df_raw, "any_large_dairy", outcome_col, controls,
+                              cluster_col="state_fips", z=1.96, label=f"spec|{outcome_key}")
+            if res is None:
+                continue
+            spec_rows.append({
+                "outcome": outcome_key, "n_controls": len(controls),
+                "controls": "+".join(controls), **res,
+            })
+    n_done = sum(1 for r in spec_rows if r["outcome"] == outcome_key)
+    print(f"  {outcome_key:26s}: {n_done} / {2**len(CORE_9)} specs estimated")
+
+spec_df = pd.DataFrame(spec_rows)
+spec_csv = os.path.join(tables_s4_dir, f"{today_str}_Block4_spec_curve.csv")
+spec_df.to_csv(spec_csv, index=False)
+print("Saved:", spec_csv)
+
+print(f"\n{'outcome':28s} {'beta min':>9s} {'median':>9s} {'beta max':>9s} {'share sig (p<.05)':>18s}")
+for outcome_key in OUTCOMES:
+    sub = spec_df[spec_df["outcome"] == outcome_key]
+    if sub.empty:
+        continue
+    print(f"{outcome_key:28s} {sub['beta'].min():9.3f} {sub['beta'].median():9.3f} "
+          f"{sub['beta'].max():9.3f} {(sub['pval'] < 0.05).mean():18.2f}")
+
+# Figure Y4: ordered dot + 95% CI plot per outcome -- shows the RANGE of beta
+# across all 512 control combinations AND, using each spec's own SE, which
+# specs are significant vs not. More informative than a plain box/whisker
+# since the box/whisker would show only the point-estimate distribution and
+# drop the uncertainty (SE) on each individual spec.
+n_out = len(OUTCOMES)
+n_cols_sc = 3
+n_rows_sc = int(np.ceil(n_out / n_cols_sc))
+fig, axes = plt.subplots(n_rows_sc, n_cols_sc, figsize=(n_cols_sc*5.5, n_rows_sc*4.2))
+axes = axes.flatten()
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    ax = axes[i]
+    sub = spec_df[spec_df["outcome"] == outcome_key].sort_values("beta").reset_index(drop=True)
+    if sub.empty:
+        ax.set_visible(False)
+        continue
+    x = np.arange(len(sub))
+    sig = sub["pval"] < 0.05
+    colors = np.where(sig, "#1b7837", "#b2b2b2")
+    ax.errorbar(x[~sig], sub.loc[~sig, "beta"], yerr=1.96*sub.loc[~sig, "se"],
+                fmt="o", ms=1.5, color="#b2b2b2", elinewidth=0.4, alpha=0.6, label="not sig. (p>=.05)")
+    ax.errorbar(x[sig], sub.loc[sig, "beta"], yerr=1.96*sub.loc[sig, "se"],
+                fmt="o", ms=1.5, color="#1b7837", elinewidth=0.4, alpha=0.6, label="sig. (p<.05)")
+    ax.axhline(0, color="black", lw=0.8, ls=":")
+    ax.set_title(outcome_key, fontsize=9, fontweight="bold")
+    ax.set_xlabel("specifications, sorted by beta", fontsize=7)
+    ax.set_ylabel("dairy beta, 95% CI", fontsize=7)
+    ax.tick_params(labelsize=7)
+    ax.legend(fontsize=6, loc="best", markerscale=3)
+fig.suptitle(
+    f"Specification curve: dairy coefficient across all {2**len(CORE_9)} control combinations\n"
+    "log_pop always included; every subset of 9 core controls (adult obesity, uninsured, "
+    "unemployment, poverty, %female, %65+, %hispanic, income, some college) added on top",
+    fontsize=10, y=1.02,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y4_spec_curve.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
+
+# --- Block 5b: Ridge + Random Forest covariate ranking, dairy included ------
+# Same wide ~20-variable candidate set as before, but "any_large_dairy" is
+# now IN the candidate set too (not run separately) -- so its own importance
+# can be read directly off the same ranking as the standard controls.
+WIDE_20 = [
+    "log_pop", "any_large_dairy", "adult_obesity_per100k", "uninsured_adults_per100k",
+    "unemployment_per100k", "children_in_poverty_per100k", "access_to_healthy_foods_per100k",
+    "premature_death", "preventable_hospital_stays", "poor_physical_health_days",
+    "low_birthweight_per100k", "teen_births_per100k", "%_female", "%_65_and_older",
+    "%_hispanic", "some_college_per100k", "diabetes_prevalence_per100k",
+    "median_household_income", "children_in_single-parent_households_per100k",
+    "adult_smoking_per100k", "primary_care_physicians_per100k", "high_school_graduation",
+]
+WIDE_20 = [c for c in WIDE_20 if c in df_raw.columns]
+
+rank_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    if outcome_col not in df_raw.columns:
+        continue
+    mask = df_raw[outcome_col].notna()
+    sub = df_raw.loc[mask]
+    if mask.sum() < 200:
+        print(f"  [{outcome_key}] too few obs, skip")
+        continue
+
+    X_wide = sub[WIDE_20]
+    y_wide = sub[outcome_col]
+    imp = SimpleImputer(strategy="mean")
+    scl = StandardScaler()
+    X_imp = scl.fit_transform(imp.fit_transform(X_wide))
+
+    ridge = RidgeCV(alphas=np.logspace(-3, 3, 25), cv=5).fit(X_imp, y_wide)
+    ridge_coefs = pd.Series(np.abs(ridge.coef_), index=WIDE_20)
+
+    rf = RandomForestRegressor(n_estimators=300, max_depth=6, random_state=42, n_jobs=-1)
+    rf.fit(imp.transform(X_wide), y_wide)
+    rf_importance = pd.Series(rf.feature_importances_, index=WIDE_20)
+
+    dairy_rf_rank = int((rf_importance.rank(ascending=False))["any_large_dairy"])
+    print(f"  {outcome_key:26s}: dairy RF importance={rf_importance['any_large_dairy']:.4f} "
+          f"(rank {dairy_rf_rank}/{len(WIDE_20)})")
+
+    for var in WIDE_20:
+        rank_rows.append({
+            "outcome": outcome_key, "variable": var,
+            "ridge_abs_std_coef": ridge_coefs[var], "rf_importance": rf_importance[var],
+            "is_dairy": var == "any_large_dairy",
+        })
+
+rank_df = pd.DataFrame(rank_rows)
+rank_csv = os.path.join(tables_s4_dir, f"{today_str}_Block5_covariate_ranking.csv")
+rank_df.to_csv(rank_csv, index=False)
+print("Saved:", rank_csv)
+
+# Figure Y5: ranking bar chart per outcome, dairy highlighted
+fig, axes = plt.subplots(n_rows_sc, n_cols_sc, figsize=(n_cols_sc*5.5, n_rows_sc*4.5))
+axes = axes.flatten()
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    ax = axes[i]
+    sub = rank_df[rank_df["outcome"] == outcome_key].sort_values("rf_importance", ascending=True)
+    if sub.empty:
+        ax.set_visible(False)
+        continue
+    colors = np.where(sub["is_dairy"], "#762a83", "#4393c3")
+    ax.barh(sub["variable"], sub["rf_importance"], color=colors)
+    ax.set_title(outcome_key, fontsize=9, fontweight="bold")
+    ax.set_xlabel("Random Forest importance", fontsize=7)
+    ax.tick_params(labelsize=6)
+fig.suptitle(
+    "Covariate importance ranking (Random Forest) -- dairy CAFO presence included\n"
+    "Purple bar = any_large_dairy | Blue bars = standard demographic/health controls",
+    fontsize=10, y=1.02,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y5_covariate_ranking.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
 
 print(f"\nAll script4 outputs saved to:\n  figs:   {out_dir}\n  tables: {tables_s4_dir}")
