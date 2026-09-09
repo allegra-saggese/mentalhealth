@@ -528,12 +528,12 @@ for outcome_key, outcome_col in OUTCOMES.items():
         df_dairy, "dairy_large_present", outcome_col, ctrl,
         cluster_col="state_fips", z=1.96, label=f"within|{outcome_key}",
     )
-    for spec_name, res in [("Pooled (state+year FE)", pooled), ("Within (county+year FE)", within)]:
+    for model_label, res in [("Pooled (state+year FE)", pooled), ("Within (county+year FE)", within)]:
         if res is None:
             continue
-        levels_rows.append({"outcome": outcome_key, "spec": spec_name, **res})
+        levels_rows.append({"outcome": outcome_key, "model_type": model_label, **res})
         sig = "*" if res["pval"] < 0.05 else " "
-        print(f"  {spec_name:26s} | {outcome_key:26s} beta={res['beta']:+.4f}  "
+        print(f"  {model_label:26s} | {outcome_key:26s} beta={res['beta']:+.4f}  "
               f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
 
 levels_df = pd.DataFrame(levels_rows)
@@ -543,21 +543,21 @@ print("Saved:", levels_csv)
 
 # Figure Y1: levels vs within comparison
 fig, ax = plt.subplots(figsize=(9, 6))
-spec_colors = {"Pooled (state+year FE)": "#4393c3", "Within (county+year FE)": "#d6604d"}
+model_colors = {"Pooled (state+year FE)": "#4393c3", "Within (county+year FE)": "#d6604d"}
 y_labels, y_pos = [], []
 for i, outcome_key in enumerate(OUTCOMES.keys()):
     sub = levels_df[levels_df["outcome"] == outcome_key]
-    for j, spec in enumerate(spec_colors):
-        row = sub[sub["spec"] == spec]
+    for j, model_label in enumerate(model_colors):
+        row = sub[sub["model_type"] == model_label]
         if row.empty:
             continue
         row = row.iloc[0]
         yy = i * 3 + j * 0.9
         ax.errorbar(row["beta"], yy, xerr=[[row["beta"]-row["ci_lo"]], [row["ci_hi"]-row["beta"]]],
-                    fmt="o", color=spec_colors[spec], ms=6, capsize=3, elinewidth=1.2,
+                    fmt="o", color=model_colors[model_label], ms=6, capsize=3, elinewidth=1.2,
                     markeredgecolor="white")
         if row["pval"] < 0.05:
-            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=spec_colors[spec])
+            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=model_colors[model_label])
     y_labels.append(outcome_key)
     y_pos.append(i * 3 + 0.45)
 ax.axvline(0, color="black", lw=0.8, ls=":")
@@ -565,7 +565,7 @@ ax.set_yticks(y_pos)
 ax.set_yticklabels(y_labels, fontsize=9)
 ax.set_xlabel("beta (large dairy CAFO presence)", fontsize=9)
 legend_handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=8, label=k)
-                  for k, c in spec_colors.items()]
+                  for k, c in model_colors.items()]
 ax.legend(handles=legend_handles, fontsize=8, loc="best")
 ax.set_title(
     "Dairy CAFO presence: pooled (cross-sectional) vs within-county coefficients\n"
@@ -600,14 +600,14 @@ for outcome_key, outcome_col in OUTCOMES.items():
         df_raw, ANIMAL_PRESENCE_COLS, outcome_col, ctrl,
         cluster_col="state_fips", z=1.96, label=f"conditional|{outcome_key}",
     )
-    for spec_name, res_dict in [("Isolated (dairy alone)", isolated),
-                                 ("Conditional (+ beef/hogs/chickens)", conditional)]:
+    for model_label, res_dict in [("Isolated (dairy alone)", isolated),
+                                   ("Conditional (+ beef/hogs/chickens)", conditional)]:
         res = res_dict.get("any_large_dairy")
         if res is None:
             continue
-        horserace_rows.append({"outcome": outcome_key, "spec": spec_name, **res})
+        horserace_rows.append({"outcome": outcome_key, "model_type": model_label, **res})
         sig = "*" if res["pval"] < 0.05 else " "
-        print(f"  {spec_name:36s} | {outcome_key:24s} beta={res['beta']:+.4f}  "
+        print(f"  {model_label:36s} | {outcome_key:24s} beta={res['beta']:+.4f}  "
               f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
 
 horserace_df = pd.DataFrame(horserace_rows)
@@ -621,17 +621,17 @@ hr_colors = {"Isolated (dairy alone)": "#1b7837", "Conditional (+ beef/hogs/chic
 y_labels, y_pos = [], []
 for i, outcome_key in enumerate(OUTCOMES.keys()):
     sub = horserace_df[horserace_df["outcome"] == outcome_key]
-    for j, spec in enumerate(hr_colors):
-        row = sub[sub["spec"] == spec]
+    for j, model_label in enumerate(hr_colors):
+        row = sub[sub["model_type"] == model_label]
         if row.empty:
             continue
         row = row.iloc[0]
         yy = i * 3 + j * 0.9
         ax.errorbar(row["beta"], yy, xerr=[[row["beta"]-row["ci_lo"]], [row["ci_hi"]-row["beta"]]],
-                    fmt="o", color=hr_colors[spec], ms=6, capsize=3, elinewidth=1.2,
+                    fmt="o", color=hr_colors[model_label], ms=6, capsize=3, elinewidth=1.2,
                     markeredgecolor="white")
         if row["pval"] < 0.05:
-            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=hr_colors[spec])
+            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=hr_colors[model_label])
     y_labels.append(outcome_key)
     y_pos.append(i * 3 + 0.45)
 ax.axvline(0, color="black", lw=0.8, ls=":")
@@ -963,13 +963,13 @@ for outcome_key, outcome_col in OUTCOMES.items():
     valid_predictors = [c for c in ALL_PREDICTORS if sub[c].notna().any()]
     dropped = sorted(set(ALL_PREDICTORS) - set(valid_predictors))
     if dropped:
-        print(f"    (no coverage at all for: {dropped} — excluded from both specs)")
+        print(f"    (no coverage at all for: {dropped} — excluded from both model versions)")
 
     # --- Pooled (raw levels) ---
     X_pooled = sub[valid_predictors]
     coefs_pooled, alpha_pooled, r2_pooled = run_ridge(X_pooled, sub[outcome_col])
     for pred, coef in coefs_pooled.reindex(ALL_PREDICTORS).items():
-        ridge_rows.append({"outcome": outcome_key, "predictor": pred, "spec": "Pooled",
+        ridge_rows.append({"outcome": outcome_key, "predictor": pred, "model_type": "Pooled",
                             "std_coef": coef, "alpha": alpha_pooled, "r2": r2_pooled})
 
     # --- Within-transformed (county + year demeaned) ---
@@ -977,7 +977,7 @@ for outcome_key, outcome_col in OUTCOMES.items():
     if len(dm) >= 200:
         coefs_within, alpha_within, r2_within = run_ridge(dm[valid_predictors], dm[outcome_col])
         for pred, coef in coefs_within.reindex(ALL_PREDICTORS).items():
-            ridge_rows.append({"outcome": outcome_key, "predictor": pred, "spec": "Within",
+            ridge_rows.append({"outcome": outcome_key, "predictor": pred, "model_type": "Within",
                                 "std_coef": coef, "alpha": alpha_within, "r2": r2_within})
     else:
         print(f"  [{outcome_key}] within-transformed N too small ({len(dm)}), pooled only")
@@ -1006,8 +1006,8 @@ if not ridge_df.empty:
         sub = ridge_df[ridge_df["outcome"] == outcome_key]
         if sub.empty:
             continue
-        pooled = sub[sub["spec"] == "Pooled"].set_index("predictor")["std_coef"]
-        within = sub[sub["spec"] == "Within"].set_index("predictor")["std_coef"]
+        pooled = sub[sub["model_type"] == "Pooled"].set_index("predictor")["std_coef"]
+        within = sub[sub["model_type"] == "Within"].set_index("predictor")["std_coef"]
         order = pooled.abs().sort_values(ascending=True).index
         y_pos = np.arange(len(order))
         colors = ["#762a83" if "dairy" in p else "#999999" for p in order]
