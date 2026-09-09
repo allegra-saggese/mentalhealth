@@ -54,10 +54,11 @@ from packages import *
 from functions import *
 import itertools
 import statsmodels.api as sm
-from sklearn.linear_model import RidgeCV
+from sklearn.linear_model import RidgeCV, LassoCV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
+from doubleml import DoubleMLData, DoubleMLPLR
 
 # ── Directories ──────────────────────────────────────────────────────────────
 merged_dir    = os.path.join(db_data, "merged")
@@ -75,6 +76,75 @@ df_raw = df_raw[df_raw["rural"] == 1].copy()
 df_raw["state_fips"] = df_raw["fips"].astype("string").str[:2]
 print(f"Rural panel: {len(df_raw):,} rows | {df_raw['fips'].nunique():,} counties | "
       f"years {int(df_raw['year'].min())}-{int(df_raw['year'].max())}")
+
+# The main "*_panel.csv" does not carry FSIS establishment counts (confirmed
+# 100% NaN for n_unique_establishments_fsis etc.) -- FSIS lives in a separate
+# file, "*_panel_fsis.csv", merged in here on (fips, year). FSIS coverage is
+# 2017-2023 only, ~46-50% of rural counties per year (used below for the
+# CAFO x FSIS interaction, Block 1e).
+try:
+    _fsis_path = latest_file_glob(merged_dir, "*_panel_fsis.csv")
+    _fsis = pd.read_csv(_fsis_path, low_memory=False)[
+        ["fips", "year", "n_unique_establishments_fsis"]
+    ]
+    df_raw = df_raw.merge(_fsis, on=["fips", "year"], how="left")
+    print(f"FSIS merged from {os.path.basename(_fsis_path)}: "
+          f"{df_raw['n_unique_establishments_fsis'].notna().sum():,} non-null county-years "
+          f"({int(_fsis['year'].min())}-{int(_fsis['year'].max())})")
+except FileNotFoundError:
+    df_raw["n_unique_establishments_fsis"] = np.nan
+    print("FSIS panel file not found -- CAFO x FSIS interaction (Block 1e) will be skipped.")
+
+# =============================================================================
+# TREATMENT VARIABLE DICTIONARY -- every dairy-CAFO variable built below,
+# what it measures, and which comparisons it feeds. Built out incrementally
+# per team discussion; documented here so the different model versions in
+# this script don't have to be reverse-engineered from the code.
+#
+#   any_large_{animal}      binary: >=1 LARGE {animal} CAFO in this county-year.
+#                            Built for hogs/beef/dairy/chickens -- feeds the
+#                            isolated-vs-conditional "horse race" (Block 1b).
+#   any_medlarge_dairy       binary: >=1 MEDIUM-OR-LARGE dairy CAFO.
+#   any_dairy                binary: >=1 dairy CAFO of ANY size (small/medium/large).
+#     -> any_large_dairy / any_medlarge_dairy / any_dairy feed the size-threshold
+#        comparison (Block 1c): does requiring "large" specifically matter?
+#   cafo_dairy_large          raw COUNT of large dairy CAFOs (not divided by
+#                              population). Used with log_pop as a SEPARATE
+#                              control, rather than folded into the treatment
+#                              itself -- see Block 1d.
+#   cafo_dairy_large_log_ct   log1p(raw count) -- same idea, logged.
+#   cafo_dairy_large_raw      raw count DIVIDED BY population, per 10k residents,
+#                              NOT logged (Part b ridge + Block 1d).
+#   cafo_dairy_large_log      log1p(per-10k rate) -- the transform used
+#                              throughout Part (a)/(b) prior to this review.
+#     -> These 4 encode two separate choices that get conflated if not kept
+#        distinct: (i) per-capita RATE (divide by population, bakes in a
+#        1/population functional form) vs. RAW COUNT + a separate log_pop
+#        control (lets the data estimate the population relationship
+#        freely); (ii) logged vs. unlogged. Block 1d runs all 4 (+ binary
+#        presence) side by side so this is tested, not assumed.
+#   any_fsis                  binary: >=1 FSIS-registered establishment
+#                              (slaughter/processing) in this county-year,
+#                              2017-2023 only. IMPORTANT: the FSIS source file
+#                              lists ONLY county-years with >=1 establishment
+#                              (confirmed: min non-null value = 1, never 0) --
+#                              a county absent from that file is not "unknown,"
+#                              it has zero establishments. So absence is
+#                              filled to 0 within the confirmed 2017-2023
+#                              coverage window, not left as NaN -- treating it
+#                              as NaN would make any_fsis constant (=1)
+#                              wherever non-missing, which is what happened
+#                              on the first pass (any_fsis got a ~0 coefficient
+#                              and the interaction term collapsed onto
+#                              any_large_dairy alone -- caught and fixed here).
+#                              This is a *different* situation from the CDC
+#                              despair data, where absence genuinely is
+#                              ambiguous (suppression) -- FSIS is a federal
+#                              regulatory registry, not a survey.
+#   any_large_dairy_x_fsis    interaction: any_large_dairy * any_fsis --
+#                              "has both a large dairy CAFO AND FSIS-registered
+#                              processing/slaughter capacity" (Block 1e).
+# =============================================================================
 
 # Presence indicators for all 4 CAFO animal types -- needed for the isolated
 # vs. conditional ("horse race") TWFE comparison below. .where(notna()) keeps
@@ -96,6 +166,23 @@ DAIRY_THRESHOLDS = {
     "Medium + large":   "any_medlarge_dairy",
     "Any size":         "any_dairy",
 }
+
+# Raw count (not divided by population) and its log, for the functional-form
+# comparison in Block 1d -- these get log_pop as a SEPARATE control instead
+# of being pre-divided by population.
+df_raw["cafo_dairy_large_log_ct"] = np.log1p(df_raw["cafo_dairy_large"])
+df_raw["log_pop"] = np.log(df_raw[POP_COL].where(df_raw[POP_COL] > 0))
+
+# FSIS presence + CAFO x FSIS interaction (Block 1e). Absence within the
+# confirmed 2017-2023 coverage window is filled to 0 (true zero establishments,
+# not missing -- see dictionary note above); outside that window, NaN.
+_fsis_covered_years = df_raw["year"].between(2017, 2023)
+df_raw["any_fsis"] = np.where(
+    _fsis_covered_years,
+    (df_raw["n_unique_establishments_fsis"].fillna(0) > 0).astype(float),
+    np.nan,
+)
+df_raw["any_large_dairy_x_fsis"] = df_raw["any_large_dairy"] * df_raw["any_fsis"]
 
 # ── Outcome construction fixes (found reviewing Galina's cafo_analysis_files/) ─
 # Despair: crude_rate_despair is CDC's own pre-computed crude rate, which CDC
@@ -625,6 +712,84 @@ fig.savefig(path, dpi=200, bbox_inches="tight")
 plt.close(fig)
 print("Saved:", path)
 
+# --- Block 1d: functional form -- per-capita rate vs. raw count + log_pop --
+# large dairy only, 5 functional forms of the SAME underlying variable, all
+# with the same demographic controls (log_pop included explicitly in every
+# row here, including the per-10k versions, so the comparison is apples to
+# apples): binary presence, raw count, log(raw count), per-10k rate
+# (unlogged), log(per-10k rate). Tests whether (i) it matters how many CAFOs
+# exist (binary vs. count) and (ii) dividing by population upfront vs.
+# controlling for population separately changes the answer.
+print("\nFunctional form comparison (large dairy): presence vs count vs per-capita, log vs raw...")
+FUNCTIONAL_FORMS = {
+    "Binary presence":         "any_large_dairy",
+    "Raw count":               "cafo_dairy_large",
+    "Log(raw count)":          "cafo_dairy_large_log_ct",
+    "Per-10k rate (unlogged)": "cafo_dairy_large_raw" if "cafo_dairy_large_raw" in df_raw.columns else None,
+    "Log(per-10k rate)":       "cafo_dairy_large_log" if "cafo_dairy_large_log" in df_raw.columns else None,
+}
+# Per-10k rate columns are built later, in Part (b) -- compute them here too
+# so this comparison doesn't depend on run order.
+_pop_safe = df_raw[POP_COL].replace(0, np.nan)
+if "cafo_dairy_large_raw" not in df_raw.columns:
+    df_raw["cafo_dairy_large_raw"] = (df_raw["cafo_dairy_large"] / _pop_safe) * 10_000
+    FUNCTIONAL_FORMS["Per-10k rate (unlogged)"] = "cafo_dairy_large_raw"
+if "cafo_dairy_large_log" not in df_raw.columns:
+    df_raw["cafo_dairy_large_log"] = np.log1p(df_raw["cafo_dairy_large_raw"])
+    FUNCTIONAL_FORMS["Log(per-10k rate)"] = "cafo_dairy_large_log"
+
+form_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    ctrl_base = [c for c in CONTROL_COLS if c in df_raw.columns]
+    for form_label, form_col in FUNCTIONAL_FORMS.items():
+        # log_pop included as a control in every row -- for the per-10k
+        # (already population-normalized) versions this is a genuine
+        # over-specification check: does the per-capita rate still "work"
+        # once population is ALSO separately controlled for?
+        ctrl = ["log_pop"] + [c for c in ctrl_base if c != "log_pop"]
+        res = run_fe_ols(df_raw, form_col, outcome_col, ctrl,
+                          cluster_col="state_fips", z=1.96, label=f"{form_label}|{outcome_key}")
+        if res is None:
+            continue
+        form_rows.append({"outcome": outcome_key, "form": form_label, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {form_label:26s} | {outcome_key:26s} beta={res['beta']:+.5f}  "
+              f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
+
+form_df = pd.DataFrame(form_rows)
+form_csv = os.path.join(tables_s4_dir, f"{today_str}_Block1d_dairy_functional_form.csv")
+form_df.to_csv(form_csv, index=False)
+print("Saved:", form_csv)
+
+# --- Block 1e: CAFO x FSIS interaction (exploratory -- thin sample) ---------
+# FSIS only exists 2017-2023 at ~46-50% county coverage, so this is
+# necessarily underpowered relative to the rest of Part (a) -- flagged
+# explicitly rather than presented on equal footing with the fuller-sample
+# results above. Single regression per outcome: dairy alone, FSIS alone, and
+# their interaction, together -- not three separate regressions -- so the
+# interaction term is read as "the ADDITIONAL association with having both,
+# beyond dairy alone and FSIS alone."
+print("\nCAFO x FSIS interaction (2017-2023 only, ~46-50% county coverage -- exploratory)...")
+interaction_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    ctrl = [c for c in CONTROL_COLS if c in df_raw.columns]
+    res_dict = run_fe_ols_multi(
+        df_raw, ["any_large_dairy", "any_fsis", "any_large_dairy_x_fsis"], outcome_col, ctrl,
+        cluster_col="state_fips", z=1.96, label=f"dairy_x_fsis|{outcome_key}",
+    )
+    for term in ["any_large_dairy", "any_fsis", "any_large_dairy_x_fsis"]:
+        res = res_dict.get(term)
+        if res is None:
+            continue
+        interaction_rows.append({"outcome": outcome_key, "term": term, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {term:26s} | {outcome_key:26s} beta={res['beta']:+.4f}  p={res['pval']:.3f}{sig}  N={res['N']:,}")
+
+interaction_df = pd.DataFrame(interaction_rows)
+inter_csv = os.path.join(tables_s4_dir, f"{today_str}_Block1e_dairy_fsis_interaction.csv")
+interaction_df.to_csv(inter_csv, index=False)
+print("Saved:", inter_csv)
+
 # --- Block 2: event study around dairy entry --------------------------------
 print("\nEvent study (state-clustered SEs, 90% CI, to match memo spec)...")
 print("Joint (Wald/F) tests use the same cluster-robust covariance as the point")
@@ -879,8 +1044,6 @@ print("\n" + "="*78)
 print("PART (e): Control specification curve + covariate importance ranking")
 print("="*78)
 
-df_raw["log_pop"] = np.log(df_raw[POP_COL].where(df_raw[POP_COL] > 0))
-
 # --- Block 5a: specification curve -------------------------------------------
 # log_pop always in X_i; every possible subset of this 9-variable core set
 # added on top (2^9 = 512 combinations per outcome). All 9 chosen for
@@ -1043,5 +1206,178 @@ path = os.path.join(out_dir, f"{today_str}_Y5_covariate_ranking.png")
 fig.savefig(path, dpi=200, bbox_inches="tight")
 plt.close(fig)
 print("Saved:", path)
+
+# =============================================================================
+# PART (f): 2010-2020 window -- interactions, ML model selection (Random
+# Forest + Double Lasso), then re-run the causal (TWFE) estimate.
+# Reviewed against Econ 224 (Leung) lecture notes: LEC-2 section 3
+# (Double/Debiased ML: cross-fitted Lasso nuisance models + Neyman-orthogonal
+# partially-linear estimator -- the "double lasso" here) and LEC-3 section 2
+# (Random Forests: bagged, decorrelated trees; m=sqrt(d) covariates per
+# split; explicitly a PREDICTION tool, not a causal one -- "random forests
+# are best suited for pure prediction and often considered black boxes,"
+# while lasso/CART are the ones suited to understanding X-Y relationships).
+#
+# MODEL SPECIFICATION DICTIONARY -- one sentence each, for team sharing:
+#
+#   TWFE (within, county+year FE):
+#     Estimates the association between dairy CAFO exposure and the outcome
+#     using only within-county changes over time, after removing every
+#     time-invariant county characteristic and every national year-to-year
+#     shock.
+#
+#   Random Forest (variable importance):
+#     A black-box, non-linear predictive model that ranks which covariates
+#     -- including dairy CAFO exposure -- best predict the outcome, without
+#     producing an interpretable causal coefficient; used here for model
+#     selection, not causal inference.
+#
+#   Double Lasso / Double ML (partially linear, cross-fitted):
+#     Uses two separate cross-fitted Lasso regressions to remove the
+#     predictable part of both the outcome and the dairy-CAFO variable using
+#     all covariates, then estimates the association from what is left
+#     over -- a machine-learning way of controlling for many covariates
+#     without hand-picking which ones belong in X_i.
+#
+#   Per-capita CAFO spec:
+#     Measures dairy CAFO exposure as operations per 10,000 residents, so a
+#     bigger county with proportionally more CAFOs counts as the same
+#     "exposure" as a smaller county with fewer.
+#
+#   Raw/net count CAFO spec:
+#     Measures dairy CAFO exposure as the raw number of operations in the
+#     county, with population entered as its own separate control instead
+#     of being divided out of the treatment variable.
+# =============================================================================
+print("\n" + "="*78)
+print("PART (f): 2010-2020 window -- interactions, RF + Double Lasso, re-run TWFE")
+print("="*78)
+
+df_ml = df_raw[df_raw["year"].between(2010, 2020)].copy()
+print(f"2010-2020 window: {len(df_ml):,} rows | {df_ml['fips'].nunique():,} counties")
+
+# --- Interaction terms -------------------------------------------------------
+# dairy x income inequality: memo flagged inequality as a candidate mechanism,
+#   not just a confounder -- worth seeing if the dairy association is
+#   concentrated where inequality is high.
+# dairy x %hispanic: tests the labor-composition channel directly.
+# any_large_dairy_x_fsis: already built (Block 1e) -- reused here.
+df_ml["dairy_x_incineq"]  = df_ml["any_large_dairy"] * df_ml["income_inequality"]
+df_ml["dairy_x_hispanic"] = df_ml["any_large_dairy"] * df_ml["%_hispanic"]
+
+INTERACTION_TERMS = ["dairy_x_incineq", "dairy_x_hispanic", "any_large_dairy_x_fsis"]
+ML_CONTROLS = [c for c in WIDE_20 if c not in ("any_large_dairy",)]
+DAIRY_SPECS = {
+    "Per-capita rate": "cafo_dairy_large_raw",
+    "Raw count":       "cafo_dairy_large",
+}
+
+# --- Block 6a: Random Forest variable importance, both dairy specs ---------
+# Tuned per LEC-3 convention: num.trees~500, m=sqrt(d) features per split
+# (max_features="sqrt"), small min leaf size, deep/overgrown trees (bagging
+# handles the variance, so no max_depth restriction) -- rather than the
+# arbitrary max_depth=6 used in Part (e).
+print("\nRandom Forest variable importance (2010-2020 window)...")
+rf_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    if outcome_col not in df_ml.columns:
+        continue
+    mask = df_ml[outcome_col].notna()
+    sub = df_ml.loc[mask]
+    if mask.sum() < 200:
+        continue
+    for spec_label, spec_col in DAIRY_SPECS.items():
+        preds = [spec_col] + ML_CONTROLS + INTERACTION_TERMS
+        preds = [p for p in preds if p in sub.columns]
+        X = sub[preds]
+        y = sub[outcome_col]
+        imp = SimpleImputer(strategy="mean")
+        rf = RandomForestRegressor(n_estimators=500, max_features="sqrt",
+                                    min_samples_leaf=5, random_state=42, n_jobs=-1)
+        rf.fit(imp.fit_transform(X), y)
+        importance = pd.Series(rf.feature_importances_, index=preds)
+        rank = int(importance.rank(ascending=False)[spec_col])
+        print(f"  {outcome_key:26s} | {spec_label:16s} importance={importance[spec_col]:.4f} "
+              f"(rank {rank}/{len(preds)})")
+        for var in preds:
+            rf_rows.append({"outcome": outcome_key, "dairy_spec": spec_label,
+                             "variable": var, "rf_importance": importance[var],
+                             "is_dairy": var == spec_col})
+
+rf_df = pd.DataFrame(rf_rows)
+rf_csv = os.path.join(tables_s4_dir, f"{today_str}_Block6a_randomforest_2010_2020.csv")
+rf_df.to_csv(rf_csv, index=False)
+print("Saved:", rf_csv)
+
+# --- Block 6b: Double Lasso / Double ML (partially linear), both dairy specs
+# Cross-fitted LassoCV for both nuisance functions E[Y|X] and E[D|X]
+# (n_folds=5), Neyman-orthogonal partially-linear estimator -- matches LEC-2
+# section 3.3-3.4 exactly (DoubleMLPLR in the `doubleml` package, the same
+# library/method demonstrated in the course notes with lasso and random
+# forest learners).
+print("\nDouble Lasso / Double ML (2010-2020 window, partially linear)...")
+dml_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    if outcome_col not in df_ml.columns:
+        continue
+    for spec_label, spec_col in DAIRY_SPECS.items():
+        cols_needed = [outcome_col, spec_col] + ML_CONTROLS
+        sub = df_ml[cols_needed].dropna()
+        if len(sub) < 500:
+            print(f"  {outcome_key:26s} | {spec_label:16s} too few obs ({len(sub)}), skip")
+            continue
+        try:
+            dml_data = DoubleMLData(sub, y_col=outcome_col, d_cols=spec_col, x_cols=ML_CONTROLS)
+            ml_l = LassoCV(cv=5, max_iter=5000)
+            ml_m = LassoCV(cv=5, max_iter=5000)
+            model = DoubleMLPLR(dml_data, ml_l=ml_l, ml_m=ml_m, n_folds=5)
+            model.fit()
+            s = model.summary.loc[spec_col]
+            beta, se, pval = s["coef"], s["std err"], s["P>|t|"]
+            dml_rows.append({"outcome": outcome_key, "dairy_spec": spec_label,
+                              "beta": beta, "se": se, "pval": pval, "N": len(sub)})
+            sig = "*" if pval < 0.05 else " "
+            print(f"  {outcome_key:26s} | {spec_label:16s} beta={beta:+.5f}  "
+                  f"se={se:.5f}  p={pval:.3f}{sig}  N={len(sub):,}")
+        except Exception as e:
+            print(f"  {outcome_key:26s} | {spec_label:16s} FAILED: {repr(e)[:150]}")
+
+dml_df = pd.DataFrame(dml_rows)
+dml_csv = os.path.join(tables_s4_dir, f"{today_str}_Block6b_doublelasso_2010_2020.csv")
+dml_df.to_csv(dml_csv, index=False)
+print("Saved:", dml_csv)
+
+# --- Block 6c: re-run the causal (TWFE) estimate, same window, both specs --
+# Same within (county+year FE) design as Part (a), restricted to 2010-2020
+# and using the ML_CONTROLS set the RF/Double Lasso step just ran over --
+# directly comparable to Block 6b's Double Lasso numbers.
+print("\nTWFE re-run (2010-2020 window), both dairy specs + interactions...")
+twfe_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    for spec_label, spec_col in DAIRY_SPECS.items():
+        res = run_fe_ols(df_ml, spec_col, outcome_col, ML_CONTROLS,
+                          cluster_col="state_fips", z=1.96, label=f"{spec_label}|{outcome_key}")
+        if res is None:
+            continue
+        twfe_rows.append({"outcome": outcome_key, "term": spec_label, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {outcome_key:26s} | {spec_label:16s} beta={res['beta']:+.5f}  "
+              f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
+    # interaction terms, dairy presence + each interaction jointly
+    for inter_col in INTERACTION_TERMS:
+        res_dict = run_fe_ols_multi(df_ml, ["any_large_dairy", inter_col], outcome_col, ML_CONTROLS,
+                                     cluster_col="state_fips", z=1.96, label=f"{inter_col}|{outcome_key}")
+        res = res_dict.get(inter_col)
+        if res is None:
+            continue
+        twfe_rows.append({"outcome": outcome_key, "term": inter_col, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {outcome_key:26s} | {inter_col:24s} beta={res['beta']:+.5f}  "
+              f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
+
+twfe_df = pd.DataFrame(twfe_rows)
+twfe_csv = os.path.join(tables_s4_dir, f"{today_str}_Block6c_twfe_2010_2020.csv")
+twfe_df.to_csv(twfe_csv, index=False)
+print("Saved:", twfe_csv)
 
 print(f"\nAll script4 outputs saved to:\n  figs:   {out_dir}\n  tables: {tables_s4_dir}")
