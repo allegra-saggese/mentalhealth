@@ -84,6 +84,19 @@ for _animal in ["hogs", "beef", "dairy", "chickens"]:
     _col = f"cafo_{_animal}_large"
     df_raw[f"any_large_{_animal}"] = (df_raw[_col] > 0).astype(float).where(df_raw[_col].notna())
 
+# Dairy at three size thresholds -- large only (used everywhere above), medium
+# + large combined, and any size at all (cafo_dairy_total, small+medium+large).
+_dairy_medlarge = df_raw["cafo_dairy_medium"].fillna(0) + df_raw["cafo_dairy_large"].fillna(0)
+_dairy_medlarge_na = df_raw["cafo_dairy_medium"].isna() & df_raw["cafo_dairy_large"].isna()
+df_raw["any_medlarge_dairy"] = (_dairy_medlarge > 0).astype(float).where(~_dairy_medlarge_na)
+df_raw["any_dairy"] = (df_raw["cafo_dairy_total"] > 0).astype(float).where(df_raw["cafo_dairy_total"].notna())
+
+DAIRY_THRESHOLDS = {
+    "Large only":       "any_large_dairy",
+    "Medium + large":   "any_medlarge_dairy",
+    "Any size":         "any_dairy",
+}
+
 # ── Outcome construction fixes (found reviewing Galina's cafo_analysis_files/) ─
 # Despair: crude_rate_despair is CDC's own pre-computed crude rate, which CDC
 # suppresses/flags as unreliable at low death counts. crude_rate_from_census_pop
@@ -552,6 +565,66 @@ fig.savefig(path, dpi=200, bbox_inches="tight")
 plt.close(fig)
 print("Saved:", path)
 
+# --- Block 1c: dairy size threshold comparison (large / medium+large / any) -
+# Same within (county+year FE) spec, same controls, only the treatment
+# definition changes: does requiring LARGE specifically matter, or would
+# medium+large or any dairy CAFO at all give a similar answer?
+print("\nDairy size threshold comparison (large vs medium+large vs any size)...")
+threshold_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    ctrl = [c for c in CONTROL_COLS if c in df_raw.columns]
+    for thresh_label, thresh_col in DAIRY_THRESHOLDS.items():
+        res = run_fe_ols(df_raw, thresh_col, outcome_col, ctrl,
+                          cluster_col="state_fips", z=1.96, label=f"{thresh_label}|{outcome_key}")
+        if res is None:
+            continue
+        threshold_rows.append({"outcome": outcome_key, "threshold": thresh_label, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {thresh_label:16s} | {outcome_key:26s} beta={res['beta']:+.4f}  "
+              f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
+
+threshold_df = pd.DataFrame(threshold_rows)
+th_csv = os.path.join(tables_s4_dir, f"{today_str}_Block1c_dairy_size_threshold.csv")
+threshold_df.to_csv(th_csv, index=False)
+print("Saved:", th_csv)
+
+# Figure Y1c: threshold comparison
+fig, ax = plt.subplots(figsize=(9, 6))
+th_colors = {"Large only": "#762a83", "Medium + large": "#b35806", "Any size": "#4393c3"}
+y_labels, y_pos = [], []
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    sub = threshold_df[threshold_df["outcome"] == outcome_key]
+    for j, thresh in enumerate(th_colors):
+        row = sub[sub["threshold"] == thresh]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+        yy = i * 4 + j * 0.9
+        ax.errorbar(row["beta"], yy, xerr=[[row["beta"]-row["ci_lo"]], [row["ci_hi"]-row["beta"]]],
+                    fmt="o", color=th_colors[thresh], ms=6, capsize=3, elinewidth=1.2,
+                    markeredgecolor="white")
+        if row["pval"] < 0.05:
+            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=th_colors[thresh])
+    y_labels.append(outcome_key)
+    y_pos.append(i * 4 + 0.9)
+ax.axvline(0, color="black", lw=0.8, ls=":")
+ax.set_yticks(y_pos)
+ax.set_yticklabels(y_labels, fontsize=9)
+ax.set_xlabel("beta (dairy CAFO presence), within county+year FE", fontsize=9)
+legend_handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=8, label=k)
+                  for k, c in th_colors.items()]
+ax.legend(handles=legend_handles, fontsize=8, loc="best")
+ax.set_title(
+    "Dairy CAFO presence, by size threshold: large only vs medium+large vs any size\n"
+    "Same controls, same within-county+year FE spec | * = p < 0.05",
+    fontsize=10,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y1c_dairy_size_threshold.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
+
 # --- Block 2: event study around dairy entry --------------------------------
 print("\nEvent study (state-clustered SEs, 90% CI, to match memo spec)...")
 print("Joint (Wald/F) tests use the same cluster-robust covariance as the point")
@@ -635,21 +708,35 @@ print("PART (b): Ridge cross-check — does regularized regression agree?")
 print("="*78)
 
 # Build the CAFO/FSIS treatment pool (log-per-10k, same transform used
-# throughout the repo) alongside the demographic control pool.
+# throughout the repo) alongside the demographic control pool. Dairy also
+# gets a raw (unlogged) per-10k version at all 3 size thresholds, so the
+# logged vs. raw choice can be compared directly rather than assumed.
 def _log_per10k(series, pop):
     x = pd.to_numeric(series, errors="coerce")
     p = pd.to_numeric(pop, errors="coerce").replace(0, np.nan)
     return np.log1p((x / p) * 10_000)
 
+def _raw_per10k(series, pop):
+    x = pd.to_numeric(series, errors="coerce")
+    p = pd.to_numeric(pop, errors="coerce").replace(0, np.nan)
+    return (x / p) * 10_000
+
 CAFO_RAW_COLS = {
-    "cafo_dairy_log":    ["cafo_dairy_small", "cafo_dairy_medium", "cafo_dairy_large"],
-    "cafo_dairy_large_log": ["cafo_dairy_large"],
+    "cafo_dairy_log":         ["cafo_dairy_small", "cafo_dairy_medium", "cafo_dairy_large"],
+    "cafo_dairy_medlarge_log":["cafo_dairy_medium", "cafo_dairy_large"],
+    "cafo_dairy_large_log":   ["cafo_dairy_large"],
     "cafo_beef_log":     ["cafo_beef_small", "cafo_beef_medium", "cafo_beef_large"],
     "cafo_beef_large_log": ["cafo_beef_large"],
     "cafo_hogs_log":     ["cafo_hogs_small", "cafo_hogs_medium", "cafo_hogs_large"],
     "cafo_hogs_large_log": ["cafo_hogs_large"],
     "cafo_chickens_log": ["cafo_chickens_small", "cafo_chickens_medium", "cafo_chickens_large"],
     "cafo_chickens_large_log": ["cafo_chickens_large"],
+}
+# Same 3 dairy thresholds, unlogged (raw count per 10k population).
+DAIRY_RAW_UNLOGGED_COLS = {
+    "cafo_dairy_raw":          ["cafo_dairy_small", "cafo_dairy_medium", "cafo_dairy_large"],
+    "cafo_dairy_medlarge_raw": ["cafo_dairy_medium", "cafo_dairy_large"],
+    "cafo_dairy_large_raw":    ["cafo_dairy_large"],
 }
 FSIS_RAW_COLS = {
     "fsis_total_log":     "n_unique_establishments_fsis",
@@ -661,10 +748,15 @@ for new_col, src in CAFO_RAW_COLS.items():
     cols = [c for c in src if c in df_ridge.columns]
     total = df_ridge[cols].sum(axis=1, min_count=1) if cols else np.nan
     df_ridge[new_col] = _log_per10k(total, df_ridge[POP_COL])
+for new_col, src in DAIRY_RAW_UNLOGGED_COLS.items():
+    cols = [c for c in src if c in df_ridge.columns]
+    total = df_ridge[cols].sum(axis=1, min_count=1) if cols else np.nan
+    df_ridge[new_col] = _raw_per10k(total, df_ridge[POP_COL])
 for new_col, src_col in FSIS_RAW_COLS.items():
     df_ridge[new_col] = _log_per10k(df_ridge[src_col], df_ridge[POP_COL]) if src_col in df_ridge.columns else np.nan
 
-TREATMENT_PREDICTORS = list(CAFO_RAW_COLS.keys()) + list(FSIS_RAW_COLS.keys())
+TREATMENT_PREDICTORS = (list(CAFO_RAW_COLS.keys()) + list(DAIRY_RAW_UNLOGGED_COLS.keys())
+                        + list(FSIS_RAW_COLS.keys()))
 CONTROL_PREDICTORS   = [c for c in CONTROL_COLS if c in df_ridge.columns]
 ALL_PREDICTORS       = TREATMENT_PREDICTORS + CONTROL_PREDICTORS
 
@@ -725,10 +817,14 @@ for outcome_key, outcome_col in OUTCOMES.items():
     else:
         print(f"  [{outcome_key}] within-transformed N too small ({len(dm)}), pooled only")
 
-    dairy_pooled = coefs_pooled.get("cafo_dairy_large_log", np.nan)
-    dairy_within = coefs_within.get("cafo_dairy_large_log", np.nan) if len(dm) >= 200 else np.nan
-    print(f"  {outcome_key:26s} | dairy_large_log std-coef  pooled={dairy_pooled:+.4f}  "
-          f"within={dairy_within:+.4f}  (alpha_pooled={alpha_pooled:.3g})")
+    print(f"  {outcome_key}:")
+    _dairy_cols = ["cafo_dairy_large_log", "cafo_dairy_large_raw",
+                   "cafo_dairy_medlarge_log", "cafo_dairy_medlarge_raw",
+                   "cafo_dairy_log", "cafo_dairy_raw"]
+    for _col in _dairy_cols:
+        _p = coefs_pooled.get(_col, np.nan)
+        _w = coefs_within.get(_col, np.nan) if len(dm) >= 200 else np.nan
+        print(f"    {_col:26s} std-coef  pooled={_p:+.4f}  within={_w:+.4f}")
 
 ridge_df = pd.DataFrame(ridge_rows)
 ridge_csv = os.path.join(tables_s4_dir, f"{today_str}_Block3_ridge_pooled_vs_within.csv")
