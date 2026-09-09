@@ -59,13 +59,42 @@ df_raw["state_fips"] = df_raw["fips"].astype("string").str[:2]
 print(f"Rural panel: {len(df_raw):,} rows | {df_raw['fips'].nunique():,} counties | "
       f"years {int(df_raw['year'].min())}-{int(df_raw['year'].max())}")
 
+# Presence indicators for all 4 CAFO animal types -- needed for the isolated
+# vs. conditional ("horse race") TWFE comparison below. .where(notna()) keeps
+# a missing large-op count as missing rather than coding it as "absent",
+# matching the external memo's twfe.py construction.
+for _animal in ["hogs", "beef", "dairy", "chickens"]:
+    _col = f"cafo_{_animal}_large"
+    df_raw[f"any_large_{_animal}"] = (df_raw[_col] > 0).astype(float).where(df_raw[_col].notna())
+
+# ── Outcome construction fixes (found reviewing Galina's cafo_analysis_files/) ─
+# Despair: crude_rate_despair is CDC's own pre-computed crude rate, which CDC
+# suppresses/flags as unreliable at low death counts. crude_rate_from_census_pop
+# (built in script1b-generate-panel.py, deaths / census population * 100k) was
+# built for exactly this reason -- QA sense-check shows corr=0.9999 against
+# CDC's own rate wherever both exist, and it recovers ~2x the usable sample
+# (27% vs 13% coverage in recent years) by not being suppressed. Both variants
+# hit a hard cliff to 0% coverage after 2020 (source data itself, not
+# suppression) -- truncated explicitly below rather than relying on it being
+# implicitly NaN.
+DESPAIR_COL = "crude_rate_from_census_pop"
+df_raw.loc[df_raw["year"] > 2020, DESPAIR_COL] = np.nan
+
+# Assault: combine aggravated + simple assault (NIBRS), NaN-propagated the same
+# way as total_incidents_per100k's own coverage -- matches how the external
+# memo's own pipeline builds this outcome, rather than aggravated assault alone.
+df_raw["crime_assault"] = (
+    df_raw["aggravated_assault_per100k"].fillna(0) + df_raw["simple_assault_per100k"].fillna(0)
+)
+df_raw.loc[df_raw["total_incidents_per100k"].isna(), "crime_assault"] = np.nan
+
 # ── Outcomes (hard MH + despair + crime, per team discussion) ────────────────
 OUTCOMES = {
     "Poor MH Days":            "poor_mental_health_days",
     "Frequent Mental Distress":"frequent_mental_distress_per100k",
-    "Deaths of Despair":       "crude_rate_despair",
+    "Deaths of Despair":       DESPAIR_COL,
     "Violent Crime (CHR)":     "violent_crime",
-    "Aggravated Assault":      "aggravated_assault_per100k",
+    "Assault (Agg+Simple)":    "crime_assault",
     "Total Incidents (NIBRS)": "total_incidents_per100k",
 }
 
@@ -129,6 +158,41 @@ def run_fe_ols(df, treatment_col, outcome_col, control_cols, entity="fips", time
     beta, se = res.params.get(treatment_col, np.nan), res.bse.get(treatment_col, np.nan)
     return {"beta": beta, "se": se, "ci_lo": beta - z*se, "ci_hi": beta + z*se,
             "pval": res.pvalues.get(treatment_col, np.nan), "N": int(res.nobs), "r2": res.rsquared}
+
+
+def run_fe_ols_multi(df, treatment_cols, outcome_col, control_cols, entity="fips", time="year",
+                      cluster_col="state_fips", z=1.96, label=""):
+    """
+    Two-way FE OLS with MULTIPLE treatment columns entered simultaneously
+    ("horse race" -- each animal type's coefficient is conditional on the
+    others also being in the model), vs. run_fe_ols's single-treatment
+    (isolated) spec. Matches the external memo's twfe.py, which enters
+    any_large_hogs/beef/dairy/chickens together in one regression. Returns
+    a dict keyed by treatment column, one result per co-estimated coefficient.
+    """
+    x_cols = list(treatment_cols) + [c for c in control_cols if c not in treatment_cols]
+    keep_extra = [cluster_col] if cluster_col not in (entity, time) else []
+    dm = within_transform(df[[*{outcome_col, *x_cols, entity, time, *keep_extra}]],
+                           outcome_col, x_cols, entity=entity, time=time)
+    if cluster_col not in dm.columns and cluster_col in df.columns:
+        dm = dm.join(df[cluster_col])
+    if len(dm) < 200:
+        print(f"    [{label}] too few obs ({len(dm)}), skip")
+        return {}
+    Y = dm[outcome_col]
+    X = sm.add_constant(dm[x_cols], has_constant="add")
+    groups = dm[cluster_col] if cluster_col in dm.columns else dm[entity]
+    try:
+        res = sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": groups})
+    except Exception as e:
+        print(f"    [{label}] OLS failed: {e}")
+        return {}
+    out = {}
+    for tcol in treatment_cols:
+        beta, se = res.params.get(tcol, np.nan), res.bse.get(tcol, np.nan)
+        out[tcol] = {"beta": beta, "se": se, "ci_lo": beta - z*se, "ci_hi": beta + z*se,
+                     "pval": res.pvalues.get(tcol, np.nan), "N": int(res.nobs), "r2": res.rsquared}
+    return out
 
 
 def run_pooled_ols(df, treatment_col, outcome_col, control_cols, fe_cols,
@@ -213,7 +277,7 @@ def run_event_study(df_full, events_df, outcome_col, control_cols=None,
 
     if d_pool[outcome_col].notna().sum() < 200:
         print(f"    [{label}] too few obs, skip")
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
 
     rel_times = [t for t in range(-n_leads, n_lags + 1) if t != -1]
     for t in rel_times:
@@ -225,7 +289,7 @@ def run_event_study(df_full, events_df, outcome_col, control_cols=None,
     if cluster_col not in dm.columns:
         dm = dm.join(d_pool[cluster_col])
     if len(dm) < 200:
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
 
     Y = dm[outcome_col]
     X = sm.add_constant(dm[x_cols], has_constant="add")
@@ -262,7 +326,7 @@ def run_event_study(df_full, events_df, outcome_col, control_cols=None,
         res = sm.OLS(Y, X).fit(cov_type="cluster", cov_kwds={"groups": dm[cluster_col]})
     except Exception as e:
         print(f"    [{label}] event-study OLS failed: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
 
     rows = []
     for t in rel_times:
@@ -278,7 +342,43 @@ def run_event_study(df_full, events_df, outcome_col, control_cols=None,
                          "pval": np.nan, "outcome": label})
     rows.append({"t_rel": -1, "beta": 0.0, "se": 0.0, "ci_lo": 0.0, "ci_hi": 0.0,
                  "pval": np.nan, "outcome": label})
-    return pd.DataFrame(rows).sort_values("t_rel")
+    es_df = pd.DataFrame(rows).sort_values("t_rel")
+
+    # --- Joint significance (Wald/F) tests, using the fitted cluster-robust
+    # covariance -- NOT eyeballing individual noisy coefficients one at a
+    # time. Pre-period test = formal parallel-pre-trends check (H0: all
+    # pre-treatment event-time coefficients are jointly zero). Post-period
+    # test = whether the treatment effect is jointly distinguishable from
+    # zero across the post window, taken together.
+    pre_terms  = [c for c in active_dummies if int(c.replace("d_t", "")) < -1]
+    post_terms = [c for c in active_dummies if int(c.replace("d_t", "")) >= 0]
+
+    def _joint_test(terms):
+        if len(terms) < 1:
+            return {"F": np.nan, "df_num": 0, "df_denom": np.nan, "pval": np.nan, "n_terms": 0}
+        restriction = ", ".join(f"{t} = 0" for t in terms)
+        try:
+            wt = res.f_test(restriction)
+            return {"F": float(wt.fvalue), "df_num": int(wt.df_num),
+                    "df_denom": float(wt.df_denom), "pval": float(wt.pvalue),
+                    "n_terms": len(terms)}
+        except Exception as e:
+            print(f"    [{label}] joint test failed on {terms}: {e}")
+            return {"F": np.nan, "df_num": len(terms), "df_denom": np.nan, "pval": np.nan, "n_terms": len(terms)}
+
+    joint = {
+        "outcome": label,
+        "pre":  _joint_test(pre_terms),
+        "post": _joint_test(post_terms),
+    }
+    print(f"    [{label}] joint pre-trend test:  F({joint['pre']['df_num']},{joint['pre']['df_denom']:.0f})="
+          f"{joint['pre']['F']:.2f}  p={joint['pre']['pval']:.3f}  "
+          f"({'REJECT flat pre-trend' if joint['pre']['pval'] < 0.05 else 'cannot reject flat pre-trend'})")
+    print(f"    [{label}] joint post-effect test: F({joint['post']['df_num']},{joint['post']['df_denom']:.0f})="
+          f"{joint['post']['F']:.2f}  p={joint['post']['pval']:.3f}  "
+          f"({'jointly significant post effect' if joint['post']['pval'] < 0.05 else 'not jointly significant'})")
+
+    return es_df, joint
 
 
 # =============================================================================
@@ -361,21 +461,107 @@ fig.savefig(path, dpi=200, bbox_inches="tight")
 plt.close(fig)
 print("Saved:", path)
 
+# --- Block 1b: isolated vs conditional ("horse race") dairy coefficient -----
+# Isolated: dairy alone (within, county+year FE) -- same as Block 1's within row.
+# Conditional: dairy's coefficient with hogs/beef/chickens presence ALSO in
+# the regression -- matches the external memo's twfe.py, which enters all
+# four animal types simultaneously. Controls held identical across both specs
+# so the only thing that changes is whether the other 3 CAFO types are
+# partialled out -- isolates "does conditioning on other animal types change
+# the dairy answer" from "how many demographic controls are included."
+print("\nIsolated vs conditional (horse race) dairy coefficient...")
+ANIMAL_PRESENCE_COLS = ["any_large_dairy", "any_large_beef", "any_large_hogs", "any_large_chickens"]
+horserace_rows = []
+for outcome_key, outcome_col in OUTCOMES.items():
+    ctrl = [c for c in CONTROL_COLS if c in df_raw.columns]
+
+    isolated = run_fe_ols_multi(
+        df_raw, ["any_large_dairy"], outcome_col, ctrl,
+        cluster_col="state_fips", z=1.96, label=f"isolated|{outcome_key}",
+    )
+    conditional = run_fe_ols_multi(
+        df_raw, ANIMAL_PRESENCE_COLS, outcome_col, ctrl,
+        cluster_col="state_fips", z=1.96, label=f"conditional|{outcome_key}",
+    )
+    for spec_name, res_dict in [("Isolated (dairy alone)", isolated),
+                                 ("Conditional (+ beef/hogs/chickens)", conditional)]:
+        res = res_dict.get("any_large_dairy")
+        if res is None:
+            continue
+        horserace_rows.append({"outcome": outcome_key, "spec": spec_name, **res})
+        sig = "*" if res["pval"] < 0.05 else " "
+        print(f"  {spec_name:36s} | {outcome_key:24s} beta={res['beta']:+.4f}  "
+              f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
+
+horserace_df = pd.DataFrame(horserace_rows)
+hr_csv = os.path.join(tables_s4_dir, f"{today_str}_Block1b_dairy_isolated_vs_conditional.csv")
+horserace_df.to_csv(hr_csv, index=False)
+print("Saved:", hr_csv)
+
+# Figure Y1b: isolated vs conditional comparison
+fig, ax = plt.subplots(figsize=(9, 6))
+hr_colors = {"Isolated (dairy alone)": "#1b7837", "Conditional (+ beef/hogs/chickens)": "#762a83"}
+y_labels, y_pos = [], []
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    sub = horserace_df[horserace_df["outcome"] == outcome_key]
+    for j, spec in enumerate(hr_colors):
+        row = sub[sub["spec"] == spec]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+        yy = i * 3 + j * 0.9
+        ax.errorbar(row["beta"], yy, xerr=[[row["beta"]-row["ci_lo"]], [row["ci_hi"]-row["beta"]]],
+                    fmt="o", color=hr_colors[spec], ms=6, capsize=3, elinewidth=1.2,
+                    markeredgecolor="white")
+        if row["pval"] < 0.05:
+            ax.text(row["ci_hi"] + 0.01, yy, "*", va="center", fontsize=10, color=hr_colors[spec])
+    y_labels.append(outcome_key)
+    y_pos.append(i * 3 + 0.45)
+ax.axvline(0, color="black", lw=0.8, ls=":")
+ax.set_yticks(y_pos)
+ax.set_yticklabels(y_labels, fontsize=9)
+ax.set_xlabel("beta (large dairy CAFO presence), within county+year FE", fontsize=9)
+legend_handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, markersize=8, label=k)
+                  for k, c in hr_colors.items()]
+ax.legend(handles=legend_handles, fontsize=8, loc="best")
+ax.set_title(
+    "Dairy coefficient: isolated vs. conditional on other CAFO animal types\n"
+    "Same controls both specs | * = p < 0.05 | matches memo's twfe.py horse-race design",
+    fontsize=10,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y1b_dairy_isolated_vs_conditional.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
+
 # --- Block 2: event study around dairy entry --------------------------------
 print("\nEvent study (state-clustered SEs, 90% CI, to match memo spec)...")
+print("Joint (Wald/F) tests use the same cluster-robust covariance as the point")
+print("estimates -- this is the correct way to assess pre-trends/post-effects,")
+print("not eyeballing individually noisy per-lag coefficients one at a time.\n")
 es_rows = []
+joint_rows = []
 for outcome_key, outcome_col in OUTCOMES.items():
     ctrl = [c for c in CONTROL_COLS if c in df_dairy.columns]
-    es = run_event_study(
+    es, joint = run_event_study(
         df_dairy, dairy_entry, outcome_col, control_cols=ctrl,
         cluster_col="state_fips", n_leads=10, n_lags=9, z=1.645, label=outcome_key,
     )
     if not es.empty:
         es_rows.append(es)
+    if joint:
+        for period in ("pre", "post"):
+            joint_rows.append({"outcome": outcome_key, "period": period, **joint[period]})
 
 es_df = pd.concat(es_rows, ignore_index=True) if es_rows else pd.DataFrame()
 es_csv = os.path.join(tables_s4_dir, f"{today_str}_Block2_dairy_event_study.csv")
 es_df.to_csv(es_csv, index=False)
+
+joint_df = pd.DataFrame(joint_rows)
+joint_csv = os.path.join(tables_s4_dir, f"{today_str}_Block2b_dairy_event_study_joint_tests.csv")
+joint_df.to_csv(joint_csv, index=False)
+print("Saved:", joint_csv)
 print("Saved:", es_csv)
 
 # Figure Y2: event study grid, one panel per outcome
@@ -395,11 +581,17 @@ for i, outcome_key in enumerate(OUTCOMES.keys()):
     ax.axvline(-0.5, color="grey", lw=0.8, ls=":", alpha=0.6)
     ax.errorbar(sub["t_rel"], sub["beta"], yerr=[sub["beta"]-sub["ci_lo"], sub["ci_hi"]-sub["beta"]],
                 fmt="o", color="#762a83", ms=5, capsize=3, elinewidth=1)
-    pre = sub[sub["t_rel"] < 0]
-    if len(pre) >= 2:
-        ax.text(0.04, 0.94, f"pre max|b|={pre['beta'].abs().max():.3f}",
-                transform=ax.transAxes, fontsize=7, va="top",
-                bbox=dict(boxstyle="round,pad=0.25", fc="white", alpha=0.75))
+    # Formal joint (Wald/F) tests, not an eyeballed max|beta| heuristic --
+    # correctly assesses the pre-trend/post-effect block using the same
+    # cluster-robust covariance as the point estimates.
+    jt = joint_df[joint_df["outcome"] == outcome_key] if not joint_df.empty else pd.DataFrame()
+    if not jt.empty:
+        pre_p  = jt.loc[jt["period"] == "pre",  "pval"].squeeze()
+        post_p = jt.loc[jt["period"] == "post", "pval"].squeeze()
+        txt = (f"joint pre-trend: p={pre_p:.3f}\n"
+               f"joint post-effect: p={post_p:.3f}")
+        ax.text(0.04, 0.94, txt, transform=ax.transAxes, fontsize=7, va="top",
+                bbox=dict(boxstyle="round,pad=0.25", fc="white", alpha=0.8))
     ax.set_title(outcome_key, fontsize=9, fontweight="bold")
     ax.set_xlabel("years relative to first large dairy CAFO", fontsize=7)
     ax.tick_params(labelsize=7)
