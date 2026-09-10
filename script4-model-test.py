@@ -8,7 +8,7 @@ Purpose:
         external memo `GalinaAnalysis/2026-08-25-claude-cafo-patterns/cafo_memo.html`
         (Dropbox — NOT part of this repo, NOT modified or read programmatically
         by this script; only its written conclusions are being checked against).
-        Three specs, in the same progression as that memo:
+        Three model versions, in the same progression as that memo:
           1. Cross-section (pooled, state + year FE)         -> should be null/favorable
           2. Within-county (county + year FE)                -> sign should flip negative
           3. Event study around first large-dairy-CAFO entry -> dynamic, growing effect
@@ -37,7 +37,7 @@ Figures -> Dropbox/Mental/Data/output/figs/script4/
   Y1b_dairy_isolated_vs_conditional.png  Dairy alone vs. dairy + beef/hogs/chickens jointly
   Y2_dairy_event_study.png            Event-study around first large-dairy-CAFO entry
   Y3_ridge_pooled_vs_within.png       Ridge coefficients, pooled vs within-transformed
-  Y4_spec_curve.png                   Dairy beta across all 512 control combinations, w/ 95% CI
+  Y4_specification_curve.png                   Dairy beta across all 512 control combinations, w/ 95% CI
   Y5_covariate_ranking.png            Ridge + Random Forest importance, dairy included
 
 Tables -> Dropbox/Mental/Data/output/tables/script4/
@@ -46,7 +46,7 @@ Tables -> Dropbox/Mental/Data/output/tables/script4/
   Block2_dairy_event_study.csv
   Block2b_dairy_event_study_joint_tests.csv
   Block3_ridge_pooled_vs_within.csv
-  Block4_spec_curve.csv
+  Block4_specification_curve.csv
   Block5_covariate_ranking.csv
 """
 
@@ -154,16 +154,19 @@ for _animal in ["hogs", "beef", "dairy", "chickens"]:
     _col = f"cafo_{_animal}_large"
     df_raw[f"any_large_{_animal}"] = (df_raw[_col] > 0).astype(float).where(df_raw[_col].notna())
 
-# Dairy at three size thresholds -- large only (used everywhere above), medium
-# + large combined, and any size at all (cafo_dairy_total, small+medium+large).
+# Dairy at four size thresholds -- large only (used everywhere above), medium
+# + large combined, medium only, and any size at all (cafo_dairy_total,
+# small+medium+large).
 _dairy_medlarge = df_raw["cafo_dairy_medium"].fillna(0) + df_raw["cafo_dairy_large"].fillna(0)
 _dairy_medlarge_na = df_raw["cafo_dairy_medium"].isna() & df_raw["cafo_dairy_large"].isna()
 df_raw["any_medlarge_dairy"] = (_dairy_medlarge > 0).astype(float).where(~_dairy_medlarge_na)
+df_raw["any_medium_dairy"] = (df_raw["cafo_dairy_medium"] > 0).astype(float).where(df_raw["cafo_dairy_medium"].notna())
 df_raw["any_dairy"] = (df_raw["cafo_dairy_total"] > 0).astype(float).where(df_raw["cafo_dairy_total"].notna())
 
 DAIRY_THRESHOLDS = {
     "Large only":       "any_large_dairy",
     "Medium + large":   "any_medlarge_dairy",
+    "Medium only":      "any_medium_dairy",
     "Any size":         "any_dairy",
 }
 
@@ -233,7 +236,7 @@ CONTROL_COLS = [
 # =============================================================================
 # Helpers — generic two-way FE machinery (mirrors script3-ridge.py's approach,
 # parameterized for cluster variable + confidence level so we can match the
-# external memo's spec exactly for the replication, rather than this repo's
+# external memo's approach exactly for the replication, rather than this repo's
 # usual default of county-clustered / 95% CI).
 # =============================================================================
 
@@ -253,7 +256,7 @@ def run_fe_ols(df, treatment_col, outcome_col, control_cols, entity="fips", time
                cluster_col="state_fips", z=1.96, label=""):
     """
     Two-way FE (within transformation) OLS with clustered SEs.
-    z=1.96 -> 95% CI (this repo's convention); pass z=1.645 for 90% CI (memo's spec).
+    z=1.96 -> 95% CI (this repo's convention); pass z=1.645 for 90% CI (memo's approach).
     """
     x_cols = [treatment_col] + [c for c in control_cols if c != treatment_col]
     keep_extra = [cluster_col] if cluster_col not in (entity, time) else []
@@ -283,7 +286,7 @@ def run_fe_ols_multi(df, treatment_cols, outcome_col, control_cols, entity="fips
     Two-way FE OLS with MULTIPLE treatment columns entered simultaneously
     ("horse race" -- each animal type's coefficient is conditional on the
     others also being in the model), vs. run_fe_ols's single-treatment
-    (isolated) spec. Matches the external memo's twfe.py, which enters
+    (isolated) version. Matches the external memo's twfe.py, which enters
     any_large_hogs/beef/dairy/chickens together in one regression. Returns
     a dict keyed by treatment column, one result per co-estimated coefficient.
     """
@@ -376,7 +379,7 @@ def run_event_study(df_full, events_df, outcome_col, control_cols=None,
     """
     TWFE event-study regression. Omitted category: t_rel = -1.
     Control group: never-treated + not-yet-treated counties (pooled).
-    z=1.645 -> 90% CI, matching the external memo's reported spec.
+    z=1.645 -> 90% CI, matching the external memo's reported approach.
     """
     control_cols = control_cols or []
     treated_fips = set(events_df[entity].unique())
@@ -582,7 +585,7 @@ print("Saved:", path)
 # Isolated: dairy alone (within, county+year FE) -- same as Block 1's within row.
 # Conditional: dairy's coefficient with hogs/beef/chickens presence ALSO in
 # the regression -- matches the external memo's twfe.py, which enters all
-# four animal types simultaneously. Controls held identical across both specs
+# four animal types simultaneously. Controls held identical across both versions
 # so the only thing that changes is whether the other 3 CAFO types are
 # partialled out -- isolates "does conditioning on other animal types change
 # the dairy answer" from "how many demographic controls are included."
@@ -643,7 +646,7 @@ legend_handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c,
 ax.legend(handles=legend_handles, fontsize=8, loc="best")
 ax.set_title(
     "Dairy coefficient: isolated vs. conditional on other CAFO animal types\n"
-    "Same controls both specs | * = p < 0.05 | matches memo's twfe.py horse-race design",
+    "Same controls in both versions | * = p < 0.05 | matches memo's twfe.py horse-race design",
     fontsize=10,
 )
 plt.tight_layout()
@@ -653,7 +656,7 @@ plt.close(fig)
 print("Saved:", path)
 
 # --- Block 1c: dairy size threshold comparison (large / medium+large / any) -
-# Same within (county+year FE) spec, same controls, only the treatment
+# Same within (county+year FE) model, same controls, only the treatment
 # definition changes: does requiring LARGE specifically matter, or would
 # medium+large or any dairy CAFO at all give a similar answer?
 print("\nDairy size threshold comparison (large vs medium+large vs any size)...")
@@ -703,7 +706,7 @@ legend_handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c,
 ax.legend(handles=legend_handles, fontsize=8, loc="best")
 ax.set_title(
     "Dairy CAFO presence, by size threshold: large only vs medium+large vs any size\n"
-    "Same controls, same within-county+year FE spec | * = p < 0.05",
+    "Same controls, same within-county+year FE model | * = p < 0.05",
     fontsize=10,
 )
 plt.tight_layout()
@@ -791,7 +794,7 @@ interaction_df.to_csv(inter_csv, index=False)
 print("Saved:", inter_csv)
 
 # --- Block 2: event study around dairy entry --------------------------------
-print("\nEvent study (state-clustered SEs, 90% CI, to match memo spec)...")
+print("\nEvent study (state-clustered SEs, 90% CI, to match memo's approach)...")
 print("Joint (Wald/F) tests use the same cluster-robust covariance as the point")
 print("estimates -- this is the correct way to assess pre-trends/post-effects,")
 print("not eyeballing individually noisy per-lag coefficients one at a time.\n")
@@ -1056,7 +1059,7 @@ CORE_9 = [
 ]
 CORE_9 = [c for c in CORE_9 if c in df_raw.columns]
 
-spec_rows = []
+curve_rows = []
 for outcome_key, outcome_col in OUTCOMES.items():
     if outcome_col not in df_raw.columns:
         continue
@@ -1064,34 +1067,34 @@ for outcome_key, outcome_col in OUTCOMES.items():
         for combo in itertools.combinations(CORE_9, r):
             controls = ["log_pop"] + list(combo)
             res = run_fe_ols(df_raw, "any_large_dairy", outcome_col, controls,
-                              cluster_col="state_fips", z=1.96, label=f"spec|{outcome_key}")
+                              cluster_col="state_fips", z=1.96, label=f"combo|{outcome_key}")
             if res is None:
                 continue
-            spec_rows.append({
+            curve_rows.append({
                 "outcome": outcome_key, "n_controls": len(controls),
                 "controls": "+".join(controls), **res,
             })
-    n_done = sum(1 for r in spec_rows if r["outcome"] == outcome_key)
-    print(f"  {outcome_key:26s}: {n_done} / {2**len(CORE_9)} specs estimated")
+    n_done = sum(1 for r in curve_rows if r["outcome"] == outcome_key)
+    print(f"  {outcome_key:26s}: {n_done} / {2**len(CORE_9)} combinations estimated")
 
-spec_df = pd.DataFrame(spec_rows)
-spec_csv = os.path.join(tables_s4_dir, f"{today_str}_Block4_spec_curve.csv")
-spec_df.to_csv(spec_csv, index=False)
-print("Saved:", spec_csv)
+curve_df = pd.DataFrame(curve_rows)
+curve_csv = os.path.join(tables_s4_dir, f"{today_str}_Block4_specification_curve.csv")
+curve_df.to_csv(curve_csv, index=False)
+print("Saved:", curve_csv)
 
 print(f"\n{'outcome':28s} {'beta min':>9s} {'median':>9s} {'beta max':>9s} {'share sig (p<.05)':>18s}")
 for outcome_key in OUTCOMES:
-    sub = spec_df[spec_df["outcome"] == outcome_key]
+    sub = curve_df[curve_df["outcome"] == outcome_key]
     if sub.empty:
         continue
     print(f"{outcome_key:28s} {sub['beta'].min():9.3f} {sub['beta'].median():9.3f} "
           f"{sub['beta'].max():9.3f} {(sub['pval'] < 0.05).mean():18.2f}")
 
 # Figure Y4: ordered dot + 95% CI plot per outcome -- shows the RANGE of beta
-# across all 512 control combinations AND, using each spec's own SE, which
-# specs are significant vs not. More informative than a plain box/whisker
+# across all 512 control combinations AND, using each combination's own SE, which
+# combinations are significant vs not. More informative than a plain box/whisker
 # since the box/whisker would show only the point-estimate distribution and
-# drop the uncertainty (SE) on each individual spec.
+# drop the uncertainty (SE) on each individual combination.
 n_out = len(OUTCOMES)
 n_cols_sc = 3
 n_rows_sc = int(np.ceil(n_out / n_cols_sc))
@@ -1099,7 +1102,7 @@ fig, axes = plt.subplots(n_rows_sc, n_cols_sc, figsize=(n_cols_sc*5.5, n_rows_sc
 axes = axes.flatten()
 for i, outcome_key in enumerate(OUTCOMES.keys()):
     ax = axes[i]
-    sub = spec_df[spec_df["outcome"] == outcome_key].sort_values("beta").reset_index(drop=True)
+    sub = curve_df[curve_df["outcome"] == outcome_key].sort_values("beta").reset_index(drop=True)
     if sub.empty:
         ax.set_visible(False)
         continue
@@ -1123,7 +1126,7 @@ fig.suptitle(
     fontsize=10, y=1.02,
 )
 plt.tight_layout()
-path = os.path.join(out_dir, f"{today_str}_Y4_spec_curve.png")
+path = os.path.join(out_dir, f"{today_str}_Y4_specification_curve.png")
 fig.savefig(path, dpi=200, bbox_inches="tight")
 plt.close(fig)
 print("Saved:", path)
@@ -1239,12 +1242,12 @@ print("Saved:", path)
 #     over -- a machine-learning way of controlling for many covariates
 #     without hand-picking which ones belong in X_i.
 #
-#   Per-capita CAFO spec:
+#   Per-capita CAFO version:
 #     Measures dairy CAFO exposure as operations per 10,000 residents, so a
 #     bigger county with proportionally more CAFOs counts as the same
 #     "exposure" as a smaller county with fewer.
 #
-#   Raw/net count CAFO spec:
+#   Raw/net count CAFO version:
 #     Measures dairy CAFO exposure as the raw number of operations in the
 #     county, with population entered as its own separate control instead
 #     of being divided out of the treatment variable.
@@ -1267,12 +1270,12 @@ df_ml["dairy_x_hispanic"] = df_ml["any_large_dairy"] * df_ml["%_hispanic"]
 
 INTERACTION_TERMS = ["dairy_x_incineq", "dairy_x_hispanic", "any_large_dairy_x_fsis"]
 ML_CONTROLS = [c for c in WIDE_20 if c not in ("any_large_dairy",)]
-DAIRY_SPECS = {
+DAIRY_VERSIONS = {
     "Per-capita rate": "cafo_dairy_large_raw",
     "Raw count":       "cafo_dairy_large",
 }
 
-# --- Block 6a: Random Forest variable importance, both dairy specs ---------
+# --- Block 6a: Random Forest variable importance, both dairy versions ------
 # Tuned per LEC-3 convention: num.trees~500, m=sqrt(d) features per split
 # (max_features="sqrt"), small min leaf size, deep/overgrown trees (bagging
 # handles the variance, so no max_depth restriction) -- rather than the
@@ -1286,8 +1289,8 @@ for outcome_key, outcome_col in OUTCOMES.items():
     sub = df_ml.loc[mask]
     if mask.sum() < 200:
         continue
-    for spec_label, spec_col in DAIRY_SPECS.items():
-        preds = [spec_col] + ML_CONTROLS + INTERACTION_TERMS
+    for version_label, version_col in DAIRY_VERSIONS.items():
+        preds = [version_col] + ML_CONTROLS + INTERACTION_TERMS
         preds = [p for p in preds if p in sub.columns]
         X = sub[preds]
         y = sub[outcome_col]
@@ -1296,20 +1299,20 @@ for outcome_key, outcome_col in OUTCOMES.items():
                                     min_samples_leaf=5, random_state=42, n_jobs=-1)
         rf.fit(imp.fit_transform(X), y)
         importance = pd.Series(rf.feature_importances_, index=preds)
-        rank = int(importance.rank(ascending=False)[spec_col])
-        print(f"  {outcome_key:26s} | {spec_label:16s} importance={importance[spec_col]:.4f} "
+        rank = int(importance.rank(ascending=False)[version_col])
+        print(f"  {outcome_key:26s} | {version_label:16s} importance={importance[version_col]:.4f} "
               f"(rank {rank}/{len(preds)})")
         for var in preds:
-            rf_rows.append({"outcome": outcome_key, "dairy_spec": spec_label,
+            rf_rows.append({"outcome": outcome_key, "dairy_version": version_label,
                              "variable": var, "rf_importance": importance[var],
-                             "is_dairy": var == spec_col})
+                             "is_dairy": var == version_col})
 
 rf_df = pd.DataFrame(rf_rows)
 rf_csv = os.path.join(tables_s4_dir, f"{today_str}_Block6a_randomforest_2010_2020.csv")
 rf_df.to_csv(rf_csv, index=False)
 print("Saved:", rf_csv)
 
-# --- Block 6b: Double Lasso / Double ML (partially linear), both dairy specs
+# --- Block 6b: Double Lasso / Double ML (partially linear), both dairy versions
 # Cross-fitted LassoCV for both nuisance functions E[Y|X] and E[D|X]
 # (n_folds=5), Neyman-orthogonal partially-linear estimator -- matches LEC-2
 # section 3.3-3.4 exactly (DoubleMLPLR in the `doubleml` package, the same
@@ -1320,48 +1323,48 @@ dml_rows = []
 for outcome_key, outcome_col in OUTCOMES.items():
     if outcome_col not in df_ml.columns:
         continue
-    for spec_label, spec_col in DAIRY_SPECS.items():
-        cols_needed = [outcome_col, spec_col] + ML_CONTROLS
+    for version_label, version_col in DAIRY_VERSIONS.items():
+        cols_needed = [outcome_col, version_col] + ML_CONTROLS
         sub = df_ml[cols_needed].dropna()
         if len(sub) < 500:
-            print(f"  {outcome_key:26s} | {spec_label:16s} too few obs ({len(sub)}), skip")
+            print(f"  {outcome_key:26s} | {version_label:16s} too few obs ({len(sub)}), skip")
             continue
         try:
-            dml_data = DoubleMLData(sub, y_col=outcome_col, d_cols=spec_col, x_cols=ML_CONTROLS)
+            dml_data = DoubleMLData(sub, y_col=outcome_col, d_cols=version_col, x_cols=ML_CONTROLS)
             ml_l = LassoCV(cv=5, max_iter=5000)
             ml_m = LassoCV(cv=5, max_iter=5000)
             model = DoubleMLPLR(dml_data, ml_l=ml_l, ml_m=ml_m, n_folds=5)
             model.fit()
-            s = model.summary.loc[spec_col]
+            s = model.summary.loc[version_col]
             beta, se, pval = s["coef"], s["std err"], s["P>|t|"]
-            dml_rows.append({"outcome": outcome_key, "dairy_spec": spec_label,
+            dml_rows.append({"outcome": outcome_key, "dairy_version": version_label,
                               "beta": beta, "se": se, "pval": pval, "N": len(sub)})
             sig = "*" if pval < 0.05 else " "
-            print(f"  {outcome_key:26s} | {spec_label:16s} beta={beta:+.5f}  "
+            print(f"  {outcome_key:26s} | {version_label:16s} beta={beta:+.5f}  "
                   f"se={se:.5f}  p={pval:.3f}{sig}  N={len(sub):,}")
         except Exception as e:
-            print(f"  {outcome_key:26s} | {spec_label:16s} FAILED: {repr(e)[:150]}")
+            print(f"  {outcome_key:26s} | {version_label:16s} FAILED: {repr(e)[:150]}")
 
 dml_df = pd.DataFrame(dml_rows)
 dml_csv = os.path.join(tables_s4_dir, f"{today_str}_Block6b_doublelasso_2010_2020.csv")
 dml_df.to_csv(dml_csv, index=False)
 print("Saved:", dml_csv)
 
-# --- Block 6c: re-run the causal (TWFE) estimate, same window, both specs --
+# --- Block 6c: re-run the causal (TWFE) estimate, same window, both versions
 # Same within (county+year FE) design as Part (a), restricted to 2010-2020
 # and using the ML_CONTROLS set the RF/Double Lasso step just ran over --
 # directly comparable to Block 6b's Double Lasso numbers.
-print("\nTWFE re-run (2010-2020 window), both dairy specs + interactions...")
+print("\nTWFE re-run (2010-2020 window), both dairy versions + interactions...")
 twfe_rows = []
 for outcome_key, outcome_col in OUTCOMES.items():
-    for spec_label, spec_col in DAIRY_SPECS.items():
-        res = run_fe_ols(df_ml, spec_col, outcome_col, ML_CONTROLS,
-                          cluster_col="state_fips", z=1.96, label=f"{spec_label}|{outcome_key}")
+    for version_label, version_col in DAIRY_VERSIONS.items():
+        res = run_fe_ols(df_ml, version_col, outcome_col, ML_CONTROLS,
+                          cluster_col="state_fips", z=1.96, label=f"{version_label}|{outcome_key}")
         if res is None:
             continue
-        twfe_rows.append({"outcome": outcome_key, "term": spec_label, **res})
+        twfe_rows.append({"outcome": outcome_key, "term": version_label, **res})
         sig = "*" if res["pval"] < 0.05 else " "
-        print(f"  {outcome_key:26s} | {spec_label:16s} beta={res['beta']:+.5f}  "
+        print(f"  {outcome_key:26s} | {version_label:16s} beta={res['beta']:+.5f}  "
               f"p={res['pval']:.3f}{sig}  N={res['N']:,}")
     # interaction terms, dairy presence + each interaction jointly
     for inter_col in INTERACTION_TERMS:
@@ -1379,5 +1382,157 @@ twfe_df = pd.DataFrame(twfe_rows)
 twfe_csv = os.path.join(tables_s4_dir, f"{today_str}_Block6c_twfe_2010_2020.csv")
 twfe_df.to_csv(twfe_csv, index=False)
 print("Saved:", twfe_csv)
+
+# =============================================================================
+# PART (g): Causal-vs-ML comparison table, vibration-of-effects plot, and a
+# pass/fail summary across every test run so far. Pulls together tables
+# already built in Parts (a)/(b)/(f) -- nothing re-estimated here.
+# =============================================================================
+print("\n" + "="*78)
+print("PART (g): Causal vs ML comparison, vibration of effects, pass/fail summary")
+print("="*78)
+
+# --- Block 7a: causal vs ML comparison table --------------------------------
+# Only the 2010-2020 window rows are used here (Block 6a/6b/6c) -- that is
+# the ONE place TWFE, Double Lasso, and Random Forest were all run on the
+# exact same sample and the same controls, so this is a fair side-by-side.
+# Full-panel TWFE (Part a) uses a different sample/control set and is NOT
+# mixed in here to avoid comparing across different samples.
+compare_rows = []
+for outcome_key in OUTCOMES:
+    for version_label in DAIRY_VERSIONS:
+        twfe_row = twfe_df[(twfe_df["outcome"] == outcome_key) & (twfe_df["term"] == version_label)]
+        dml_row  = dml_df[(dml_df["outcome"] == outcome_key) & (dml_df["dairy_version"] == version_label)]
+        rf_row   = rf_df[(rf_df["outcome"] == outcome_key) & (rf_df["dairy_version"] == version_label)
+                          & (rf_df["is_dairy"])]
+        compare_rows.append({
+            "outcome": outcome_key,
+            "dairy_version": version_label,
+            "TWFE_beta":  twfe_row["beta"].iloc[0] if len(twfe_row) else np.nan,
+            "TWFE_pval":  twfe_row["pval"].iloc[0] if len(twfe_row) else np.nan,
+            "DoubleLasso_beta": dml_row["beta"].iloc[0] if len(dml_row) else np.nan,
+            "DoubleLasso_pval": dml_row["pval"].iloc[0] if len(dml_row) else np.nan,
+            "RF_importance": rf_row["rf_importance"].iloc[0] if len(rf_row) else np.nan,
+        })
+compare_df = pd.DataFrame(compare_rows)
+compare_df["RF_rank"] = compare_df.groupby("outcome")["RF_importance"].rank(ascending=False).astype("Int64")
+compare_csv = os.path.join(tables_s4_dir, f"{today_str}_Block7a_causal_vs_ml_comparison.csv")
+compare_df.to_csv(compare_csv, index=False)
+print("Causal (TWFE) vs ML (Double Lasso, Random Forest), 2010-2020 window, same controls:")
+print(compare_df.round(4).to_string(index=False))
+print("Saved:", compare_csv)
+
+# --- Block 7b: vibration-of-effects plot ------------------------------------
+# Every attempt at estimating the dairy coefficient across this whole script,
+# collected in one place: different size thresholds, different functional
+# forms (binary/raw count/per-capita, logged/unlogged), different windows
+# (full panel vs 2010-2020), different methods (TWFE vs Double Lasso). Each
+# point is one reasonable way of asking the same question; the point is to
+# see how much the SIGN and SIGNIFICANCE move across those choices, not to
+# read the x-axis as a single comparable unit (it isn't -- see labels).
+# Ridge is deliberately excluded: it does not produce a valid p-value here.
+vib_rows = []
+for _, r in levels_df[levels_df["model_type"] == "Within (county+year FE)"].iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": "Within, full panel, binary presence",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+for _, r in horserace_df[horserace_df["model_type"] == "Isolated (dairy alone)"].iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": "Isolated, full panel, binary presence",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+for _, r in threshold_df.iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": f"Threshold: {r['threshold']}, full panel",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+for _, r in form_df.iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": f"Form: {r['form']}, full panel",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+for _, r in interaction_df.iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": f"FSIS window: {r['term']}",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+for _, r in twfe_df.iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": f"TWFE 2010-2020: {r['term']}",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+for _, r in dml_df.iterrows():
+    vib_rows.append({"outcome": r["outcome"], "label": f"Double Lasso 2010-2020: {r['dairy_version']}",
+                      "beta": r["beta"], "se": r["se"], "pval": r["pval"]})
+
+vib_df = pd.DataFrame(vib_rows)
+vib_csv = os.path.join(tables_s4_dir, f"{today_str}_Block7b_vibration_of_effects.csv")
+vib_df.to_csv(vib_csv, index=False)
+print("Saved:", vib_csv)
+
+n_out = len(OUTCOMES)
+n_cols_v = 2
+n_rows_v = int(np.ceil(n_out / n_cols_v))
+fig, axes = plt.subplots(n_rows_v, n_cols_v, figsize=(n_cols_v*9, n_rows_v*5.5))
+axes = axes.flatten()
+for i, outcome_key in enumerate(OUTCOMES.keys()):
+    ax = axes[i]
+    sub = vib_df[vib_df["outcome"] == outcome_key].copy()
+    if sub.empty:
+        ax.set_visible(False)
+        continue
+    sub = sub.sort_values("beta").reset_index(drop=True)
+    y_pos = np.arange(len(sub))
+    # errorbar() takes one color per call, not a per-point array like scatter()
+    # does -- loop per point (cheap, ~20 points per panel).
+    for yy, row in zip(y_pos, sub.itertuples()):
+        color = "#1b7837" if row.pval < 0.05 else "#b2b2b2"
+        ax.errorbar(row.beta, yy, xerr=1.96*row.se, fmt="o", ms=4,
+                    color=color, elinewidth=1.2, capsize=2)
+    ax.axvline(0, color="black", lw=0.8, ls=":")
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(sub["label"], fontsize=6.5)
+    ax.set_title(outcome_key, fontsize=9, fontweight="bold")
+    ax.set_xlabel("beta (units vary by row -- see label; NOT directly comparable across rows)", fontsize=6.5)
+for j in range(n_out, len(axes)):
+    axes[j].set_visible(False)
+fig.suptitle(
+    "Vibration of effects: every dairy-coefficient estimate across this script\n"
+    "Green = p < 0.05 | Grey = not significant | x-axis units vary by row, see labels",
+    fontsize=11, y=1.005,
+)
+plt.tight_layout()
+path = os.path.join(out_dir, f"{today_str}_Y6_vibration_of_effects.png")
+fig.savefig(path, dpi=200, bbox_inches="tight")
+plt.close(fig)
+print("Saved:", path)
+
+# --- Block 7c: pass/fail summary across every test ---------------------------
+# One row per outcome: does dairy "pass" (show a significant, or at least a
+# consistent, association) under each of the tests run in this script.
+# Pre-trend PASS = cannot reject flat pre-trend (p >= 0.05) -- a pre-requisite
+# for the event-study post-effect to be read causally at all.
+passfail_rows = []
+for outcome_key in OUTCOMES:
+    jt = joint_df[joint_df["outcome"] == outcome_key] if not joint_df.empty else pd.DataFrame()
+    pre_p  = jt.loc[jt["period"] == "pre",  "pval"].squeeze() if not jt.empty else np.nan
+    post_p = jt.loc[jt["period"] == "post", "pval"].squeeze() if not jt.empty else np.nan
+
+    full_panel_within = levels_df[(levels_df["outcome"] == outcome_key)
+                                   & (levels_df["model_type"] == "Within (county+year FE)")]
+    full_panel_sig = bool((full_panel_within["pval"] < 0.05).any()) if len(full_panel_within) else False
+
+    twfe_2010 = twfe_df[(twfe_df["outcome"] == outcome_key) & (twfe_df["term"].isin(DAIRY_VERSIONS.keys()))]
+    twfe_2010_sig = bool((twfe_2010["pval"] < 0.05).any()) if len(twfe_2010) else False
+
+    dml_2010 = dml_df[dml_df["outcome"] == outcome_key]
+    dml_2010_sig = bool((dml_2010["pval"] < 0.05).any()) if len(dml_2010) else False
+
+    passfail_rows.append({
+        "outcome": outcome_key,
+        "Pre-trend flat (joint F-test)": "PASS" if (pd.notna(pre_p) and pre_p >= 0.05) else
+                                          ("FAIL" if pd.notna(pre_p) else "n/a"),
+        "Post-effect significant (joint F-test)": "PASS" if (pd.notna(post_p) and post_p < 0.05) else
+                                                    ("FAIL" if pd.notna(post_p) else "n/a"),
+        "TWFE significant, full panel (any threshold)": "PASS" if full_panel_sig else "FAIL",
+        "TWFE significant, 2010-2020": "PASS" if twfe_2010_sig else "FAIL",
+        "Double Lasso significant, 2010-2020": "PASS" if dml_2010_sig else "FAIL",
+    })
+
+passfail_df = pd.DataFrame(passfail_rows)
+passfail_csv = os.path.join(tables_s4_dir, f"{today_str}_Block7c_passfail_summary.csv")
+passfail_df.to_csv(passfail_csv, index=False)
+print("\nPass/fail summary across every test:")
+print(passfail_df.to_string(index=False))
+print("Saved:", passfail_csv)
 
 print(f"\nAll script4 outputs saved to:\n  figs:   {out_dir}\n  tables: {tables_s4_dir}")
