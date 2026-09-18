@@ -198,3 +198,165 @@ FE helpers could go there instead of a new `script4_common.py`. **Your call.**
 - [ ] Which of A18–A20 get built this week?
 - [ ] A21 and A22 — who decides, and what's the answer?
 - [ ] Which registry IDs are presentation exhibits vs. appendix vs. internal only?
+
+---
+
+# TREATMENT VARIABLE FAMILY (added 2026-09-18)
+
+Built once in `script4_treatment.py`, persisted into the panel, crossed with EVERY spec.
+One missingness rule throughout: **NaN stays NaN. No `fillna(0)` in treatment construction.**
+
+## Size definition (applies to all)
+`cafo_dairy_large` = dairy operations with **500+ milk cows** (USDA NASS top inventory bin,
+code 7; see script0b-usda-raw.py:663). Medium = 200-499, small = <200.
+NOTE: EPA's regulatory Large CAFO threshold for dairy is 700+ mature cows. USDA has no 700
+cutpoint. 500+ is the closest available bin — defensible, but NOT the regulatory definition.
+Must be stated in the data section.
+
+## Group E — extensive margin (presence / entry)
+| ID | Column | Definition | Events |
+|---|---|---|---|
+| E1 | `treat_dairy_lg_bin` | >=1 large dairy, NaN-preserving | — |
+| E2 | `treat_add_absorb` | absorbing: 1 from first positive-change wave onward | 277 counties |
+| E3 | `dairy_entry_year`, `dairy_t_rel` | cohort + relative event time | 4 cohorts |
+
+Exits and contractions never turn treatment back off (team decision, 2026-09-18).
+Do NOT drop exit counties outright — that selects on a treatment path correlated with outcome.
+
+## Group I — intensive margin (dose)
+| ID | Column | Definition |
+|---|---|---|
+| I1 | `treat_add_cum` | cumulative net additions of large ops |
+| I2 | `treat_add_nevents` | count of positive-change events so far |
+| I3 | `cafo_dairy_large` | raw count (with log_pop separate) |
+| I4 | `cafo_dairy_large_p10k` | count / pop x 10k |
+
+## Group M — mechanism split (build vs consolidation)
+Motivated by: 74.8% of "expansion" events occur while TOTAL dairy ops are FALLING
+(median: small -13, total -12). Delta(large)>0 predominantly measures SECTOR CONSOLIDATION,
+not new construction. Entry events show the same pattern (65.9% with total falling).
+
+### WHAT "DELTA" MEANS (was never stated — fixed 2026-09-18)
+Delta is the change between CONSECUTIVE AG CENSUS WAVES for the same county —
+a FIVE-YEAR difference, not year-over-year. Only four wave-pairs exist:
+2002->2007, 2007->2012, 2012->2017, 2017->2022.
+
+    d_large = cafo_dairy_large[wave t] - cafo_dairy_large[wave t-1]   (500+ cow ops)
+    d_total = cafo_dairy_total[wave t] - cafo_dairy_total[wave t-1]   (ALL dairy ops)
+
+| ID | Column | Definition in words | Events |
+|---|---|---|---|
+| M1 | `tr_m1_build` | Large ops UP **and** total dairy ops UP — consistent with genuinely new operations | 222 |
+| M2 | `tr_m2_consolidate` | Large ops UP **but** total dairy ops DOWN — small farms vanishing, surviving herds crossing 500 cows. CONSOLIDATION, not construction | 676 |
+| M3 | `tr_m3_add_any` | Large ops UP regardless of total | 938 |
+| — | (neither) | d_large>0 and d_total==0 | 40 |
+
+Once a county has a qualifying event, treatment is ABSORBING: 1 from that wave
+onward in every later year, including forward-filled inter-census years.
+
+**Worked example — fips 42071 (Lancaster County, PA), a consolidation county:**
+
+| wave | small | medium | LARGE | TOTAL | d_LARGE | d_TOTAL |
+|---|---|---|---|---|---|---|
+| 2002 | 1870 | 32 | 9 | 1911 | . | . |
+| 2007 | 1889 | 26 | 13 | 1928 | +4 | +17 |
+| 2012 | 1841 | 17 | 20 | 1878 | +7 | −50 |
+| 2017 | 1572 | 22 | 19 | 1613 | −1 | −265 |
+| 2022 | 805 | 42 | 20 | 867 | +1 | −746 |
+
+Large operations roughly double while the county loses over a thousand dairy farms.
+A treatment defined only on d_large>0 calls this "a CAFO was added". What actually
+happened is that the local dairy sector collapsed and concentrated.
+
+**M3 NEVER RAN.** It is byte-identical to E2 (`tr_e2_add_absorb`), so it was left
+out of the TREATMENTS dict. The column exists; no separate estimate does.
+
+**SUPPRESSION CHECK — RESOLVED 2026-09-18. Consolidation is REAL, not an artifact.**
+Evidence (`Data/clean/diagnostic/2026-06-09_qa_suppressed_bin_imputation.csv`):
+- `gap` = nass_total_ops - (small+medium+large) is **exactly 0 for all 10,110 dairy rows**
+  where it is computable (min=0, max=0, no negatives). The observed size bins fully account
+  for NASS's own separately-queried total operations. No suppressed/omitted dairy bin rows.
+- Zero `clean`-tier rows across ALL 5 animal classes and all years -> the `large_imputed`
+  branch in script0b never fires. `large_imputed` == `large` everywhere. Using `large`
+  directly (per existing convention) is confirmed harmless.
+- Only gap in coverage: `nass_total_ops` is missing (`dark` tier) in **2022 for the three
+  cattle classes** (cows milk, cows beef, incl calves). Hogs and layers are fully covered.
+  This is a totals-query coverage gap, not suppression.
+- Pattern is robust to dropping the unverifiable wave: on VERIFIED waves only (2002-2017),
+  70.1% of positive-change events still occur while total dairy ops FALL (vs 72.1% with 2022),
+  median d_small = -8, d_total = -7. Essentially unchanged.
+
+Residual caveat: counties absent from the compact entirely cannot be validated this way;
+the design zero-fills them (see Zero-fill decision in project memory).
+
+## Group C — composition / consolidation (added at user request, 2026-09-18)
+| ID | Column(s) | Definition | Within-variation (CHR sample, CORE_9) |
+|---|---|---|---|
+| C1 | `dairy_large_share` | large / total, [0,1] | 695 counties (27.0%) |
+| C2 | `dairy_large_share_scr` | C1, screened to total>=10 | 487 of 1,301 (37.4%) |
+| C3 | `log_lg` + `log_sm` **jointly** | conditional model, contemporaneous | 602 (22.8%) |
+| C4 | `log_lg` + `log_sm_baseline` | conditional on PRE-DETERMINED small-farm structure | 602 (22.8%) |
+| C5 | `hhi_size` | HHI across the 3 size bins | 1,106 (43.0%) |
+
+### Notes on Group C
+- **C1 caveats:** median county has 7 total dairy ops; 40% have <=5, so the ratio is unstable.
+  70.2% of share values are exactly 0 (median 0, p75 0) — a linear-in-share model is mostly
+  fitting the 0->positive margin, i.e. close to E1 in disguise. C1 also conflates
+  "large ops arrive" with "small ops disappear" by construction.
+- **C3 is the preferred consolidation spec.** Two coefficients instead of one: large arriving
+  (holding small fixed) vs small disappearing (holding large fixed) — the two rival mechanisms
+  estimated against each other. C1 is the RESTRICTED version of C3 (imposes beta_large = -beta_total);
+  test that restriction with an F-test rather than assuming it.
+- **C3 bad-control warning:** contemporaneous `small` is post-treatment if large CAFOs drive
+  small farms out. C4 conditions on baseline (pre-determined) small-farm structure instead.
+  Build both; the difference is itself informative.
+- **C5 caveat:** HHI moves when small farms consolidate among themselves with no large op
+  involved. Its extra variation is partly mechanical and not CAFO-specific. Supporting
+  exhibit, not a headline.
+
+## Standing finding that constrains all of the above
+`CONTROL_COLS` (25 vars) destroys the design via listwise deletion:
+no controls / CORE_9 -> 284-602 switching counties; FULL 25 -> 96.
+Replace with a coverage-screened, pre-treatment-only control set BEFORE re-estimating anything.
+
+---
+
+# CONTROL-SET DIAGNOSTICS (2026-09-18)
+
+## VIF — collinearity is NOT a problem
+Sample: Poor MH Days estimating sample, 10,958 rows / 2,324 counties, FULL 25 + log_pop.
+
+| | VIF>10 | VIF>5 | max |
+|---|---|---|---|
+| raw levels | 0 | 2 | children_in_poverty 9.10 |
+| **within-transformed (county+year demeaned)** | **0** | **0** | **log_pop 3.24** |
+
+Condition number (within): 12.7.
+Collinearity among these controls is almost entirely CROSS-SECTIONAL and is removed by
+county FE (children_in_poverty: VIF 9.10 raw -> 1.13 within). In the specification actually
+estimated, the controls are near-orthogonal.
+
+**Report this as a PASSED diagnostic. Do NOT cite collinearity as a reason to trim controls —
+the VIF table contradicts that claim.**
+
+Watch item: `%_hispanic` <-> `log_pop` correlate -0.775 within-transformed (individual VIFs
+still fine at 2.86 / 3.24). Relevant because `dairy_x_hispanic` is an interaction term in
+Part (f) — that interaction is hard to interpret cleanly if the two are this tangled.
+
+## Do controls absorb the treatment? No.
+Within-transformed, treatment = large-dairy presence:
+- VIF of treatment against all 25 controls: **1.010**
+- R^2 of treatment on controls: **0.0096**
+- largest single correlation: `%_hispanic` at **-0.046**; `poor_physical_health_days` at +0.025
+
+## REVISION to the 2026-09-17 post-treatment/bad-control concern
+That concern was overstated. Bad-control bias requires controls to be AFFECTED by treatment;
+within-county correlations max out at 0.046. Drop the clearest mediators as housekeeping,
+but this is second-order, not a fix for something large.
+Caveats: tests contemporaneous mediation only; computed on the noisy binary treatment;
+imprecise with ~93 switchers.
+
+## Control screen should be built on COVERAGE, ranked by actual cost
+1. **Coverage / listwise deletion — DOMINANT.** FULL 25 -> 96 switchers; CORE_9 -> 602.
+2. Post-treatment status — second order (see revision above).
+3. Collinearity — not a problem at all (see VIF table).
