@@ -214,6 +214,18 @@ T1 and T3 lose significance under the fullest set. **Only T2 survives all three 
 ---
 
 # 9. OPEN ITEMS
+
+### 0. BLOCKING — CHR variables are dated by RELEASE year, not data year
+See `code-audit/plans/2026-09-21_CHR-YEAR-MISALIGNMENT.md`. Confirmed against CHR's
+own release code: `median_household_income`, `children_in_poverty` and `unemployment`
+are lagged **2 years**; `poor_mental_health_days` is lagged **3**. The row labelled
+`year = 2020` holds 2018 income, 2017 mental-health days, and forward-filled 2017
+CAFO counts. Also found: `access_to_healthy_foods` splices two different measures
+(v030 → v083 at 2013), and `violent_crime` has 46.7% of year-over-year values
+identical (pooled vintage). **Outranks everything below.** Every estimate in the
+deck is affected; for the current presentation this belongs in limitations.
+
+### Remaining
 1. **SE choice for T1/T3** — verdict flips on clustering level. Settle before presenting.
 2. **CS runs without covariates** — unconditional parallel trends. Main caveat.
 3. CS only ran on the 3 core treatments; the other 9 have TWFE only.

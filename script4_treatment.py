@@ -71,19 +71,26 @@ VERIFIED_WAVES = [2002, 2007, 2012, 2017]
 #                                  2017 and 2022 cohorts are observable at all,
 #                                  which is why A18 returns just 2 cohorts for it.
 #   crude_rate_from_census_pop     2000-2020  (19.8%; hard cliff to 0% after 2020)
-#   violent_crime                  2010-2022  (45.8%)
-#   crime_assault                  2000-2021  (38.1%)
-#   total_incidents_per100k        2000-2021  (38.1%)
-#   crime_assault / total_incidents NIBRS coverage, sparser
+#   violent_crime  -- DROPPED 2026-09-21 (D-06): CHR v043 is multi-year pooled
+#                     (46.7% of values identical to prior year), release-year dated,
+#                     and discontinued after the 2022 release.
+#   crime_agg_assault              2000-2021  (38.1%)  aggravated assault, alone
+#   assault_total_per100k          2000-2021  (38.1%)  agg + simple (79% simple)
+#   violence_index_partial         2000-2021  (38.1%)  agg assault + rape + intimidation
+#   total_incidents_per100k        2000-2021  (38.1%)  NIBRS curated 12-offence total
+#   NOTE: all NIBRS variables are ARREST counts, not offences known to police.
+#   NIBRS crime block                NIBRS arrest coverage, sparser
 DESPAIR_COL = "crude_rate_from_census_pop"
 
 OUTCOMES = {
     "Poor MH Days":             "poor_mental_health_days",
     "Frequent Mental Distress": "frequent_mental_distress_per100k",
     "Deaths of Despair":        DESPAIR_COL,
-    "Violent Crime (CHR)":      "violent_crime",
-    "Assault (Agg+Simple)":     "crime_assault",
-    "Total Incidents (NIBRS)":  "total_incidents_per100k",
+    # CHR "Violent Crime" (v043) removed 2026-09-21 -- multi-year pooled, see D-06.
+    "Aggravated Assault":       "crime_agg_assault",
+    "Assault, all severities":  "assault_total_per100k",
+    "Violence index (partial)": "violence_index_partial",
+    "NIBRS curated total":      "total_incidents_per100k",
 }
 
 
@@ -256,12 +263,46 @@ def load_panel(animal="dairy", verified_waves_only=False):
     # rather than left to be implicitly NaN.
     df.loc[df["year"] > 2020, DESPAIR_COL] = np.nan
 
-    # Assault: aggravated + simple (NIBRS), NaN-propagated using the same coverage
-    # mask as total_incidents_per100k so that "no reported incidents" is not
-    # confused with "agency did not report".
-    df["crime_assault"] = (df["aggravated_assault_per100k"].fillna(0)
-                            + df["simple_assault_per100k"].fillna(0))
-    df.loc[df["total_incidents_per100k"].isna(), "crime_assault"] = np.nan
+    # ---- CRIME OUTCOMES ----------------------------------------------------
+    # IMPORTANT: every NIBRS variable in this panel is built from the
+    # `nibrs_arrestee_segment` files, i.e. they are ARREST counts, not offences
+    # known to police. Arrest rates confound crime incidence with policing
+    # intensity and clearance. Standard published crime rates are offence-based.
+    # This must be stated wherever these outcomes are reported.
+    #
+    # `total_incidents_per100k` is NOT all crime. script0d sums a CURATED list of
+    # 12 offence types (aggravated assault, simple assault, intimidation, rape,
+    # statutory rape, incest, fondling, sexual assault with an object,
+    # kidnapping/abduction, DUI, and two human-trafficking codes). Property and
+    # drug offences are excluded. It is dominated by assault: simple assault alone
+    # is 68% of it, and simple + aggravated is 86%.
+    #
+    # DROPPED 2026-09-21 (decision D-06): CHR `violent_crime` (v043). CHR pools it
+    # over multiple years -- 46.7% of county-year values are identical to the prior
+    # year -- so it cannot support annual event-study timing.
+
+    # Aggravated assault, kept ALONE. The single largest genuine UCR violent
+    # offence in these counties, annually dated, no pooling.
+    df["crime_agg_assault"] = df["aggravated_assault_per100k"]
+
+    # Renamed from `crime_assault`. Aggravated + simple assault. Explicitly NOT a
+    # violent-crime measure: 79% of it is SIMPLE assault, which UCR excludes from
+    # its violent-crime definition. Named for what it is.
+    df["assault_total_per100k"] = (df["aggravated_assault_per100k"].fillna(0)
+                                    + df["simple_assault_per100k"].fillna(0))
+    df.loc[df["total_incidents_per100k"].isna(), "assault_total_per100k"] = np.nan
+
+    # Partial violence index -- NOT the UCR definition. Aggravated assault + rape
+    # + intimidation: the three person-directed violent offences available in the
+    # panel with usable coverage. ROBBERY is missing, and robbery is a UCR violent
+    # component -- it exists in the raw nibrs_arrestee_segment files but script0d's
+    # `crime_cols` does not extract it, so adding it requires re-running stage 0.
+    # Homicide is also absent from NIBRS here (`homicides` is CHR-sourced).
+    # Label this "violent offences against persons (partial, non-UCR)".
+    _vi = (df["aggravated_assault_per100k"].fillna(0)
+           + df["rape_per100k"].fillna(0)
+           + df["intimidation_per100k"].fillna(0))
+    df["violence_index_partial"] = _vi.where(df["total_incidents_per100k"].notna())
 
     waves = VERIFIED_WAVES if verified_waves_only else CENSUS_YEARS
     ev = _wave_events(df, lg, tot, waves)
