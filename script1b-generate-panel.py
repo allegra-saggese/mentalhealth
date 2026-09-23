@@ -57,6 +57,7 @@ merged_dir = os.path.join(db_data, "merged")
 # Merge configuration
 BASE_DESCRIPTOR = "cafo_ops_by_size_compact"
 MERGE_DESCRIPTORS = {
+    "annual_controls_county_year",
     "cdc_county_year_deathsofdespair",
     "crime_fips_level_final",
     "fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip",
@@ -64,6 +65,28 @@ MERGE_DESCRIPTORS = {
     "population_full",
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
+
+# --- CHR columns replaced by correctly-dated annual sources (script0g) --------
+# County Health Rankings dates every measure by its RELEASE year, not the year
+# the data describes: median household income, children in poverty and
+# unemployment are lagged 2 years, uninsured adults 3. A row labelled 2020 held
+# 2018 income and 2017 uninsured rates, while CAFO treatment is dated by the
+# actual ag-census year -- so treatment and controls were measured in different
+# years.
+#
+# These four are dropped from the CHR block BEFORE it is merged, and the
+# script0g series take over the SAME column names with the SAME units
+# (`*_per100k` = percent x 1000). Downstream code needs no changes.
+#
+# Replaced by: SAIPE (income, child poverty), BLS LAUS (unemployment),
+# SAHIE (uninsured adults) -- all annual, all counties, no population floor.
+CHR_DESCRIPTOR = "mentalhealthrank_full"
+CHR_REPLACED_COLS = [
+    "median_household_income",
+    "children_in_poverty",
+    "unemployment",
+    "uninsured_adults",
+]
 # Non-overlapping types used for aggregate totals (beef/dairy are subsets of cattle).
 CAFO_COMMODITIES_TOTAL = ("cattle", "hogs", "chickens")
 # Full 5-type set from script0b compact output.
@@ -151,6 +174,17 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
 
     # runtime reduction: filter to rural key immediately
     df = df.merge(allowed_keys, on=["fips", "year"], how="inner")
+
+    # Drop the CHR columns superseded by script0g's correctly-dated series so the
+    # new values can take the same names without a suffix collision at merge time.
+    if descriptor == CHR_DESCRIPTOR:
+        _drop = [c for c in df.columns
+                 if any(c == b or c.startswith(b + "_") for b in CHR_REPLACED_COLS)]
+        if _drop:
+            df = df.drop(columns=_drop)
+            print(f"  {descriptor}: dropped {len(_drop)} CHR columns superseded by script0g "
+                  f"({', '.join(sorted(CHR_REPLACED_COLS))})")
+
     if df.empty:
         print(f"Skip {descriptor}: no rows after rural-key filter")
         return None

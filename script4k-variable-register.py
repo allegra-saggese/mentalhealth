@@ -243,6 +243,26 @@ EXCLUSION = {
  "violent_crime":"DROPPED AS AN OUTCOME (D-06): CHR v043 pools across years -- 46.7% of county-year values identical to the prior year -- so it cannot support annual event-study timing. Also release-year dated and discontinued after the 2022 release.",
 }
 
+
+def _fill_window(df, col, s, yrs):
+    """Share of available cells filled INSIDE the variable's own year range."""
+    if not len(yrs): return 0.0
+    sub = df[df["year"].between(yrs.min(), yrs.max())]
+    return round(100*float(sub[col].notna().mean()), 1)
+
+def _shape(df, col, s, yrs):
+    """Classify WHERE the missingness is: years, counties, both, or neither."""
+    if not len(yrs): return "no data"
+    py = yrs.nunique()/df["year"].nunique()
+    pc = df.loc[s.notna(),"fips"].nunique()/df["fips"].nunique()
+    fw = _fill_window(df, col, s, yrs)/100
+    if py >= 0.9 and pc >= 0.9 and fw >= 0.9:  return "FULL (all years, all counties)"
+    if py < 0.9 and pc >= 0.9 and fw >= 0.9:   return f"YEAR-LIMITED ({yrs.min()}-{yrs.max()}, but near-complete within that window)"
+    if py >= 0.9 and pc < 0.9:                 return "COUNTY-LIMITED (most years, subset of counties)"
+    if py < 0.9 and fw < 0.9:                  return f"BOTH ({yrs.min()}-{yrs.max()} AND sparse within that window)"
+    if fw < 0.9:                               return "SPARSE WITHIN WINDOW (years fine, cells patchy)"
+    return "partial"
+
 df = load_panel()
 ref = df[df["poor_mental_health_days"].notna()]
 est = df[["fips","year"]+[c for c in CONTROL_PRETREAT if c in df.columns]].dropna()
@@ -301,7 +321,23 @@ for c in df.columns:
       "sd":float(s.std()) if num else np.nan,
       "min":float(s.min()) if num else np.nan,
       "max":float(s.max()) if num else np.nan,
+      # Coverage split into its two dimensions. A single percentage conflates
+      # "covers every county but only 5 years" with "covers every year but only
+      # half the counties" -- they look identical and mean different things.
+      #   coverage_pct              cells filled / all county-year cells in the panel
+      #   pct_years_covered         years with ANY data / 24 panel years
+      #   pct_counties_covered      counties with ANY data / all panel counties
+      #   fill_within_active_window cells filled / cells available inside the
+      #                             variable's own year range -- isolates county
+      #                             sparsity from the year range being short
+      #   coverage_shape            plain-language classification of the above
       "coverage_pct":round(100*float(s.notna().mean()),1),
+      "n_years_with_data":int(yrs.nunique()) if len(yrs) else 0,
+      "pct_years_covered":round(100*(yrs.nunique()/df["year"].nunique()),1) if len(yrs) else 0.0,
+      "n_counties_with_data":int(df.loc[s.notna(),"fips"].nunique()) if s.notna().any() else 0,
+      "pct_counties_covered":round(100*(df.loc[s.notna(),"fips"].nunique()/df["fips"].nunique()),1) if s.notna().any() else 0.0,
+      "fill_within_active_window":_fill_window(df,c,s,yrs),
+      "coverage_shape":_shape(df,c,s,yrs),
       "coverage_pct_on_outcome_rows":round(100*float(ref[c].notna().mean()),1) if c in ref.columns else np.nan,
       "why_not_used":EXCLUSION.get(c,""),
       "source_file_clean":source_of(c)[0],
@@ -363,11 +399,11 @@ README=pd.DataFrame({"item":[
   os.path.basename(df.attrs["panel_path"]),
   fsis_src,
   f"{len(R)} main panel columns; {len(FS)} FSIS panel columns",
-  "One row per variable, carrying every inclusion/exclusion decision so each can be justified to a referee.",
-  "WHY a variable is not used as a control, with its decision ID.",
+  "One row per variable, with a description of the variable, and every inclusion/exclusion decision for control set",
+  "The decision to include or exclude a control variable, based on classification as a mediator or collider, and on review of coverage",
   "Share of rows with a non-missing value. coverage_pct_on_outcome_rows restricts to rows with a non-missing Poor MH Days.",
   "Traces the variable to the Data/clean file it came from and to the original raw source.",
-  "What was done to the variable beyond reading it -- forward-fill, zero-fill, derivation formula.",
+  "Any interpolation or changes that are done to the variable from the original format of the data set, such as forward-fill, zero-fill, derivation formula.",
   "N where the series is pooled or a multi-year rolling estimate: a pre-trend CANNOT be meaningfully tested on it.",
   "A = re-source at true annual data year; B = multi-year, keep with restrictions; C = drop.",
   "Links to code-audit/plans/CONTROL-DECISION-REGISTER.md",
