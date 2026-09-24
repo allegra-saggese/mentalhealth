@@ -453,37 +453,142 @@ CONTROL_PRETREAT = [c for c in CONTROL_COMPREHENSIVE if c not in CONTROL_MEDIATO
 # -----------------------------------------------------------------------------
 # Everything else in TREATMENTS stays available as robustness, but these three
 # carry the headline results and are the ones run through Callaway-Sant'Anna.
+# ---------------------------------------------------------------------------
+# D_i : EXPOSURE TO CAFOs  -- the treatment set (labels fixed 2026-09-23)
+# ---------------------------------------------------------------------------
+# These are TREATMENT DEFINITIONS ONLY: the exposure measure itself, nothing
+# else. Controls -- including log_pop -- belong to the REGRESSION SPECIFICATION
+# and are defined separately, further down. Keeping them apart matters: log_pop
+# is a control in the T2 and T4 regressions, but it is not part of what T2 or T4
+# measure.
+#
+# All defined on LARGE DAIRY operations only (500+ milk cows, USDA top inventory
+# bin -- NOT the EPA 700+ regulatory threshold; see the size note above).
+#
+#   T1  Presence      binary 0/1: does the county have a large dairy CAFO?
+#   T2  Count         raw count of large dairy CAFOs. beta reads as the marginal
+#                     impact of ONE additional CAFO.
+#   T3  Per capita    raw count / population, per 10,000 residents
+#   T4  Log(count)    log(1 + count). The +1 is required, not cosmetic: 81.4% of
+#                     county-years have zero large dairy CAFOs, and plain log
+#                     would discard them.
+#   T6  Conditional   given the BASELINE number of SMALL dairy CAFOs, the effect
+#                     of introducing a large one -- market concentration, the
+#                     loss of small farms to large. DEFINED BUT NOT RUN with
+#                     T1-T4: it answers a different question. Its controls are
+#                     still to be specified.
+#
+# T5 (log per capita) was DROPPED 2026-09-23. The numbering gap is deliberate --
+# T6 keeps its label so it matches the slides.
+#
+# T1-T4 are four functional forms of the SAME underlying exposure and should
+# agree in sign. Divergence between them is itself a finding.
 CORE_TREATMENTS = {
-    # T2 is the CONDITIONAL model: log(large) entered jointly with log(small), so
-    # the treatment coefficient is the association with large-operation counts
-    # HOLDING THE SMALL-FARM COUNT FIXED, and log(small) gets its own coefficient.
-    # That separation is the point -- 676 of 938 positive-change events are
-    # consolidation (large up, total down), so a bare log(large) regression cannot
-    # tell "large operations arrived" apart from "small farms disappeared".
-    # The two coefficients are reported side by side; the ratio model (C1,
-    # large/total) is the RESTRICTED version that forces beta_large = -beta_small,
-    # a restriction this spec lets you test instead of assume.
-    "T1": ("tr_e1_lg_bin",       [],              "Any large dairy CAFO (binary presence)"),
-    "T2": ("tr_c3_log_lg",       ["cond_log_sm"], "log(large) | log(small) -- CONDITIONAL"),
-    "T3": ("tr_e3_entry_absorb", [],              "CAFO entrance (0 -> +), absorbing"),
+    "T1": "tr_e1_lg_bin",     # Presence of a large dairy CAFO (0/1)
+    "T2": "tr_i3_lg_count",   # Count of large dairy CAFOs
+    "T3": "tr_i4_lg_p10k",    # Large dairy CAFOs per 10,000 residents
+    "T4": "tr_c3_log_lg",     # Log(1 + count of large dairy CAFOs)
 }
-# T2 run WITHOUT its conditioning term, kept only as the contrast that shows what
-# the conditioning does. Not a core spec.
-CORE_T2_UNCONDITIONAL = ("tr_c3_log_lg", [], "log(large), unconditional (contrast)")
+CORE_TREATMENT_LABELS = {
+    "T1": "Presence of a large dairy CAFO (0/1)",
+    "T2": "Count of large dairy CAFOs",
+    "T3": "Large dairy CAFOs per 10,000 residents",
+    "T4": "Log(1 + count of large dairy CAFOs)",
+    "T6": "Log(1+count) given baseline small dairy CAFOs",
+}
+# Defined for the record; excluded from the T1-T4 runs. Controls TBD.
+T6_TREATMENT = "tr_c3_log_lg"
+
 # ---------------------------------------------------------------------------
-# HEADLINE SPECIFICATION -- single source of truth. Import these; do not hardcode.
+# REGRESSION SPECIFICATION -- separate from the treatment definition above.
 # ---------------------------------------------------------------------------
-#   Estimator : TWO-WAY FIXED EFFECTS, county + year  (the WITHIN estimator).
-#               Pooled/state-FE results are a benchmark, never the headline --
-#               pooled estimates are null for mental health and strongly NEGATIVE
-#               for deaths of despair, i.e. cross-county confounding, not signal.
-#   Treatment : C3, the conditional model -- log(1+large) entered JOINTLY with
-#               log(1+small), so the coefficient is the association with large
-#               operations holding the small-farm count fixed.
-#   Outcome   : poor_mental_health_days (best coverage, most switchers)
-#   Controls  : CONTROL_PRETREAT (19)
-#   SE        : cluster-robust on state_fips
+# Extra regressors a given treatment requires in its estimating equation. These
+# are NOT part of the exposure measure; they are there so the coefficient reads
+# correctly.
+#   T2, T4  enter log_pop, because a raw or logged COUNT otherwise partly picks
+#           up county size -- larger counties have more of everything.
+#   T1      binary presence: no size adjustment needed.
+#   T3      already population-normalised by construction.
+SPEC_EXTRA_REGRESSORS = {
+    "T1": [],
+    "T2": ["log_pop"],
+    "T3": [],
+    "T4": ["log_pop"],
+    "T6": [],          # to be specified
+}
+
+# Single source of truth for the headline spec. Estimator named explicitly:
+# pooled/state-FE results are a benchmark, never the headline.
 HEADLINE_ESTIMATOR = "within (county + year FE)"
 HEADLINE_FE        = "fips + year"
-HEADLINE_TREATMENT = "C3"
+HEADLINE_TREATMENT = "T1"
 HEADLINE_OUTCOME   = "poor_mental_health_days"
+
+# ---------------------------------------------------------------------------
+# COVARIATE ORDER for the sequential A1/A2 runs (fixed 2026-09-23)
+# ---------------------------------------------------------------------------
+# Forward stepwise results depend entirely on the order variables are added, so
+# the order is FIXED HERE and stated, not left implicit. 13 covariates enter one
+# at a time; VIF, the change in beta, partial R2 and surviving switcher count are
+# recorded at each step.
+#
+# NOTE ON THE COVERAGE CLIFF: positions 1-5 and 8-10 are full-coverage
+# (99.7-99.9%, re-sourced by script0g); the rest are still CHR-sourced at
+# 52.8-65.9%. Adding a partial-coverage variable collapses the estimating sample
+# through listwise deletion, so every step after the first one confounds "what
+# this covariate does" with "what losing half the sample does".
+# The order is therefore grouped: all EIGHT full-coverage covariates first, then
+# the six partial-coverage ones ranked by coverage descending. This gives eight
+# steps where a change in beta is attributable to the covariate alone, and pushes
+# the sample loss as late as possible.
+#
+# The ACS 5-year block (some_college, children_in_single-parent,
+# %_not_proficient_in_english) all share the SAME 53.4% window, so whichever
+# enters first pays the entire sample cost and the other two then look free. The
+# real question is whether the ACS block earns its place AS A GROUP, not whether
+# any individual member does.
+# %_not_proficient_in_english enters last, against a specification that already
+# contains %_hispanic -- the honest test of whether the two are redundant.
+COVARIATE_ORDER = [
+    # --- full coverage (99.6-99.9%) : eight clean steps, sample intact --------
+    "median_household_income",                      #  1  SAIPE      99.9%
+    "unemployment_per100k",                         #  2  BLS LAUS   99.7%
+    "%_65_and_older",                               #  3  Census PEP 99.9%
+    "%_hispanic",                                   #  4  Census PEP 99.9%
+    "%_below_18_years_of_age",                      #  5  Census PEP 99.9%
+    "children_in_poverty_per100k",                  #  6  SAIPE      99.9%
+    "%_female",                                     #  7  Census PEP 99.9%
+    "%_asian",                                      #  8  Census PEP 99.9%
+    # --- partial coverage : the sample falls from here ------------------------
+    "uninsured_adults_per100k",                     #  9  SAHIE      65.9%  (2008+)
+    "adult_obesity_per100k",                        # 10  BRFSS      57.6%
+    "access_to_healthy_foods_per100k",              # 11  USDA       57.3%
+    "some_college_per100k",                         # 12  ACS 5-yr   53.4%
+    "children_in_single-parent_households_per100k", # 13  ACS 5-yr   53.4%
+    "%_not_proficient_in_english_per100k",          # 14  ACS 5-yr   53.4%
+]
+
+# Excluded from the sequential runs, with the reason recorded for the paper.
+COVARIATE_EXCLUDED = {
+    "adult_smoking_per100k":
+        "COLLIDER -- responds to distress and to local economic shocks, so it is "
+        "caused by both the outcome and the treatment. Conditioning induces bias.",
+    "teen_births_per100k":
+        "COLLIDER -- same reasoning as adult_smoking.",
+    "%_rural":
+        "DUPLICATED -- the sample is already filtered on the NCHS urban-rural "
+        "classification, and %_rural is decennial (93.7% of values identical to "
+        "the prior year; within-SD share 0.080).",
+    "driving_alone_to_work_per100k":
+        "Could not obtain consistent data across the panel window.",
+    "%_native_hawaiian/other_pacific_islander":
+        "Negligible in non-metro counties; contributes no usable variation.",
+}
+
+# %_hispanic was initially dropped for collinearity with
+# %_not_proficient_in_english, then REINSTATED at position 14 once that reasoning
+# was checked: the two correlate +0.773 in LEVELS but only -0.243 WITHIN county,
+# and the within correlation is what a county-FE model uses. Placing it last
+# means its marginal contribution is read against a specification that already
+# contains the English-proficiency measure, which is the honest test of whether
+# the two are redundant.
