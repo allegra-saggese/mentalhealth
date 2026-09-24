@@ -36,7 +36,7 @@ from packages import *
 from functions import *
 
 RAW  = os.path.join(db_data, "raw", "annual_controls")
-for sub in ("saipe","laus","sahie"): os.makedirs(os.path.join(RAW,sub), exist_ok=True)
+for sub in ("saipe","laus","sahie","pep"): os.makedirs(os.path.join(RAW,sub), exist_ok=True)
 CLEAN = os.path.join(db_data, "clean")
 TODAY = date.today().strftime("%Y-%m-%d")
 YEARS = range(2000, 2024)
@@ -201,6 +201,14 @@ REPLACES = {
     "saipe_pct_children_poverty":    ("children_in_poverty_per100k",  1000),
     "laus_unemployment_rate":        ("unemployment_per100k",         1000),
     "sahie_pct_uninsured_18_64":     ("uninsured_adults_per100k",     1000),
+    # PEP shares are fractions (0-1); the panel stores these as plain percent
+    # (mean %_hispanic ~0.08 in the panel), so scale by 1.
+    "pep_pct_female":                ("%_female",                              1),
+    "pep_pct_hispanic":              ("%_hispanic",                            1),
+    "pep_pct_asian":                 ("%_asian",                               1),
+    "pep_pct_nhpi":                  ("%_native_hawaiian/other_pacific_islander", 1),
+    "pep_pct_65_plus":               ("%_65_and_older",                        1),
+    "pep_pct_under_18":              ("%_below_18_years_of_age",               1),
 }
 
 def apply_final_names(out):
@@ -211,11 +219,120 @@ def apply_final_names(out):
             out[dst] = out[src] * scale
     return out
 
+# =============================================================================
+# PEP -- county demographics, dated by TRUE data year
+# =============================================================================
+# Replaces the six CHR demographic shares, which are dated by CHR's RELEASE year
+# and therefore carry a 2-year lag. Census PEP publishes county population by
+# age x sex x race x Hispanic origin ANNUALLY for every county, with no
+# population floor, so the lag is removable outright.
+#
+# THREE VINTAGES, each indexing YEAR as a code rather than a calendar year, and
+# each indexing it differently. Verified empirically against known Alabama state
+# totals (2010, 2012, 2015, 2018 all matched within 0.4%) rather than taken from
+# the documentation:
+#
+#   co-est00int-alldata-{SS}   2000-2010   code 2..12 -> 2000..2010
+#                              (code 1 = 4/1/2000 census, 13 = 4/1/2010 census)
+#   CC-EST2020-ALLDATA-{SS}    2010-2020   code 3..13 -> 2010..2020
+#                              (code 1 = 4/1/2010 census, 2 = estimates base)
+#   cc-est2024-alldata         2020-2024   code 2..6  -> 2020..2024
+#                              (code 1 = 4/1/2020 estimates base)
+#
+# VINTAGE OVERLAP: the 2010-2020 series drifted ~2% BELOW the 2020 census count
+# by its final year and was never rebased, so the two vintages disagree at the
+# seam. Per team decision, the NEWER vintage wins wherever they overlap. Because
+# every variable here is a SHARE, a level error largely cancels between numerator
+# and denominator -- but the 2010 and 2020 seams are still checked for jumps
+# below, since a spurious break there would read as an event-study result.
+#
+# AGEGRP: 0 = all ages, 1..18 = 0-4, 5-9, ... 85+.
+#   under 18  = AGEGRP 1,2,3 plus 3/5 of AGEGRP 4 (15-19) -- see note below
+#   65+       = AGEGRP 14..18
+# The 15-19 band straddles 18, so "% below 18" cannot be formed exactly from
+# 5-year bands. CHR's own measure uses single-year ages. We take AGEGRP 1-3
+# (0-14) plus 3/5 of the 15-19 band as a linear approximation, and record it.
+PEP_STATES = [f"{i:02d}" for i in list(range(1,57))]
+def pep():
+    print("PEP demographics")
+    VINT = [
+        ("2000-2010", "https://www2.census.gov/programs-surveys/popest/datasets/2000-2010/intercensal/county/co-est00int-alldata-{ss}.csv", 1998, range(2,13)),
+        ("2010-2020", "https://www2.census.gov/programs-surveys/popest/datasets/2010-2020/counties/asrh/CC-EST2020-ALLDATA-{ss}.csv", 2007, range(3,14)),
+        ("2020-2024", "https://www2.census.gov/programs-surveys/popest/datasets/2020-2024/counties/asrh/cc-est2024-alldata.csv", 2018, range(2,7)),
+    ]
+    frames=[]
+    for vname, tmpl, offset, codes in VINT:
+        parts=[]
+        targets = ["NATIONAL"] if "{ss}" not in tmpl else PEP_STATES
+        for ss in targets:
+            url = tmpl if ss=="NATIONAL" else tmpl.format(ss=ss)
+            dest = os.path.join(RAW,"pep", f"{vname}_{ss}.csv")
+            if not fetch(url,dest): continue
+            try:
+                d=pd.read_csv(dest,encoding="latin-1",low_memory=False)
+            except Exception as e:
+                print(f"    {vname} {ss}: {type(e).__name__}"); continue
+            d.columns=[c.upper().strip() for c in d.columns]
+            if "AGEGRP" not in d.columns: continue
+            d=d[d["YEAR"].isin(list(codes))]
+            if "SUMLEV" in d.columns: d=d[d["SUMLEV"]==50]
+            parts.append(d)
+        if not parts:
+            print(f"  {vname}: no files"); continue
+        D=pd.concat(parts,ignore_index=True)
+        D["year"]=D["YEAR"]+offset
+        D["fips"]=(D["STATE"].astype(int).astype(str).str.zfill(2)
+                   + D["COUNTY"].astype(int).astype(str).str.zfill(3))
+        # AGEGRP CODING DIFFERS BY VINTAGE -- caught by the seam check below.
+        #   co-est00int (2000-2010): AGEGRP 0 = AGE 0 (infants), 99 = TOTAL,
+        #                            1 = 1-4, 2 = 5-9, 3 = 10-14, 4 = 15-19 ...
+        #   CC-EST2020 / cc-est2024: AGEGRP 0 = TOTAL,
+        #                            1 = 0-4, 2 = 5-9, 3 = 10-14, 4 = 15-19 ...
+        # Using 0 as the denominator for the 2000-2010 files divided by the infant
+        # count instead of the population -- ~72x too small, and inf where zero.
+        # 65+ is AGEGRP 14-18 in BOTH codings. Under-18 differs: the older vintage
+        # needs AGEGRP 0 included, the newer does not.
+        TOTAL_CODE = 99 if D["AGEGRP"].max() == 99 else 0
+        U18_LOW    = 0  if TOTAL_CODE == 99 else 1
+        tot = D[D.AGEGRP==TOTAL_CODE].set_index(["fips","year"])
+        num = lambda f,c: pd.to_numeric(f[c],errors="coerce")
+        base = num(tot,"TOT_POP")
+        out = pd.DataFrame(index=tot.index)
+        out["pep_pct_female"]   = num(tot,"TOT_FEMALE")/base
+        out["pep_pct_hispanic"] = (num(tot,"H_MALE")+num(tot,"H_FEMALE"))/base
+        out["pep_pct_asian"]    = (num(tot,"AA_MALE")+num(tot,"AA_FEMALE"))/base
+        out["pep_pct_nhpi"]     = (num(tot,"NA_MALE")+num(tot,"NA_FEMALE"))/base
+        g = D[D.AGEGRP.between(0,18)].copy()
+        g["_pop"]=pd.to_numeric(g["TOT_POP"],errors="coerce")
+        o65 = g[g.AGEGRP.between(14,18)].groupby(["fips","year"])["_pop"].sum()
+        u15 = g[g.AGEGRP.between(U18_LOW,3)].groupby(["fips","year"])["_pop"].sum()
+        b1519 = g[g.AGEGRP==4].groupby(["fips","year"])["_pop"].sum()
+        out["pep_pct_65_plus"] = (o65/base).reindex(out.index)
+        out["pep_pct_under_18"] = ((u15 + 0.6*b1519)/base).reindex(out.index)
+        out=out.reset_index(); out["_vintage"]=vname
+        frames.append(out)
+        print(f"  {vname}: {out.fips.nunique():,} counties, {int(out.year.min())}-{int(out.year.max())}")
+    if not frames: return pd.DataFrame()
+    P=pd.concat(frames,ignore_index=True)
+    # NEWER VINTAGE WINS on overlap: sort so the latest vintage lands last, keep last.
+    order={v:i for i,(v,_,_,_) in enumerate(VINT)}
+    P["_ord"]=P["_vintage"].map(order)
+    P=P.sort_values(["fips","year","_ord"]).drop_duplicates(["fips","year"],keep="last")
+    P=P.drop(columns=["_ord","_vintage"])
+    # seam check -- a jump at 2010 or 2020 would read as a spurious event
+    for seam in (2010,2020):
+        a=P[P.year==seam-1].set_index("fips")["pep_pct_65_plus"]
+        b=P[P.year==seam].set_index("fips")["pep_pct_65_plus"]
+        j=(b-a.reindex(b.index)).abs().median()
+        print(f"  seam {seam-1}->{seam}: median |change| in pct_65_plus = {j:.5f}")
+    return P
+
+
 if __name__ == "__main__":
     print("="*72); print("script0g -- annual county controls, dated by TRUE data year"); print("="*72)
-    S,L,H = saipe(), laus(), sahie()
+    S,L,H,P = saipe(), laus(), sahie(), pep()
     out=None
-    for f in (S,L,H):
+    for f in (S,L,H,P):
         if f is None or f.empty: continue
         out = f if out is None else out.merge(f,on=["fips","year"],how="outer")
     if out is None or out.empty:

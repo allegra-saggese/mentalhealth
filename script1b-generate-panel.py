@@ -82,10 +82,18 @@ RURAL_DESCRIPTOR_HINT = "rural-key"
 # SAHIE (uninsured adults) -- all annual, all counties, no population floor.
 CHR_DESCRIPTOR = "mentalhealthrank_full"
 CHR_REPLACED_COLS = [
+    # economic -- replaced by SAIPE / BLS LAUS / SAHIE
     "median_household_income",
     "children_in_poverty",
     "unemployment",
     "uninsured_adults",
+    # demographics -- replaced by Census PEP county characteristics
+    "%_female",
+    "%_hispanic",
+    "%_asian",
+    "%_native_hawaiian/other_pacific_islander",
+    "%_65_and_older",
+    "%_below_18_years_of_age",
 ]
 # Non-overlapping types used for aggregate totals (beef/dairy are subsets of cattle).
 CAFO_COMMODITIES_TOTAL = ("cattle", "hogs", "chickens")
@@ -825,6 +833,10 @@ def _strip_source_suffixes(name: str) -> str:
     n = name
     n = n.replace("_raw_value_mentalhealthrank_full", "")
     n = n.replace("_mentalhealthrank_full", "")
+    # script0g's correctly-dated series must land on the PANEL's own names. The
+    # CHR versions of these ten are dropped above (CHR_REPLACED_COLS), so there
+    # is no collision -- these simply take over the names downstream code uses.
+    n = n.replace("_annual_controls_county_year", "")
     n = n.replace("_cafo_ops_by_size_compact", "_cafo")
     # Fix double-cafo: any_large_cafo_cafo → any_large_cafo
     n = n.replace("_cafo_cafo", "_cafo")
