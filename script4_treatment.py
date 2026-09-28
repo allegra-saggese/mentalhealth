@@ -422,10 +422,13 @@ TREATMENTS = {
 # percentage at 29.6% coverage, and derived from the despair OUTCOME) and
 # `state_abbrev` (the state identifier, already absorbed by state clustering and
 # the state FE in pooled specs). Nothing binary or categorical is being lost.
+# REMOVED 2026-09-27: %_rural (D-03, decided). It was the only member of this set
+# excluded from COVARIATE_ORDER, which made CONTROL_COMPREHENSIVE and the
+# sequential runs disagree about the control pool. Set is now 25, not 26.
 CONTROL_COMPREHENSIVE = [
     "%_65_and_older", "%_asian", "%_below_18_years_of_age", "%_female",
     "%_hispanic", "%_native_hawaiian/other_pacific_islander",
-    "%_not_proficient_in_english_per100k", "%_rural",
+    "%_not_proficient_in_english_per100k",
     "access_to_healthy_foods_per100k", "adult_obesity_per100k",
     "adult_smoking_per100k", "children_in_poverty_per100k",
     "children_in_single-parent_households_per100k", "diabetes_prevalence_per100k",
@@ -472,14 +475,16 @@ CONTROL_PRETREAT = [c for c in CONTROL_COMPREHENSIVE if c not in CONTROL_MEDIATO
 #   T4  Log(count)    log(1 + count). The +1 is required, not cosmetic: 81.4% of
 #                     county-years have zero large dairy CAFOs, and plain log
 #                     would discard them.
-#   T6  Conditional   given the BASELINE number of SMALL dairy CAFOs, the effect
-#                     of introducing a large one -- market concentration, the
-#                     loss of small farms to large. DEFINED BUT NOT RUN with
-#                     T1-T4: it answers a different question. Its controls are
-#                     still to be specified.
+# T5 (log per capita) was DROPPED 2026-09-23.
 #
-# T5 (log per capita) was DROPPED 2026-09-23. The numbering gap is deliberate --
-# T6 keeps its label so it matches the slides.
+# T6 was RETIRED 2026-09-28. It was "log(1+large dairy) conditional on the
+# baseline number of SMALL dairy CAFOs" -- the consolidation question. Two
+# decisions closed it:
+#   1. Conditioning on OTHER CAFO TYPES (not small dairy) is what we want, and
+#      that is a CONDITIONING SET, not a treatment. It lives in model A3 and is
+#      applied to T1-T4. See A3_CONDITIONING below.
+#   2. Small-dairy conditioning is dropped entirely (user decision 2026-09-28).
+# There is therefore no T6. T1-T4 are the complete treatment set.
 #
 # T1-T4 are four functional forms of the SAME underlying exposure and should
 # agree in sign. Divergence between them is itself a finding.
@@ -494,10 +499,7 @@ CORE_TREATMENT_LABELS = {
     "T2": "Count of large dairy CAFOs",
     "T3": "Large dairy CAFOs per 10,000 residents",
     "T4": "Log(1 + count of large dairy CAFOs)",
-    "T6": "Log(1+count) given baseline small dairy CAFOs",
 }
-# Defined for the record; excluded from the T1-T4 runs. Controls TBD.
-T6_TREATMENT = "tr_c3_log_lg"
 
 # ---------------------------------------------------------------------------
 # REGRESSION SPECIFICATION -- separate from the treatment definition above.
@@ -514,8 +516,84 @@ SPEC_EXTRA_REGRESSORS = {
     "T2": ["log_pop"],
     "T3": [],
     "T4": ["log_pop"],
-    "T6": [],          # to be specified
 }
+
+# ---------------------------------------------------------------------------
+# A3 CONDITIONING SET -- other large CAFO types (added 2026-09-28)
+# ---------------------------------------------------------------------------
+# The horse race: is the dairy coefficient DAIRY, or is it "this county has a
+# large CAFO"? A3 re-runs T1-T4 while conditioning on the PRESENCE of other
+# large CAFO types.
+#
+# WHY PRESENCE AND NOT COUNTS. A binary indicator means the same thing whatever
+# functional form the dairy treatment takes -- binary (T1), count (T2), per
+# capita (T3) or logged (T4). Conditioning on COUNTS would require the control
+# to match each treatment's form, and a count control against a binary treatment
+# changes what the coefficient reads as.
+#
+# WHY DISAGGREGATED, NEVER A POOLED "any other large CAFO". Checked on the
+# 2026-09-23 panel:
+#     counties with dairy and NO other large CAFO :      0
+#     county-years in that cell                   :     14  (4 counties, which
+#                                                            have other CAFOs in
+#                                                            other years)
+# A large dairy is effectively a subset of "has a large CAFO", so a pooled
+# indicator has no counterfactual cell and only 39 of 759 dairy counties ever
+# switch it. Disaggregated by type it is thin but estimable -- switchers among
+# the 759 dairy-ever counties: hogs 119, chickens 79, cattle 58.
+#
+# WHY beef IS EXCLUDED. `cafo_beef_large` is a strict subset of
+# `cafo_cattle_large`: beef>0 & cattle==0 occurs in 0.0% of rows, cattle>0 &
+# beef==0 in 31.2%. Entering both double-counts the same operations. `cattle` is
+# kept as the broader measure. If the substantive interest is specifically beef
+# feedlots rather than all cattle, this choice reverses.
+#
+# EXPECTED RESULT, STATED BEFORE THE RUN. Correlation with dairy presence:
+#                  levels    within county
+#   any_cattle     +0.277        +0.084
+#   any_hogs       +0.117        -0.001
+#   any_chickens   +0.176        -0.024
+# Between counties, dairy counties genuinely have more of everything, so A3
+# should move beta under A1 (pooled). WITHIN county the co-movement is ~0, so A3
+# should barely move beta under A2. A null result under A2 is the EXPECTED
+# result and is the point of the exercise -- it is evidence the within estimate
+# is not picking up "any CAFO". It is not a failed run.
+#
+# IDENTIFICATION CAVEAT for the paper: other-animal presence is not clearly
+# pre-determined with respect to dairy. If large dairy expansion displaces or
+# attracts other livestock, these are post-treatment and conditioning on them is
+# a bad control. A3 is a robustness PROBE on what the dairy coefficient
+# contains, not a better-identified specification than A2.
+A3_CONDITIONING = {
+    "any_lg_cattle":   "cafo_cattle_large",
+    "any_lg_hogs":     "cafo_hogs_large",
+    "any_lg_chickens": "cafo_chickens_large",
+}
+A3_EXCLUDED = {
+    "cafo_beef_large":
+        "Strict subset of cafo_cattle_large (beef>0 & cattle==0 in 0.0% of "
+        "rows). Double-counts the same operations.",
+    "any_other_lg_cafo":
+        "Pooled indicator has no counterfactual: 0 counties have a large dairy "
+        "and no other large CAFO.",
+}
+
+
+def add_a3_conditioning(df):
+    """Attach the A3 other-CAFO presence indicators.
+
+    One indicator per type: 1 if the county has >=1 large operation of that
+    animal that year, 0 if it has none, NaN if the underlying count is missing.
+
+    The .where() is the project-wide missingness rule: a missing count must NOT
+    become a 0 (= "no CAFO"), because that silently reclassifies unknown
+    counties as untreated on the control. Same rule that fixed the 2000-01
+    fillna(0) bug on the dairy treatment.
+    """
+    for name, src in A3_CONDITIONING.items():
+        df[name] = (df[src] > 0).where(df[src].notna()).astype("float")
+    return df
+
 
 # Single source of truth for the headline spec. Estimator named explicitly:
 # pooled/state-FE results are a benchmark, never the headline.
