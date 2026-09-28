@@ -660,3 +660,26 @@ justifications should not be blurred.
 **If challenged on the control set, these two are where the challenge will land.** Worth
 running as a named sensitivity (step-8 + uninsured + obesity) rather than leaving it to a
 referee. Not yet run.
+
+### D-30 · `script4f` and `script4i` retired — 2026-09-29
+**`script4i-cs-covariates.py` → MERGED into `script4a` A6.** The covariate-adjusted
+Callaway–Sant'Anna arm now runs beside the unconditional one, on the same cells and the same
+bootstrap draws, so the two differ only in the conditioning. The headline TWFE-vs-CS table now
+uses the **adjusted** arm, which conditions on the same step-8 set as the TWFE side — the
+comparison therefore isolates the estimator instead of confounding it with the control set.
+Cells too thin to fit the adjustment fall back to unconditional and are counted in
+`n_fallback_cells` (currently **0** everywhere).
+
+**`script4f-core-models.py` → ARCHIVED, nothing salvaged.** It was already **broken**: it
+unpacks `CORE_TREATMENTS` as 3-tuples, which raises `ValueError` against the current
+str→str dict. Everything it did is replicated: TWFE → A2, event study → A5,
+Callaway–Sant'Anna → A6. Its three control sets (19/26/9) are retired under D-29 and its
+6-outcome, 3-treatment grid predates D-11 and D-17.
+
+**One thing was lost and is recorded here rather than silently dropped:** 4f defined a
+*different cohort per treatment* (`coh_T1` = first year of any presence, `coh_T2` = `add_year`,
+`coh_T3` = `entry_year`). `script4a` uses `add_year` only. Whether the CS result is sensitive
+to the cohort definition is a legitimate robustness question and is **not currently tested**.
+
+**Downstream:** `script4g-slides.py` and `script4h-result-tables.py` still read
+`tables_dir/script4f`. Both are stale and must be repointed when rebuilt.

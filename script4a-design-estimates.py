@@ -471,11 +471,23 @@ es.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A5_event_study.csv"), index=False)
 # INFERENCE: nonparametric cluster bootstrap resampling STATES with replacement
 # (300 reps), matching the state-clustered SEs used elsewhere in this file.
 #
-# NO COVARIATES -- THE MAIN CAVEAT, STATED PLAINLY. The (g,t) cells are thin and
-# a doubly-robust version would need a propensity model estimated inside each
-# cell. Parallel trends is therefore assumed UNCONDITIONALLY here, which is a
-# STRONGER assumption than A2 makes. The covariate-adjusted variant is in
-# script4i.
+# TWO ARMS, BOTH RUN HERE (merged from the former script4i, 2026-09-29):
+#   unconditional       ATT(g,t) is a raw difference of long differences.
+#                       Parallel trends assumed UNCONDITIONALLY -- a STRONGER
+#                       assumption than A2 makes, since A2 conditions on X.
+#   covariate-adjusted  outcome-regression adjustment using the step-8 set
+#                       measured at base period g-1. Parallel trends assumed
+#                       CONDITIONAL on X, matching A2.
+# Running both in one place is the point: the headline TWFE-vs-CS table uses the
+# adjusted arm, so the comparison isolates the ESTIMATOR rather than confounding
+# it with the conditioning set. Both arms share the same cells and the same
+# bootstrap draws.
+#
+# A doubly-robust version would additionally need a propensity model fitted
+# inside each (g,t) cell; the cells are too thin for that and it is not attempted.
+# Cells too thin even for the outcome regression fall back to the unconditional
+# estimate and are counted in n_fallback_cells -- check that column before
+# describing an aggregate as "adjusted".
 print("\n" + "=" * 78)
 print("A6: Callaway-Sant'Anna staggered DiD (not-yet-treated + never-treated controls)")
 print("=" * 78)
@@ -487,8 +499,35 @@ print(f"  inference: {N_BOOT}-rep cluster bootstrap over states")
 print(f"  covariates: NONE -- unconditional parallel trends. See docstring.\n")
 
 
-def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None):
-    """All ATT(g,t) for one outcome. `wide` is fips x year."""
+def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None,
+                 Xbase=None, use_cov=False, min_n=10):
+    """All ATT(g,t) for one outcome. `wide` is fips x year.
+
+    use_cov=False  UNCONDITIONAL. ATT(g,t) is a raw difference of long
+                   differences. Parallel trends assumed unconditionally.
+
+    use_cov=True   OUTCOME-REGRESSION ADJUSTED (merged in from the former
+                   script4i, 2026-09-29). Parallel trends assumed CONDITIONAL on
+                   X, which is the same assumption A2 makes -- so the
+                   TWFE-vs-CS comparison becomes assumption-matched instead of
+                   confounding the estimator with the conditioning set.
+
+                   For cohort g and period t:
+                     1. dY_i = Y_i,t - Y_i,(g-1) for every unit
+                     2. fit dY = X'b ON THE CLEAN CONTROL GROUP ONLY, where X is
+                        measured at the BASE PERIOD g-1 -- pre-treatment by
+                        construction, so this cannot condition on a
+                        post-treatment variable
+                     3. predict each treated unit's counterfactual dYhat = X'b
+                     4. ATT(g,t) = mean(dY | treated) - mean(dYhat | treated)
+
+                   Fitting on controls only is what makes this an adjustment
+                   rather than a regression that absorbs the treatment effect.
+                   Cells too thin to fit the adjustment fall back to the
+                   unconditional estimate and are flagged with fallback=1, so a
+                   "conditional" aggregate that is silently part unconditional
+                   cannot be reported as if it were not.
+    """
     out = []
     idx = wide.index if keep_fips is None else wide.index.intersection(keep_fips)
     coh = cohort_of.reindex(idx)
@@ -497,82 +536,142 @@ def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None):
         if base not in wide.columns:
             continue
         treated = idx[(coh == g).values]
-        if len(treated) < 10:
+        if len(treated) < min_n:
             continue
+        Xb = Xbase.get(base) if (use_cov and Xbase) else None
         for t in years:
             if t == base or t not in wide.columns:
                 continue
             ctrl = idx[((coh.isna()) | (coh > max(t, g))).values]
             d_all = wide[t] - wide[base]
             dt, dc = d_all.reindex(treated).dropna(), d_all.reindex(ctrl).dropna()
-            if len(dt) < 10 or len(dc) < 10:
+            if len(dt) < min_n or len(dc) < min_n:
                 continue
-            out.append({"cohort": int(g), "year": int(t), "event_time": int(t - g),
-                        "att": float(dt.mean() - dc.mean()),
-                        "n_treated": int(len(dt)), "n_control": int(len(dc))})
+            rec = {"cohort": int(g), "year": int(t), "event_time": int(t - g)}
+
+            if Xb is None:
+                out.append({**rec, "att": float(dt.mean() - dc.mean()),
+                            "n_treated": int(len(dt)), "n_control": int(len(dc)),
+                            "fallback": 0})
+                continue
+
+            Xc = Xb.reindex(dc.index).dropna()
+            Xt = Xb.reindex(dt.index).dropna()
+            if len(Xc) < max(min_n, Xb.shape[1] + 5) or len(Xt) < min_n:
+                out.append({**rec, "att": float(dt.mean() - dc.mean()),
+                            "n_treated": int(len(dt)), "n_control": int(len(dc)),
+                            "fallback": 1})
+                continue
+            yc = dc.reindex(Xc.index).values
+            A  = np.column_stack([np.ones(len(Xc)), Xc.values])
+            try:
+                b, *_ = np.linalg.lstsq(A, yc, rcond=None)
+            except np.linalg.LinAlgError:
+                continue
+            pred = np.column_stack([np.ones(len(Xt)), Xt.values]) @ b
+            out.append({**rec,
+                        "att": float(dt.reindex(Xt.index).mean() - pred.mean()),
+                        "n_treated": int(len(Xt)), "n_control": int(len(Xc)),
+                        "fallback": 0})
     return out
 
 
+def base_period_covariates(d, cohorts, xcols):
+    """Covariates at each candidate base period g-1, standardised.
+
+    Standardising inside the base period keeps the control-group regression
+    numerically well behaved when covariates are on wildly different scales
+    (dollars of income against a percentage). It does not change ATT.
+    """
+    Xbase = {}
+    for g in cohorts:
+        b = g - 1
+        sub = d[d.year == b].set_index("fips")[xcols]
+        if len(sub):
+            sd = sub.std().replace(0, np.nan)
+            Xbase[b] = ((sub - sub.mean()) / sd).dropna(axis=1, how="all")
+    return Xbase
+
+
+X_CS = [c for c in CONTROLS_HEADLINE if c in df.columns]
+print(f"  covariate-adjusted arm uses the step-8 set ({len(X_CS)} vars) at base period g-1\n")
+print(f"  {'outcome':26s} {'ATT uncond':>11s} {'ATT cond':>10s} {'se':>8s} {'cells':>6s} {'fallback':>9s}")
+
 cs_rows, csagg_rows = [], []
 for okey, ocol in OUTCOMES.items():
-    d = df[["fips", "year", "state_fips", "cohort", ocol]].dropna(subset=[ocol])
+    d = df[["fips", "year", "state_fips", "cohort", ocol] + X_CS].dropna(subset=[ocol])
     if d.empty:
         continue
     wide      = d.pivot_table(index="fips", columns="year", values=ocol, aggfunc="first")
     cohort_of = d.groupby("fips")["cohort"].first()
     state_of  = d.groupby("fips")["state_fips"].first()
     years     = sorted(d["year"].unique())
-    pt = att_gt_table(wide, cohort_of, COHORTS, years)
-    if not pt:
-        print(f"  {okey:26s} no estimable (g,t) cells")
-        continue
+    Xbase     = base_period_covariates(d, COHORTS, X_CS)
 
     states   = state_of.dropna().unique()
     by_state = {s: state_of.index[state_of == s] for s in states}
-    keys = [(r["cohort"], r["year"]) for r in pt]
-    boot, boot_overall = {k: [] for k in keys}, []
-    for _b in range(N_BOOT):
-        draw   = RNG.choice(states, size=len(states), replace=True)
-        fips_b = pd.Index(np.concatenate([by_state[s].values for s in draw]))
-        pb = att_gt_table(wide, cohort_of, COHORTS, years,
-                          keep_fips=pd.Index(pd.unique(fips_b)))
-        m = {(r["cohort"], r["year"]): r["att"] for r in pb}
-        for k in keys:
-            if k in m:
-                boot[k].append(m[k])
-        post = [r for r in pb if r["event_time"] >= 0]
-        if post:
-            w = np.array([r["n_treated"] for r in post], float)
-            boot_overall.append(float(np.average([r["att"] for r in post], weights=w)))
+    line = {}
+    # BOTH ARMS, same cells, same bootstrap draws -> the only difference between
+    # the two columns is the conditioning, not the sample or the resampling.
+    for arm, use_cov in [("unconditional", False), ("covariate-adjusted", True)]:
+        pt = att_gt_table(wide, cohort_of, COHORTS, years, Xbase=Xbase, use_cov=use_cov)
+        if not pt:
+            continue
+        keys = [(r["cohort"], r["year"]) for r in pt]
+        boot, boot_overall = {k: [] for k in keys}, []
+        rng = np.random.default_rng(20260928)      # same draws for both arms
+        for _b in range(N_BOOT):
+            draw   = rng.choice(states, size=len(states), replace=True)
+            fips_b = pd.Index(np.concatenate([by_state[s].values for s in draw]))
+            pb = att_gt_table(wide, cohort_of, COHORTS, years,
+                              keep_fips=pd.Index(pd.unique(fips_b)),
+                              Xbase=Xbase, use_cov=use_cov)
+            m = {(r["cohort"], r["year"]): r["att"] for r in pb}
+            for k in keys:
+                if k in m:
+                    boot[k].append(m[k])
+            post_b = [r for r in pb if r["event_time"] >= 0]
+            if post_b:
+                w = np.array([r["n_treated"] for r in post_b], float)
+                boot_overall.append(float(np.average([r["att"] for r in post_b], weights=w)))
 
-    for r in pt:
-        b  = boot[(r["cohort"], r["year"])]
-        se = float(np.std(b, ddof=1)) if len(b) > 10 else np.nan
-        cs_rows.append({"registry": "A6", "outcome": okey, **r, "se_state": se,
-                        "ci_lo": r["att"] - 1.96 * se, "ci_hi": r["att"] + 1.96 * se,
-                        "p_state": float(2 * (1 - _norm.cdf(abs(r["att"] / se))))
-                        if se and se > 0 else np.nan})
+        for r in pt:
+            b  = boot[(r["cohort"], r["year"])]
+            se = float(np.std(b, ddof=1)) if len(b) > 10 else np.nan
+            cs_rows.append({"registry": "A6", "arm": arm, "outcome": okey, **r,
+                            "se_state": se,
+                            "ci_lo": r["att"] - 1.96 * se, "ci_hi": r["att"] + 1.96 * se,
+                            "p_state": float(2 * (1 - _norm.cdf(abs(r["att"] / se))))
+                            if se and se > 0 else np.nan})
 
-    pdf = pd.DataFrame(pt)
-    for e, grp in pdf.groupby("event_time"):
-        w = grp["n_treated"].astype(float)
-        csagg_rows.append({"registry": "A6", "outcome": okey, "agg_level": "event_time",
-                           "event_time": int(e),
-                           "att": float(np.average(grp["att"], weights=w)),
-                           "n_cohorts": int(grp["cohort"].nunique()),
-                           "n_treated": int(grp["n_treated"].sum())})
-    post = pdf[pdf.event_time >= 0]
-    if len(post):
-        overall = float(np.average(post["att"], weights=post["n_treated"].astype(float)))
-        se_o = float(np.std(boot_overall, ddof=1)) if len(boot_overall) > 10 else np.nan
-        csagg_rows.append({"registry": "A6", "outcome": okey, "agg_level": "overall_ATT",
-                           "event_time": np.nan, "att": overall, "se_state": se_o,
-                           "ci_lo": overall - 1.96 * se_o, "ci_hi": overall + 1.96 * se_o,
-                           "n_cohorts": int(post["cohort"].nunique()),
-                           "n_treated": int(post["n_treated"].sum())})
-        star = "*" if (se_o and abs(overall) > 1.96 * se_o) else " "
-        print(f"  {okey:26s} overall ATT={overall:+9.4f}  se={se_o:7.4f}{star}  "
-              f"cells={len(pdf):3d}  cohorts={post['cohort'].nunique()}")
+        pdf = pd.DataFrame(pt)
+        for e, grp in pdf.groupby("event_time"):
+            w = grp["n_treated"].astype(float)
+            csagg_rows.append({"registry": "A6", "arm": arm, "outcome": okey,
+                               "agg_level": "event_time", "event_time": int(e),
+                               "att": float(np.average(grp["att"], weights=w)),
+                               "n_cohorts": int(grp["cohort"].nunique()),
+                               "n_treated": int(grp["n_treated"].sum())})
+        post = pdf[pdf.event_time >= 0]
+        if len(post):
+            overall = float(np.average(post["att"], weights=post["n_treated"].astype(float)))
+            se_o = float(np.std(boot_overall, ddof=1)) if len(boot_overall) > 10 else np.nan
+            nfb  = int(pdf.get("fallback", pd.Series(0, index=pdf.index)).sum())
+            csagg_rows.append({"registry": "A6", "arm": arm, "outcome": okey,
+                               "agg_level": "overall_ATT",
+                               "event_time": np.nan, "att": overall, "se_state": se_o,
+                               "ci_lo": overall - 1.96 * se_o, "ci_hi": overall + 1.96 * se_o,
+                               "n_cohorts": int(post["cohort"].nunique()),
+                               "n_treated": int(post["n_treated"].sum()),
+                               "n_fallback_cells": nfb})
+            line[arm] = (overall, se_o, len(pdf), nfb)
+
+    if line:
+        u = line.get("unconditional", (np.nan,)*4)
+        c = line.get("covariate-adjusted", (np.nan,)*4)
+        star = "*" if (c[1] and abs(c[0]) > 1.96 * c[1]) else " "
+        print(f"  {okey:26s} {u[0]:+11.4f} {c[0]:+10.4f}{star}{c[1]:8.4f} "
+              f"{c[2]:6d} {c[3]:9d}")
 
 cs   = pd.DataFrame(cs_rows)
 csag = pd.DataFrame(csagg_rows)
@@ -605,6 +704,7 @@ csag.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A6_cs_aggregated.csv"), index=Fal
 print("\n" + "=" * 78)
 print("HEADLINE: A2 (TWFE) vs A6 (Callaway-Sant'Anna)")
 print("  treatment held fixed at tr_e2_add_absorb (the CS cohort definition)")
+print("  CS arm = covariate-adjusted, so both sides condition on the step-8 set")
 print("=" * 78)
 
 CMP_TID = "E2"
@@ -612,7 +712,11 @@ cmp_rows = []
 for okey in OUTCOMES:
     a2 = grid[(grid.registry == "A2") & (grid.treatment_id == CMP_TID)
               & (grid.outcome == okey) & (grid.control_set.str.startswith("step8"))]
-    a6 = (csag[(csag["agg_level"] == "overall_ATT") & (csag.outcome == okey)]
+    # Use the COVARIATE-ADJUSTED arm: it conditions on the same step-8 set that
+    # the TWFE side uses, so the only difference between the columns is the
+    # estimator. The unconditional arm is in the output for reference.
+    a6 = (csag[(csag["agg_level"] == "overall_ATT") & (csag.outcome == okey)
+               & (csag.arm == "covariate-adjusted")]
           if len(csag) else pd.DataFrame())
     if a2.empty or a6.empty:
         continue
@@ -725,7 +829,7 @@ if len(es):
 
 # --- F3: A6 event-time ATT ---------------------------------------------------
 if len(csag):
-    ev = csag[csag["agg_level"] == "event_time"]
+    ev = csag[(csag["agg_level"] == "event_time") & (csag.arm == "covariate-adjusted")]
     eo = [o for o in OUTCOMES if o in set(ev.outcome)]
     if eo:
         n = len(eo); ncol = 4; nrow = int(np.ceil(n / ncol))
