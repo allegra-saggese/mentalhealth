@@ -1,3 +1,8 @@
+> **SUPERSEDED 2026-09-27 for MODEL IDs.** The A-numbering below is the old scheme,
+> which mixed built and specified-only models. See `2026-09-27_MODEL-NAMING.md` for the
+> reconciled A (built) / B (specified) split and the crosswalk. Everything else in this
+> file — specs, questions, results, flags — still stands.
+
 # Analysis Registry — dairy CAFO → mental health / crime outcomes
 **Date:** 2026-09-17 | **Status:** FOR MANUAL REVIEW | **Source:** `script4-model-test.py` (1,550 lines, last run 2026-09-10)
 

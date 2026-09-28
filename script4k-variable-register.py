@@ -70,7 +70,7 @@ OUTCOME_META = {
 }
 
 DECISION = {
-"%_rural":"D-03 drop (pending removal)","access_to_healthy_foods_per100k":"D-05 drop (decided)",
+"%_rural":"D-03 drop (REMOVED 2026-09-27)","access_to_healthy_foods_per100k":"D-05 drop (decided)",
 "adult_smoking_per100k":"D-04 collider, removal candidate (open)","teen_births_per100k":"D-04 collider (open) / D-12 keep CHR pooled (decided)",
 }
 for c in CONTROL_MEDIATORS: DECISION.setdefault(c,"D-01 excluded as mediator")
