@@ -23,16 +23,15 @@ ORDER
     20-21 VIF
     22-23 balance / detectable effect
 
-Output -> Data/output/latex-outputs-2809/BEAMER_FRAMES.tex
+Output -> LATEX_OUT/BEAMER_FRAMES.tex
 """
 import warnings; warnings.filterwarnings("ignore")
 import glob
 import numpy as np, pandas as pd
-from script4_treatment import db_data, COVARIATE_ORDER, os, date
+from script4_treatment import db_data, COVARIATE_ORDER, os, date, LATEX_OUT
 
-OUT = os.path.join(db_data, "output", "latex-outputs-2809")
+OUT = LATEX_OUT   # run 2 (2026-10-12)
 T4A = os.path.join(db_data, "output", "tables", "script4a")
-T4L = os.path.join(db_data, "output", "tables", "script4l")
 T4B = os.path.join(db_data, "output", "tables", "script4b")
 
 def latest(d, pat):
@@ -48,6 +47,7 @@ OUTS = list(SHORT)
 def cf(b, se, p, d=3):
     if pd.isna(b): return "---"
     s = f"{b:.{d}f}"
+    if pd.notna(p) and p < 0.01: return f"\\alert{{{s}$^{{***}}$\\,\\tiny({se:.{d}f})}}"
     if pd.notna(p) and p < 0.05: return f"\\alert{{{s}$^{{**}}$\\,\\tiny({se:.{d}f})}}"
     if pd.notna(p) and p < 0.10: return f"{s}$^{{*}}$\\,\\tiny({se:.{d}f})"
     return f"{s}\\,\\tiny({se:.{d}f})"
@@ -279,10 +279,10 @@ F.append(frame("A1: pooled cross-section --- specification", r"""  $$Y_{it} = \b
 if g is not None:
     for reg, title, note in [
         ("A1", "A1: pooled cross-section --- results",
-         r"Step-8 controls, state-clustered SE in parentheses. $^{**}p<0.05$, $^{*}p<0.10$. "
+         r"Step-8 controls, state-clustered SE in parentheses. $^{***}p<0.01$, $^{**}p<0.05$, $^{*}p<0.10$. "
          r"Units differ by row and by column; magnitudes are \emph{not} comparable across either."),
         ("A2", "A2: two-way fixed effects --- results",
-         r"Step-8 controls, state-clustered SE in parentheses. $^{**}p<0.05$, $^{*}p<0.10$. "
+         r"Step-8 controls, state-clustered SE in parentheses. $^{***}p<0.01$, $^{**}p<0.05$, $^{*}p<0.10$. "
          r"Switcher counts differ sharply across treatments on the identical sample "
          r"(T1 253, T3 707), so $N$ alone does not describe the evidence behind a column.")]:
         v = g[g.registry == reg]
@@ -313,39 +313,7 @@ F.insert(len(F)-1, frame("A2: two-way fixed effects --- specification", r"""  $$
   \vspace{0.5em}
   {\footnotesize Under staggered adoption with heterogeneous effects, the TWFE coefficient is a variance-weighted average of $2\times2$ comparisons that includes already-treated units as controls. A6 addresses this.}"""))
 
-F.append(frame("A3: conditioning on other CAFO types --- specification", r"""  $$Y_{it} = \beta D^{\text{dairy}}_{it} + \sum_{a \in A} \phi_a \mathbb{1}[\text{large } a \text{ present}]_{it} + X_{it}\gamma + \alpha_i + \delta_t + \varepsilon_{it}$$
-  \vspace{0.3em}
-  \begin{itemize}\footnotesize
-    \item $A = \{\text{cattle},\ \text{hogs},\ \text{chickens}\}$, entered as \textbf{presence indicators}
-    \item Binary indicators mean the same thing against a binary, count, per-capita or logged treatment
-    \item Estimated over all $2^3 = 8$ subsets; step-8 controls held fixed throughout
-    \item \textbf{Beef excluded:} strict subset of cattle ($\textit{beef}>0\ \&\ \textit{cattle}=0$ in 0.0\% of rows)
-    \item \textbf{No pooled ``any other CAFO'':} 0 counties have a large dairy and no other large CAFO
-  \end{itemize}
-  \vspace{0.4em}
-  {\footnotesize Other-animal presence is not clearly pre-determined with respect to dairy: if dairy expansion displaces or attracts other livestock, these are post-treatment. Within-county correlation with dairy presence is $+0.084$, $-0.001$, $-0.024$.}"""))
-
-a3 = latest(T4L, "*_A3_horserace.csv")
-if a3 is not None:
-    COLS = [("(none = A1/A2)","None"),("cattle","$+$Cattle"),("hogs","$+$Hogs"),
-            ("chickens","$+$Chickens"),("cattle+hogs+chickens","$+$All three")]
-    for tid in ["T1", "T2"]:
-        w = a3[(a3.fe_spec.str.startswith("A2")) & (a3.treatment_id == tid)]
-        if w.empty: continue
-        rows = []
-        for o in OUTS:
-            cells = [cf(w[(w.outcome==o)&(w.subset==k)].iloc[0].beta,
-                        w[(w.outcome==o)&(w.subset==k)].iloc[0].se_county,
-                        w[(w.outcome==o)&(w.subset==k)].iloc[0].p_county)
-                     if len(w[(w.outcome==o)&(w.subset==k)]) else "---" for k,_ in COLS]
-            rows.append(f"{SHORT[o]} & " + " & ".join(cells) + " \\\\")
-        rows += ["\\midrule", "Median $|\\Delta\\beta|$ & --- & " + " & ".join(
-            f"{w[w.subset==k].d_beta_pct_vs_ref.abs().median():.1f}\\%" for k,_ in COLS[1:]) + " \\\\"]
-        F.append(frame(f"A3 --- {tid}: results", tbl(
-            "l"+"r"*len(COLS), " & " + " & ".join(l for _,l in COLS) + " \\\\", rows,
-            r"County $+$ year FE, step-8 controls, county-clustered SE. Column 1 is the A2 "
-            r"specification. $^{**}p<0.05$, $^{*}p<0.10$. Pairwise subsets are estimated and "
-            r"retained in the output but omitted here.")))
+# A3 removed 2026-10-12 (Sept 30 feedback).
 
 F.append(frame("A4: dairy $\\times$ slaughterhouse --- specification", r"""  $$Y_{it} = \beta_1 D_{it} + \beta_2 F_{it} + \beta_3 (D \times F)_{it} + X_{it}\gamma + \alpha_i + \delta_t + \varepsilon_{it}$$
   \vspace{0.3em}
@@ -376,7 +344,7 @@ if a4 is not None and "identified" in a4.columns:
     F.append(frame("A4: dairy $\\times$ slaughterhouse --- results", tbl(
         "lrrrr", " & T1 & T2 & T3 & T4 \\\\", rows,
         r"Coefficient on the interaction. County $+$ year FE, step-8 controls, state-clustered SE. "
-        r"2017--2023. $^{**}p<0.05$, $^{*}p<0.10$. Five outcomes (despair and all four crime measures) "
+        r"2017--2023. $^{***}p<0.01$, $^{**}p<0.05$, $^{*}p<0.10$. Five outcomes (despair and all four crime measures) "
         r"have zero treatment switchers in this window and are not shown.")))
 
 F.append(frame("A5: event study --- specification", r"""  $$Y_{it} = \sum_{e \neq -1} \theta_e \mathbb{1}[t - g_i = e] + X_{it}\gamma + \alpha_i + \delta_t + \varepsilon_{it}$$
@@ -461,14 +429,13 @@ if va is not None:
   \end{center}
   \vspace{0.5em}
   {\footnotesize Collinearity among these controls is almost entirely \emph{cross-sectional}, and county fixed effects remove it. A raw-level VIF overstates collinearity for a county-FE model by roughly a factor of two.\\[0.3em]
-  The right-hand side also matters: adding T2 plus $\log$ population moves the block maximum from 1.45 to 1.57. A3's conditioning sets and A4's interaction move it further.}"""))
+  The right-hand side also matters: adding T2 plus $\log$ population moves the block maximum from 1.45 to 1.57. A4's interaction moves it further.}"""))
 
     summ = (va.groupby("model").agg(n=("vif_max","size"), w=("within","first"),
                                     mx=("vif_max","max"), md=("vif_max","median"),
                                     z=("n_zero_var","sum")).reset_index())
     rows = [f"{r.model} & {'Within' if r.w else 'Raw levels'} & {int(r.n)} & "
             f"{r.mx:.2f} & {r.md:.2f} & 0 & {int(r.z)} \\\\" for _, r in summ.iterrows()]
-    rows.append("A3 & Both & 448 & 3.35 & --- & 0 & 0 \\\\")
     F.append(frame("Variance inflation factors: full audit", tbl(
         "llrrrrr",
         "Model & Transform & Specs & Max VIF & Median & $>10$ & Absorbed \\\\", rows,

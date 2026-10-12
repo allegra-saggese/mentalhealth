@@ -14,19 +14,20 @@ a table means editing 4d or 4n and re-running; nothing here needs to change.
 
 RUN ORDER
 ---------
-    python3 script4a-design-estimates.py      # A1, A2, A4, A5, A6
-    python3 script4l-a3-horserace.py          # A3
+    python3 script4j-control-diagnostics.py   # control pre-trends, VIF
+    python3 script4a-design-estimates.py      # A1, A2, A4, A5, A6, A7
+    python3 script4r-fsis-treatment.py        # slaughterhouse treatment
     python3 script4d-balance-panel.py         # balance fragment
     python3 script4n-regression-tables.py     # regression fragment
     python3 script4p-full-appendix.py         # this file
 
-Output -> Data/output/latex-outputs-2809/FULL_RESULTS_APPENDIX.tex / .pdf
+Output -> LATEX_OUT/FULL_RESULTS_APPENDIX.tex / .pdf
 """
 import warnings; warnings.filterwarnings("ignore")
 import subprocess
-from script4_treatment import db_data, os, date
+from script4_treatment import db_data, os, date, LATEX_OUT
 
-OUT = os.path.join(db_data, "output", "latex-outputs-2809")
+OUT = LATEX_OUT   # run 2 (2026-10-12)
 TODAY = date.today().strftime("%Y-%m-%d")
 
 FRAGMENTS = {
@@ -58,17 +59,17 @@ PREAMBLE = r"""\documentclass[11pt]{article}
 \vspace{2cm}
 {\large
 \begin{tabular}{rl}
-Panel        & 2026-09-23 (CHR year misalignment corrected) \\
+Panel        & 2026-10-12 (run 2: revised demographic controls) \\
 Sample       & rural US counties, NCHS codes 3--6, 2000--2023 \\
 Treatments   & T1--T4, plus E2 for the staggered-DiD estimators \\
 Outcomes     & 7 (3 mental health / mortality, 4 crime) \\
-Controls     & step-8 pre-committed set \\
+Controls     & step-8 set, revised 2026-10-12 \\
 Inference    & state-clustered standard errors throughout \\
 \end{tabular}\par}
 \vspace{2cm}
 {\large\today\par}
 \vfill
-{\small\itshape Stars: $^{*}\,p<0.10$, $^{**}\,p<0.05$.\par}
+{\small\itshape Stars: $^{*}\,p<0.10$, $^{**}\,p<0.05$, $^{***}\,p<0.01$.\par}
 \end{titlepage}
 
 \tableofcontents

@@ -207,6 +207,9 @@ REPLACES = {
     "pep_pct_hispanic":              ("%_hispanic",                            1),
     "pep_pct_asian":                 ("%_asian",                               1),
     "pep_pct_nhpi":                  ("%_native_hawaiian/other_pacific_islander", 1),
+    "pep_pct_black":                 ("%_black",                               1),
+    "pep_pct_aian":                  ("%_american_indian_alaskan_native_pep",  1),
+    "pep_pct_asian_aian_nhpi":       ("%_asian_aian_nhpi",                     1),
     "pep_pct_65_plus":               ("%_65_and_older",                        1),
     "pep_pct_under_18":              ("%_below_18_years_of_age",               1),
 }
@@ -302,6 +305,18 @@ def pep():
         out["pep_pct_hispanic"] = (num(tot,"H_MALE")+num(tot,"H_FEMALE"))/base
         out["pep_pct_asian"]    = (num(tot,"AA_MALE")+num(tot,"AA_FEMALE"))/base
         out["pep_pct_nhpi"]     = (num(tot,"NA_MALE")+num(tot,"NA_FEMALE"))/base
+        # Added 2026-10-12 (Sept 30 feedback): Black and AIAN shares from the same
+        # annual PEP files, so the race block is dated by true data year. CHR's
+        # %_non-hispanic_african_american / %_american_indian_and_alaskan_native
+        # cover 2011-2019 only. PEP race categories are "alone" and include
+        # Hispanic members of each race.
+        out["pep_pct_black"]    = (num(tot,"BA_MALE")+num(tot,"BA_FEMALE"))/base
+        out["pep_pct_aian"]     = (num(tot,"IA_MALE")+num(tot,"IA_FEMALE"))/base
+        # Combined group: Asian + AIAN + NHPI. NHPI alone has no usable variation in
+        # non-metro counties, and Asian and AIAN shares are small; one combined
+        # share replaces %_asian in the control set.
+        out["pep_pct_asian_aian_nhpi"] = (out["pep_pct_asian"] + out["pep_pct_aian"]
+                                          + out["pep_pct_nhpi"])
         g = D[D.AGEGRP.between(0,18)].copy()
         g["_pop"]=pd.to_numeric(g["TOT_POP"],errors="coerce")
         o65 = g[g.AGEGRP.between(14,18)].groupby(["fips","year"])["_pop"].sum()

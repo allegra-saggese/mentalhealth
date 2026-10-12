@@ -19,8 +19,20 @@ MODELS IN THIS FILE
     A5   Event study                leads/lags around entry
     A6   Callaway-Sant'Anna         staggered DiD, ATT(g,t)
 
-    A3 (other-animal horse race) lives in script4l-a3-horserace.py -- it is a
-    448-regression grid and does not belong inside this file. Run 2026-09-28.
+    A3 (other-animal horse race) was DROPPED 2026-10-12 (Sept 30 feedback).
+    script4l-a3-horserace.py is retired and no longer part of the pipeline.
+
+RUN 2 ADDITIONS (2026-10-12)
+----------------------------
+* Controls: step-8 set revised in script4_treatment (no %_female; combined
+  Asian+AIAN+NHPI share; %_black).
+* A4 saves SEs for EVERY term (dairy, FSIS, interaction), not just the interaction.
+* A5 also run (a) with baseline (2000) log population x year, and (b) with log
+  population as the OUTCOME -- the depopulation placebo.
+* A6 event-time ATTs now carry bootstrap SEs (aggregated inside each draw).
+* A7 LP-DiD (estimators.lpdid) on the same E2 cohorts as A5/A6.
+* Conley spatial SEs on the A2 grid when county centroids are available
+  (Data/raw/gazetteer/; see estimators.load_centroids).
 
 WHAT CHANGED SUBSTANTIVELY FROM THE 09-18 VERSION
 --------------------------------------------------
@@ -83,6 +95,7 @@ from script4_treatment import (
     db_data, figs_dir, tables_dir, os, date,
 )
 from functions import latest_file_glob
+from estimators import lpdid, conley_se, load_centroids
 
 OUT_FIGS   = os.path.join(figs_dir,   "script4a")
 OUT_TABLES = os.path.join(tables_dir, "script4a")
@@ -206,6 +219,7 @@ def fit(sub, y, tcol, extra, controls_clean, fe, label):
                 for x in extra:
                     if x in t.index:
                         out[f"cond_{x}_beta"] = float(t.loc[x, "Estimate"])
+                        out[f"cond_{x}_se"]   = float(t.loc[x, "Std. Error"])
                         out[f"cond_{x}_p"]    = float(t.loc[x, "Pr(>|t|)"])
     except Exception as e:
         print(f"      [{label}] failed: {type(e).__name__}: {e}")
@@ -395,37 +409,37 @@ print("=" * 78)
 
 LEADS, LAGS = 8, 8
 CLEAN_HEAD = [_clean(c) for c in CONTROLS_HEADLINE]
-es_rows = []
-for okey, ocol in OUTCOMES.items():
-    need = ["fips", "year", "state_fips", ocol, "t_rel"] + CONTROLS_HEADLINE
-    sub = df[need + ["cohort"]].copy()
+
+# Baseline log population: the county's log population in 2000 (first panel
+# year, before every cohort's entry), so interacting it with year adjusts for
+# differential population TRENDS without conditioning on post-entry population,
+# which CAFO employment could itself move.
+_lp0 = (df[df.year == df.year.min()].set_index("fips")["log_pop"])
+df["log_pop_base"] = df["fips"].map(_lp0)
+
+
+def run_event_study(ycol, ylabel, controls, registry, extra_terms="", extra_cols=()):
+    """TWFE event study around the first positive change. Returns rows."""
+    rows = []
+    need = ["fips", "year", "state_fips", ycol, "t_rel"] + list(controls) + list(extra_cols)
+    sub = df[list(dict.fromkeys(need))].copy()
     sub["ev"] = sub["t_rel"].clip(-LEADS, LAGS)
     # never-treated (t_rel NaN) are pooled into the omitted category so pyfixest
     # KEEPS them as the comparison group instead of dropping them.
     sub.loc[sub["t_rel"].isna(), "ev"] = -1
-    sub = sub.drop(columns=["t_rel", "cohort"]).dropna()
+    sub = sub.drop(columns=["t_rel"]).dropna()
     sub = sub.rename(columns={c: _clean(c) for c in sub.columns})
     if len(sub) < 500:
-        continue
-    # VIF for A5 is computed on the COVARIATE BLOCK ONLY. The event-time
-    # indicators are a mutually exclusive partition of the sample, so they are
-    # collinear with each other BY CONSTRUCTION and their VIF is not a
-    # diagnostic -- it would flag a design feature as a problem. What can
-    # meaningfully be checked is whether the controls are collinear with each
-    # other in the event-study sample, which differs from the A2 sample.
-    vif5 = rhs_vif(sub, CLEAN_HEAD, within=True)
-    VIF_AUDIT.append({"model": "A5", "treatment_id": "E2", "outcome": okey,
-                      "control_set": "step8", "within": True,
-                      "note": "covariate block only; event-time dummies excluded "
-                              "(collinear by construction)", **vif5})
-
-    fml = f"{_clean(ocol)} ~ i(ev, ref=-1) + " + " + ".join(CLEAN_HEAD) + " | fips + year"
+        return rows, None
+    cc = [_clean(c) for c in controls]
+    rhs = " + ".join(["i(ev, ref=-1)"] + cc) + extra_terms
+    fml = f"{_clean(ycol)} ~ {rhs} | fips + year"
     try:
         m = pf.feols(fml, data=sub, vcov={"CRV1": "state_fips"})
         t = m.tidy()
     except Exception as e:
-        print(f"  [{okey}] event study failed: {type(e).__name__}: {e}")
-        continue
+        print(f"  [{registry}|{ylabel}] event study failed: {type(e).__name__}: {e}")
+        return rows, None
     for idx, r in t.iterrows():
         if not str(idx).startswith("ev::"):
             continue
@@ -433,15 +447,39 @@ for okey, ocol in OUTCOMES.items():
             e = int(float(str(idx).split("::")[1]))
         except (ValueError, IndexError):
             continue
-        es_rows.append({"registry": "A5", "outcome": okey, "event_time": e,
-                        "beta": float(r["Estimate"]), "se_state": float(r["Std. Error"]),
-                        "p_state": float(r["Pr(>|t|)"]),
-                        "ci_lo": float(r["Estimate"]) - 1.96 * float(r["Std. Error"]),
-                        "ci_hi": float(r["Estimate"]) + 1.96 * float(r["Std. Error"])})
-    pre = [x for x in es_rows if x["outcome"] == okey and x["event_time"] < -1]
+        b, se = float(r["Estimate"]), float(r["Std. Error"])
+        rows.append({"registry": registry, "outcome": ylabel, "event_time": e,
+                     "beta": b, "se_state": se, "p_state": float(r["Pr(>|t|)"]),
+                     "ci_lo": b - 1.96 * se, "ci_hi": b + 1.96 * se, "N": int(m._N)})
+    pre = [x for x in rows if x["event_time"] < -1]
     nsig = sum(1 for x in pre if x["p_state"] < 0.05)
-    print(f"  {okey:26s} pre-period coefs={len(pre):2d}  significant={nsig}  "
+    print(f"  {registry:12s} {ylabel:26s} pre-period coefs={len(pre):2d}  significant={nsig}  "
           f"{'PRE-TREND CONCERN' if nsig else 'pre-trend flat'}")
+    return rows, sub
+
+
+es_rows = []
+for okey, ocol in OUTCOMES.items():
+    rows, sub = run_event_study(ocol, okey, CONTROLS_HEADLINE, "A5")
+    es_rows += rows
+    if sub is not None:
+        # VIF for A5 is computed on the COVARIATE BLOCK ONLY. The event-time
+        # indicators are a mutually exclusive partition of the sample, so they
+        # are collinear with each other BY CONSTRUCTION.
+        vif5 = rhs_vif(sub, CLEAN_HEAD, within=True)
+        VIF_AUDIT.append({"model": "A5", "treatment_id": "E2", "outcome": okey,
+                          "control_set": "step8", "within": True,
+                          "note": "covariate block only; event-time dummies excluded "
+                                  "(collinear by construction)", **vif5})
+    # (a) baseline log population x year -- adjusts for population trends
+    rows, _ = run_event_study(ocol, okey, CONTROLS_HEADLINE, "A5_popbase",
+                              extra_terms=" + i(year, log_pop_base)",
+                              extra_cols=["log_pop_base"])
+    es_rows += rows
+
+# (b) depopulation placebo: log population as the outcome, no controls
+rows, _ = run_event_study("log_pop", "Log population (placebo)", [], "A5_logpop")
+es_rows += rows
 
 es = pd.DataFrame(es_rows)
 es.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A5_event_study.csv"), index=False)
@@ -619,6 +657,7 @@ for okey, ocol in OUTCOMES.items():
             continue
         keys = [(r["cohort"], r["year"]) for r in pt]
         boot, boot_overall = {k: [] for k in keys}, []
+        boot_e = {}                                  # event-time aggregates per draw
         rng = np.random.default_rng(20260928)      # same draws for both arms
         for _b in range(N_BOOT):
             draw   = rng.choice(states, size=len(states), replace=True)
@@ -630,6 +669,14 @@ for okey, ocol in OUTCOMES.items():
             for k in keys:
                 if k in m:
                     boot[k].append(m[k])
+            # event-time aggregate computed INSIDE the draw, with the same
+            # cohort-size weights as the point estimate, so its SE is the
+            # bootstrap SD of the aggregate itself (added 2026-10-12)
+            _pbd = pd.DataFrame(pb)
+            if len(_pbd):
+                for _e, _g in _pbd.groupby("event_time"):
+                    boot_e.setdefault(int(_e), []).append(
+                        float(np.average(_g["att"], weights=_g["n_treated"].astype(float))))
             post_b = [r for r in pb if r["event_time"] >= 0]
             if post_b:
                 w = np.array([r["n_treated"] for r in post_b], float)
@@ -647,9 +694,15 @@ for okey, ocol in OUTCOMES.items():
         pdf = pd.DataFrame(pt)
         for e, grp in pdf.groupby("event_time"):
             w = grp["n_treated"].astype(float)
+            att_e = float(np.average(grp["att"], weights=w))
+            be = boot_e.get(int(e), [])
+            se_e = float(np.std(be, ddof=1)) if len(be) > 10 else np.nan
             csagg_rows.append({"registry": "A6", "arm": arm, "outcome": okey,
                                "agg_level": "event_time", "event_time": int(e),
-                               "att": float(np.average(grp["att"], weights=w)),
+                               "att": att_e, "se_state": se_e,
+                               "ci_lo": att_e - 1.96 * se_e, "ci_hi": att_e + 1.96 * se_e,
+                               "p_state": (float(2 * (1 - _norm.cdf(abs(att_e / se_e))))
+                                           if se_e and se_e > 0 else np.nan),
                                "n_cohorts": int(grp["cohort"].nunique()),
                                "n_treated": int(grp["n_treated"].sum())})
         post = pdf[pdf.event_time >= 0]
@@ -677,6 +730,78 @@ cs   = pd.DataFrame(cs_rows)
 csag = pd.DataFrame(csagg_rows)
 cs.to_csv(os.path.join(OUT_TABLES,   f"{TODAY}_A6_cs_att_gt.csv"), index=False)
 csag.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A6_cs_aggregated.csv"), index=False)
+
+
+# =============================================================================
+# A7 : LP-DiD  (Dube, Girardi, Jorda & Taylor 2023)   -- added 2026-10-12
+# =============================================================================
+# Same E2 cohorts as A5/A6. For each horizon h, a stacked regression of the long
+# difference Y_{t+h} - Y_{t-1} on a newly-treated dummy, event-year FE, and the
+# step-8 controls measured at t-1, on newly treated + clean (not-yet / never
+# treated) counties only. Regression-based inference, state-clustered. h < -1 is
+# the pre-trend test. Treatment timing is still only observed at census waves,
+# so h is in years but the identifying events occur every 5 years.
+print("\n" + "=" * 78)
+print("A7: LP-DiD (clean controls: not-yet-treated + never-treated)")
+print("=" * 78)
+lp_rows = []
+for okey, ocol in OUTCOMES.items():
+    pan = df[["fips", "year", "state_fips", "cohort", ocol] + CONTROLS_HEADLINE].copy()
+    pan = pan.rename(columns={c: _clean(c) for c in pan.columns})
+    for arm, ctrls in [("no controls", []), ("step-8 at t-1", CLEAN_HEAD)]:
+        r = lpdid(pan, _clean(ocol), horizons=range(-LEADS, LAGS + 1), controls=ctrls)
+        if r.empty:
+            continue
+        r.insert(0, "arm", arm); r.insert(0, "outcome", okey); r.insert(0, "registry", "A7")
+        lp_rows.append(r)
+        pre = r[r.h < -1]
+        print(f"  {okey:26s} {arm:14s} pre sig={int((pre.p < .05).sum())}/{len(pre)}  "
+              f"h=0: {r.loc[r.h == 0, 'beta'].squeeze() if (r.h == 0).any() else float('nan'):+.4f}")
+lp_df = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
+lp_df.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A7_lpdid.csv"), index=False)
+
+
+# =============================================================================
+# CONLEY SPATIAL SEs on the A2 grid   -- added 2026-10-12
+# =============================================================================
+# State clustering allows arbitrary correlation inside a state and none across a
+# state line. Conley SEs instead let correlation decay with distance (Bartlett,
+# cutoffs 100/250/500 km, within year) plus serial correlation within county.
+# Needs county centroids; skipped with a message if the Gazetteer file is absent.
+cent = load_centroids(db_data)
+if cent is None:
+    print("\nConley SEs skipped: no county Gazetteer file in Data/raw/gazetteer/ "
+          "(download 2020_Gaz_counties_national.txt from census.gov).")
+else:
+    print("\n" + "=" * 78)
+    print("Conley spatial SEs, A2 grid")
+    print("=" * 78)
+    conley_rows = []
+    for tid, spec in GRID_TREATMENTS.items():
+        tcol, extra, _ = spec
+        for okey, ocol in OUTCOMES.items():
+            need = ["fips", "year", "state_fips", ocol, tcol] + list(extra) + CONTROLS_HEADLINE
+            sub, mp = prep(df, need)
+            sub = sub.merge(cent, on="fips", how="inner").reset_index(drop=True)
+            if len(sub) < 200:
+                continue
+            fml = (f"{mp[ocol]} ~ " + " + ".join([mp[tcol]] + [mp[x] for x in extra]
+                   + [mp[c] for c in CONTROLS_HEADLINE]) + " | fips + year")
+            try:
+                m = pf.feols(fml, data=sub, vcov="hetero", fixef_rm="none")
+            except Exception as e:
+                print(f"  [{tid}|{okey}] {e}"); continue
+            if m._N != len(sub):
+                print(f"  [{tid}|{okey}] row mismatch, skipped"); continue
+            rec = {"treatment_id": tid, "outcome": okey,
+                   "beta": float(m.coef()[mp[tcol]]), "N": int(m._N)}
+            for km in (100, 250, 500):
+                rec[f"se_conley_{km}km"] = conley_se(m, sub, mp[tcol], sub["lat"].values,
+                                                     sub["lon"].values, cutoff_km=km)
+            conley_rows.append(rec)
+        print(f"  {tid} done")
+    pd.DataFrame(conley_rows).to_csv(
+        os.path.join(OUT_TABLES, f"{TODAY}_A2_conley_se.csv"), index=False)
 
 
 # =============================================================================
@@ -775,7 +900,6 @@ if len(va):
     print(f"  specs above 10 (the usual rule of thumb): {int((va.vif_max > 10).sum())}")
     print(f"  regressors absorbed by the FE (zero within-variance): {int(va.n_zero_var.sum())}")
     print("\n  A6 has no VIF: Callaway-Sant'Anna estimates cell means, not a regression.")
-    print("  A3 VIF lives with its own output in script4l.")
 
 
 # =============================================================================

@@ -32,7 +32,7 @@ WHAT EACH COLUMN MEANS
                       of the outcome. Within-county, not raw, because that is the
                       variation a county-FE model can actually use.
 
-Output -> Data/output/latex-outputs-2809/
+Output -> LATEX_OUT (Data/output/latex-outputs-run2/)
               BALANCEpanel.tex / .pdf        (one table per treatment + outcomes)
               <date>_balance_panel.csv       (same numbers, machine readable)
 """
@@ -42,10 +42,10 @@ import numpy as np, pandas as pd, pyfixest as pf
 
 from script4_treatment import (
     load_panel, OUTCOMES, CORE_TREATMENTS, CORE_TREATMENT_LABELS,
-    SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, db_data, os, date,
+    SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, db_data, os, date, LATEX_OUT,
 )
 
-OUT = os.path.join(db_data, "output", "latex-outputs-2809")
+OUT = LATEX_OUT   # run 2 (2026-10-12); was latex-outputs-2809
 os.makedirs(OUT, exist_ok=True)
 TODAY = date.today().strftime("%Y-%m-%d")
 CONTROLS = COVARIATE_ORDER[:8]

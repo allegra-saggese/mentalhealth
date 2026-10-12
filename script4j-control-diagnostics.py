@@ -35,7 +35,8 @@ import warnings; warnings.filterwarnings("ignore")
 import numpy as np, pandas as pd, pyfixest as pf
 from script4_treatment import (load_panel, OUTCOMES, CONTROL_PRETREAT,
                                 HEADLINE_TREATMENT, HEADLINE_OUTCOME,
-                                TREATMENTS, tables_dir, os, date)
+                                CORE_TREATMENTS, SPEC_EXTRA_REGRESSORS,
+                                tables_dir, os, date)
 
 OUT = os.path.join(tables_dir, "script4a"); os.makedirs(OUT, exist_ok=True)
 TODAY = date.today().strftime("%Y-%m-%d")
@@ -51,6 +52,8 @@ META = {
  "%_asian":("Share Asian","confounder","Predetermined demographic composition. Near-zero and near-constant in rural counties, so it adds little either way."),
  "%_below_18_years_of_age":("Share under 18","confounder","Age structure; predetermined."),
  "%_female":("Share female","confounder","Predetermined."),
+ "%_asian_aian_nhpi":("Share Asian, AIAN or NHPI","confounder","Predetermined demographic composition; combined group (2026-10-12)."),
+ "%_black":("Share Black","confounder","Predetermined demographic composition (Census PEP, Black alone)."),
  "%_hispanic":("Share Hispanic","mediator","PLAUSIBLY MOVED BY TREATMENT: large livestock operations recruit Hispanic labour, so post-CAFO composition partly reflects the CAFO. Retained because it is also a strong confounder, but flagged."),
  "%_native_hawaiian/other_pacific_islander":("Share NH/PI","confounder","Predetermined; negligible in rural counties."),
  "%_not_proficient_in_english_per100k":("Limited English proficiency","mediator","Same channel as %Hispanic -- tracks in-migration of CAFO labour."),
@@ -67,11 +70,14 @@ META = {
  "unemployment_per100k":("Unemployment rate","mediator","A CAFO opening changes local employment directly."),
  "uninsured_adults_per100k":("Uninsured adults","mediator","Insurance follows employment, which treatment can move."),
 }
+META["log_pop"]=("Log population (placebo)","placebo","Not a control: tests whether treated counties were on a different population path before entry.")
 META["teen_births_per100k"]=("Teen birth rate","collider","Responds to both local economic conditions and to social/mental-health conditions, so it is caused by treatment and outcome alike.")
 
 df = load_panel()
 ref = df[df[HEADLINE_OUTCOME].notna()]
-tcol,tcond,_ = TREATMENTS[HEADLINE_TREATMENT]
+# HEADLINE_TREATMENT is a core ID (T1); the legacy TREATMENTS dict no longer has it.
+tcol  = CORE_TREATMENTS[HEADLINE_TREATMENT]
+tcond = SPEC_EXTRA_REGRESSORS.get(HEADLINE_TREATMENT, [])
 est_cols = ["fips","year",HEADLINE_OUTCOME,tcol]+list(tcond)+CONTROL_PRETREAT
 est = df[list(dict.fromkeys(est_cols))].dropna()
 
@@ -93,10 +99,14 @@ cov=pd.DataFrame(rows)
 # =============================== 2. pre-trends ===============================
 # Each control as the DEPENDENT variable in the event-study spec.
 pre_rows=[]
-d=df[["fips","year","state_fips","t_rel"]+CONTROL_PRETREAT].copy()
+# log_pop added 2026-10-12: population placebo. A differential pre-trend in log
+# population would mean treated counties were already depopulating (or growing)
+# before entry, which moves every per-100k outcome through the denominator.
+PRETREND_VARS = CONTROL_PRETREAT + ["log_pop"]
+d=df[["fips","year","state_fips","t_rel"]+PRETREND_VARS].copy()
 d["ev"]=d["t_rel"].clip(-LEADS,LAGS); d.loc[d.t_rel.isna(),"ev"]=-1
 d=d.drop(columns=["t_rel"])
-for c in CONTROL_PRETREAT:
+for c in PRETREND_VARS:
     sub=d[["fips","year","state_fips","ev",c]].dropna()
     if len(sub)<1000: continue
     sub=sub.rename(columns={x:cl(x) for x in sub.columns})

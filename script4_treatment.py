@@ -51,6 +51,10 @@ import numpy as np
 import pandas as pd
 
 CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
+
+# Where the LaTeX tables for the current run are written (script4d, 4n, 4p, 4q).
+# Run 2 (2026-10-12) moved this from latex-outputs-2809.
+LATEX_OUT = os.path.join(db_data, "output", "latex-outputs-run2")
 MERGED_DIR   = os.path.join(db_data, "merged")
 
 # Waves where NASS's own total-operations count is available to validate the size
@@ -426,8 +430,9 @@ TREATMENTS = {
 # excluded from COVARIATE_ORDER, which made CONTROL_COMPREHENSIVE and the
 # sequential runs disagree about the control pool. Set is now 25, not 26.
 CONTROL_COMPREHENSIVE = [
-    "%_65_and_older", "%_asian", "%_below_18_years_of_age", "%_female",
-    "%_hispanic", "%_native_hawaiian/other_pacific_islander",
+    # 2026-10-12: %_asian, %_female, %_nhpi replaced by %_asian_aian_nhpi, %_black
+    "%_65_and_older", "%_asian_aian_nhpi", "%_below_18_years_of_age", "%_black",
+    "%_hispanic",
     "%_not_proficient_in_english_per100k",
     "access_to_healthy_foods_per100k", "adult_obesity_per100k",
     "adult_smoking_per100k", "children_in_poverty_per100k",
@@ -635,8 +640,13 @@ COVARIATE_ORDER = [
     "%_hispanic",                                   #  4  Census PEP 99.9%
     "%_below_18_years_of_age",                      #  5  Census PEP 99.9%
     "children_in_poverty_per100k",                  #  6  SAIPE      99.9%
-    "%_female",                                     #  7  Census PEP 99.9%
-    "%_asian",                                      #  8  Census PEP 99.9%
+    # 7-8 REVISED 2026-10-12 (Sept 30 feedback): %_female dropped (little
+    # within-county variation; adds variance, not adjustment). %_asian replaced
+    # by one combined Asian + AIAN + NHPI share, and %_black added, all from
+    # annual Census PEP (script0g). Reference group = everyone else (mostly
+    # non-Hispanic white). %_hispanic relabelling to Latin(x) is on hold.
+    "%_asian_aian_nhpi",                            #  7  Census PEP 99.9%
+    "%_black",                                      #  8  Census PEP 99.9%
     # --- partial coverage : the sample falls from here ------------------------
     "uninsured_adults_per100k",                     #  9  SAHIE      65.9%  (2008+)
     "adult_obesity_per100k",                        # 10  BRFSS      57.6%
@@ -660,7 +670,13 @@ COVARIATE_EXCLUDED = {
     "driving_alone_to_work_per100k":
         "Could not obtain consistent data across the panel window.",
     "%_native_hawaiian/other_pacific_islander":
-        "Negligible in non-metro counties; contributes no usable variation.",
+        "Negligible in non-metro counties; contributes no usable variation. "
+        "Now enters only inside %_asian_aian_nhpi (2026-10-12).",
+    "%_female":
+        "DROPPED 2026-10-12 (Sept 30 feedback): little within-county variation; "
+        "adds variance rather than adjustment.",
+    "%_asian":
+        "REPLACED 2026-10-12 by %_asian_aian_nhpi (combined Asian + AIAN + NHPI).",
 }
 
 # %_hispanic was initially dropped for collinearity with

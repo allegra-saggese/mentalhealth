@@ -1,306 +1,336 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4n-regression-tables.py  --  regression tables, journal layout.
+script4n-regression-tables.py  --  regression tables in standard paper format.
 
-Reads the CSVs written by script4a (A1, A2, A4, A5, A6) and script4l (A3).
-NO estimation happens here.
+REWRITTEN 2026-10-12 (run 2). Reads the latest CSVs from script4a (A1, A2, A4,
+A5, A6, A7, VIF, Conley) and script4r (slaughterhouse R0-R4). NO estimation.
 
-LAYOUT
-------
-Standard published-paper form throughout:
-    COLUMNS are specifications, numbered (1) (2) (3) ...
-    ROWS are coefficients, with the standard error in parentheses DIRECTLY BELOW
-    a bottom panel carries N, counties, switchers, fixed effects and controls
+FORMAT (applies to every table)
+-------------------------------
+    columns  = outcomes (1)-(7), grouped Mental health | Mortality | Arrests
+    panels   = treatments (Panel A, B, ...), one coefficient row each,
+               standard error in parentheses directly below
+    bottom   = Observations, Counties, State clusters, Controls, FE rows
+    stars    = *** p<0.01, ** p<0.05, * p<0.10   (state-clustered p-values)
+Notes go in the document, not inside the tabular, so each fragment can be
+\\input into a paper, a slide or the appendix unchanged.
 
-This replaces the earlier long-format dump, in which every treatment x outcome x
-specification was one row. That format is readable by a machine and by nobody
-else -- the A3 table alone ran to 56 rows and no coefficient could be compared
-against its neighbour without counting lines.
+A3 was dropped 2026-10-12 and is no longer read.
 
-STARS: * p<0.10, ** p<0.05.  SEs state-clustered throughout.
-
-A3 IN PARTICULAR
-----------------
-One table per treatment, columns (1)-(5):
-    (1) no conditioning -- identical to the A2 specification
-    (2) + large cattle present
-    (3) + large hogs present
-    (4) + large chickens present
-    (5) + all three
-Reading across a row shows what happens to the dairy coefficient as other animal
-types are conditioned on, which is the entire question A3 asks. The three
-pairwise subsets are estimated and kept in the CSV but omitted from the table:
-they carry no information the single and full columns do not.
-
-Output -> Data/output/latex-outputs-2809/REGRESSION_TABLES.tex / .pdf
-          plus _BODY_regressions.tex for the combined appendix (script4p)
+Output -> LATEX_OUT/tables/*.tex, LATEX_OUT/REGRESSION_TABLES.tex (+ .pdf if
+pdflatex is available), LATEX_OUT/_BODY_regressions.tex for script4p.
 """
 import warnings; warnings.filterwarnings("ignore")
-import glob, subprocess
+import glob, math, subprocess
 import numpy as np, pandas as pd
-from script4_treatment import db_data, os, date
+from script4_treatment import db_data, os, LATEX_OUT
 
-OUT = os.path.join(db_data, "output", "latex-outputs-2809"); os.makedirs(OUT, exist_ok=True)
+TAB = os.path.join(LATEX_OUT, "tables"); os.makedirs(TAB, exist_ok=True)
 T4A = os.path.join(db_data, "output", "tables", "script4a")
-T4L = os.path.join(db_data, "output", "tables", "script4l")
+T4R = os.path.join(db_data, "output", "tables", "script4r")
+
 
 def latest(d, pat):
     f = sorted(glob.glob(os.path.join(d, pat)))
     return pd.read_csv(f[-1]) if f else None
 
-def esc(s):
-    return str(s).replace("_", r"\_").replace("%", r"\%").replace("&", r"\&")
 
-def cell(beta, se, p, fmt="{:.4f}"):
-    """A coefficient and its SE, as the two stacked lines a paper table uses."""
-    if pd.isna(beta):
-        return "", ""
-    st = "$^{**}$" if (pd.notna(p) and p < 0.05) else ("$^{*}$" if (pd.notna(p) and p < 0.10) else "")
-    return fmt.format(beta) + st, f"({fmt.format(se)})" if pd.notna(se) else ""
+OUTS = ["Poor MH Days", "Frequent Mental Distress", "Deaths of Despair", "Aggravated Assault",
+        "Assault, all severities", "Violence index (partial)", "NIBRS curated total"]
+DEC = {"Poor MH Days": 3, "Frequent Mental Distress": 1, "Deaths of Despair": 3,
+       "Aggravated Assault": 2, "Assault, all severities": 2,
+       "Violence index (partial)": 2, "NIBRS curated total": 2}
+HEAD7 = r""" & \multicolumn{2}{c}{Mental health} & Mortality & \multicolumn{4}{c}{Arrests per 100{,}000} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-4}\cmidrule(lr){5-8}
+ & Poor MH & Freq.\ mental & Deaths of & Agg. & Assault, & Violence & NIBRS \\
+ & days & distress & despair & assault & all sev. & (partial) & total \\
+ & (1) & (2) & (3) & (4) & (5) & (6) & (7) \\
+\midrule"""
+PANELS = [("T1", "Panel A. Presence of a large dairy CAFO (T1)", "Large dairy CAFO (0/1)"),
+          ("T2", "Panel B. Count of large dairy CAFOs (T2)", "Number of large dairy CAFOs"),
+          ("T3", "Panel C. Large dairy CAFOs per 10,000 residents (T3)", "Large dairy CAFOs per 10,000"),
+          ("T4", r"Panel D. $\log(1+\text{count})$ (T4)", r"$\log(1+$large dairy CAFOs$)$"),
+          ("E2", "Panel E. First gain of a large dairy CAFO, absorbing (E2)", "Post first gain (0/1)")]
+STARNOTE = r"$^{***}p<0.01$, $^{**}p<0.05$, $^{*}p<0.10$"
 
-def table(caption, label, ncol, colhead, rows, foot, note):
-    spec = "l" + "r" * ncol
-    nums = " & ".join(f"({i+1})" for i in range(ncol))
-    return ("\\begin{table}[htbp]\n\\centering\n"
-            f"\\caption{{{caption}}}\n\\label{{{label}}}\n"
-            "\\begin{adjustbox}{max width=\\textwidth, max totalheight=0.78\\textheight}\n"
-            f"\\begin{{tabular}}{{{spec}}}\n\\toprule\n"
-            f" & {nums} \\\\\n"
-            f" & {colhead} \\\\\n\\midrule\n"
-            + "\n".join(rows) + "\n\\midrule\n" + "\n".join(foot) +
-            "\n\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\n"
-            "\\vspace{0.3em}\n\\begin{minipage}{\\textwidth}\\footnotesize\n"
-            f"\\textit{{Notes.}} {note}\n"
-            "\\end{minipage}\n\\end{table}\n")
 
-tex = [r"""\documentclass[11pt]{article}
-\usepackage[margin=0.8in]{geometry}
-\usepackage{booktabs,adjustbox,amsmath,graphicx}
-\usepackage[colorlinks=true,linkcolor=blue]{hyperref}
-\setlength{\parindent}{0pt}
-\begin{document}
-\begin{center}
-{\Large\bfseries Regression results, models A1--A6}\\[0.3em]
-{\large Large dairy CAFOs and rural mental health}\\[0.6em]
-Panel 2026-09-23 \quad$\cdot$\quad step-8 pre-committed controls \quad$\cdot$\quad
-state-clustered SEs\\[0.2em]
-\today
-\end{center}
-\vspace{0.5em}
-\textit{Stars:} $^{*}\,p<0.10$, $^{**}\,p<0.05$. Standard errors in parentheses.
-\vspace{1em}
-"""]
+def st(p):
+    return "" if pd.isna(p) else "^{***}" if p < .01 else "^{**}" if p < .05 else "^{*}" if p < .10 else ""
 
-TRT = ["T1", "T2", "T3", "T4", "E2"]
 
-# ============================================================ A1 / A2
-g = latest(T4A, "*_A1_A2_treatment_grid.csv")
-if g is not None:
-    for reg, nm, fe in [("A2", "A2 --- TWFE within county", "County $+$ year"),
-                        ("A1", "A1 --- Pooled OLS", "State $+$ year")]:
-        v = g[g.registry == reg]
-        rows = []
-        for okey in v.outcome.unique():
-            b_line, s_line = [esc(okey)], [""]
-            for tid in TRT:
-                r = v[(v.treatment_id == tid) & (v.outcome == okey)]
-                if r.empty:
-                    b_line.append(""); s_line.append(""); continue
-                r = r.iloc[0]
-                b, s = cell(r.beta, r.se_state, r.p_state)
-                b_line.append(b); s_line.append(s)
-            rows.append(" & ".join(b_line) + " \\\\")
-            rows.append(" & ".join(s_line) + " \\\\")
-            rows.append("\\addlinespace")
-        foot = []
-        for lbl, key in [("Observations", "N"), ("Counties", "n_counties"),
-                         ("Switchers", "n_switchers")]:
-            vals = []
-            for tid in TRT:
-                r = v[(v.treatment_id == tid) & (v.outcome == "Poor MH Days")]
-                vals.append(f"{int(r.iloc[0][key]):,}" if len(r) else "")
-            foot.append(f"{lbl} (Poor MH Days) & " + " & ".join(vals) + " \\\\")
-        foot.append(f"Fixed effects & " + " & ".join([fe.split()[0]] * len(TRT)) + " \\\\")
-        foot.append("Step-8 controls & " + " & ".join(["Yes"] * len(TRT)) + " \\\\")
-        tex.append(table(
-            f"{nm} ({fe.lower()} fixed effects)", f"tab:{reg}", len(TRT),
-            " & ".join(f"\\textbf{{{t}}}" for t in TRT), rows, foot,
-            "Each column is a separate regression; each cell is the treatment coefficient "
-            "for that treatment--outcome pair. "
-            "T1 presence, T2 count, T3 per 10{,}000 residents, T4 $\\log(1+$count$)$, "
-            "E2 first positive change (absorbing). T2 and T4 additionally control for "
-            "$\\log$ population. Sample sizes vary by outcome; the bottom panel reports "
-            "them for the headline outcome. "
-            + ("\\textit{Switchers} is the number of counties whose treatment changes --- "
-               "under county fixed effects only these identify $\\beta$."
-               if reg == "A2" else
-               "A1 is a \\textit{benchmark}, not a headline: identified off between-county "
-               "variation and far more sensitive to the control set than A2.")))
+def coef(b, p, d):
+    if pd.isna(b):
+        return ""
+    sign = "$-$" if b < 0 else ""
+    return f"{sign}{abs(b):,.{d}f}" + (f"$\\mkern-2mu{st(p)}$" if st(p) else "")
 
-# ============================================================ A3
-a3 = latest(T4L, "*_A3_horserace.csv")
-if a3 is not None:
-    COLS = [("(none = A1/A2)", "None"), ("cattle", "$+$ Cattle"), ("hogs", "$+$ Hogs"),
-            ("chickens", "$+$ Chickens"), ("cattle+hogs+chickens", "$+$ All three")]
-    w = a3[a3.fe_spec.str.startswith("A2")]
-    for tid in ["T1", "T2", "T3", "T4"]:
-        v = w[w.treatment_id == tid]
-        if v.empty:
-            continue
-        tlab = v.treatment.iloc[0]
-        rows = []
-        for okey in v.outcome.unique():
-            b_line, s_line = [esc(okey)], [""]
-            for key, _ in COLS:
-                r = v[(v.outcome == okey) & (v.subset == key)]
-                if r.empty:
-                    b_line.append(""); s_line.append(""); continue
-                r = r.iloc[0]
-                b, s = cell(r.beta, r.se_county, r.p_county)
-                b_line.append(b); s_line.append(s)
-            rows.append(" & ".join(b_line) + " \\\\")
-            rows.append(" & ".join(s_line) + " \\\\")
-            rows.append("\\addlinespace")
-        base = v[v.subset == "(none = A1/A2)"]
-        full = v[v.subset == "cattle+hogs+chickens"]
-        foot = ["Median $|\\Delta\\beta|$ vs (1) & --- & "
-                + " & ".join(
-                    f"{v[v.subset==k].d_beta_pct_vs_ref.abs().median():.1f}\\%"
-                    for k, _ in COLS[1:]) + " \\\\",
-                f"Observations & " + " & ".join(
-                    f"{int(v[v.subset==k].N.median()):,}" for k, _ in COLS) + " \\\\",
-                f"Switchers & " + " & ".join(
-                    f"{int(v[v.subset==k].n_switchers.median()):,}" for k, _ in COLS) + " \\\\",
-                "Fixed effects & " + " & ".join(["County"] * len(COLS)) + " \\\\",
-                "Step-8 controls & " + " & ".join(["Yes"] * len(COLS)) + " \\\\"]
-        tex.append(table(
-            f"A3 --- {tid}: dairy conditional on other large CAFO types",
-            f"tab:A3_{tid}", len(COLS),
-            " & ".join(lab for _, lab in COLS), rows, foot,
-            f"Treatment: {esc(tlab)}. Column (1) is the A2 specification; columns (2)--(5) add "
-            "indicators for the presence of other large operations. County $+$ year fixed "
-            "effects, step-8 controls, county-clustered SEs. "
-            "\\textbf{The near-null is the expected result and was registered before the run:} "
-            "within-county correlation between dairy presence and the three indicators is "
-            "$+0.084$, $-0.001$ and $-0.024$, so there is little for them to absorb. It is "
-            "evidence the within estimate is not capturing ``any large CAFO''. "
-            "Beef is excluded --- it is a strict subset of cattle "
-            "($\\textit{beef}>0\\ \\&\\ \\textit{cattle}=0$ in 0.0\\% of rows). "
-            "Other-animal presence is not clearly pre-determined with respect to dairy, so A3 "
-            "is a probe on what the coefficient contains, not a better-identified "
-            "specification. Pairwise subsets are estimated and retained in the output CSV."))
 
-# ============================================================ A4
+def se(x, d):
+    return "" if pd.isna(x) else f"({x:,.{d}f})"
+
+
+def pnorm(b, s):
+    return math.erfc(abs(b / s) / math.sqrt(2)) if (pd.notna(s) and s > 0) else np.nan
+
+
+def save(name, body):
+    with open(os.path.join(TAB, name), "w") as f:
+        f.write(body)
+    return name
+
+
+written = []
+
+# ------------------------------------------------------------- A1 / A2 -------
+grid = latest(T4A, "*_A1_A2_treatment_grid.csv")
+
+
+def twfe(reg, fe_county, panels=None):
+    d = grid[grid.registry == reg]
+    PN = PANELS if panels is None else [x for x in PANELS if x[0] in panels]
+    L = [r"\begin{tabular}{l*{7}{c}}", r"\toprule", HEAD7]
+    for i, (t, title, lab) in enumerate(PN):
+        r = d[d.treatment_id == t].set_index("outcome")
+        L.append(f"\\multicolumn{{8}}{{l}}{{\\textit{{{title}}}}} \\\\")
+        L.append(lab + " & " + " & ".join(coef(r.loc[o, "beta"], r.loc[o, "p_state"], DEC[o]) if o in r.index else "" for o in OUTS) + r" \\")
+        L.append(" & " + " & ".join(se(r.loc[o, "se_state"], DEC[o]) if o in r.index else "" for o in OUTS) + r" \\")
+        L.append("Switching counties & " + " & ".join(f"{int(r.loc[o,'n_switchers']):,}" if o in r.index else "" for o in OUTS) + r" \\")
+        if i < len(PN) - 1:
+            L.append(r"\addlinespace")
+    r = d[d.treatment_id == "T1"].set_index("outcome")
+    yes, no = " & ".join(["Yes"] * 7), " & ".join(["No"] * 7)
+    L += [r"\midrule",
+          "Observations & " + " & ".join(f"{int(r.loc[o,'N']):,}" for o in OUTS) + r" \\",
+          "Counties & " + " & ".join(f"{int(r.loc[o,'n_counties']):,}" for o in OUTS) + r" \\",
+          "State clusters & " + " & ".join(f"{int(r.loc[o,'n_states'])}" for o in OUTS) + r" \\",
+          "Controls & " + yes + r" \\",
+          "County FE & " + (yes if fe_county else no) + r" \\",
+          "State FE & " + (no if fe_county else yes) + r" \\",
+          "Year FE & " + yes + r" \\", r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(L)
+
+
+if grid is not None:
+    for reg, fe in [("A1", False), ("A2", True)]:
+        written.append(save(f"tab_{reg}.tex", twfe(reg, fe)))
+        for k, pn in [("p1", ["T1", "T2", "T3"]), ("p2", ["T4", "E2"])]:
+            written.append(save(f"tab_{reg}_{k}.tex", twfe(reg, fe, pn)))
+
+# ------------------------------------------------------------- A4 ------------
 a4 = latest(T4A, "*_A4_fsis_interaction.csv")
-if a4 is not None and "identified" in a4.columns:
-    ok = a4[a4.identified]
-    outs = list(dict.fromkeys(ok.outcome))
-    rows = []
-    for okey in outs:
-        b_line, s_line = [esc(okey)], [""]
-        for tid in ["T1", "T2", "T3", "T4"]:
-            r = ok[(ok.treatment_id == tid) & (ok.outcome == okey)]
-            if r.empty:
-                b_line.append(""); s_line.append(""); continue
-            r = r.iloc[0]
-            b, s = cell(r.beta, r.se_state, r.p_state)
-            b_line.append(b); s_line.append(s)
-        rows.append(" & ".join(b_line) + " \\\\")
-        rows.append(" & ".join(s_line) + " \\\\")
-        rows.append("\\addlinespace")
-    foot = ["Observations & " + " & ".join(
-                f"{int(ok[ok.treatment_id==t].N.median()):,}" for t in ["T1","T2","T3","T4"]) + " \\\\",
-            "Switchers & " + " & ".join(
-                f"{int(ok[ok.treatment_id==t].n_switchers.median()):,}" for t in ["T1","T2","T3","T4"]) + " \\\\",
-            "Fixed effects & " + " & ".join(["County"] * 4) + " \\\\",
-            "Sample & " + " & ".join(["2017--23"] * 4) + " \\\\"]
-    sup = sorted(a4.loc[~a4.identified, "outcome"].unique())
-    tex.append(table(
-        "A4 --- Dairy $\\times$ FSIS slaughterhouse interaction", "tab:A4", 4,
-        " & ".join(f"\\textbf{{{t}}}" for t in ["T1","T2","T3","T4"]), rows, foot,
-        "Reported coefficient is on the interaction; dairy and FSIS main effects are in the "
-        "same regression. \\textbf{Only identified specifications appear.} Suppressed: "
-        f"{esc(', '.join(sup))}. Treatment is measured at ag-census waves and forward-filled, "
-        "so it moves only in 2007, 2012, 2017 and 2022. Those outcomes end in 2020 or 2021, "
-        "leaving \\textit{no wave transition} inside the window, so county fixed effects "
-        "absorb the dairy term entirely. Their coefficients are not interpretable and are "
-        "\\textit{not} reported as nulls --- a null would claim power this design does not "
-        "have. Exploratory: 89 switchers over seven years."))
+TCOL = {"T1": "tr_e1_lg_bin", "T2": "tr_i3_lg_count", "T3": "tr_i4_lg_p10k", "T4": "tr_c3_log_lg"}
+if a4 is not None:
+    cols = [(o, t) for o in ["Poor MH Days", "Frequent Mental Distress"] for t in TCOL]
+    L = [r"\begin{tabular}{l*{8}{c}}", r"\toprule",
+         r" & \multicolumn{4}{c}{Poor MH days} & \multicolumn{4}{c}{Freq.\ mental distress} \\",
+         r"\cmidrule(lr){2-5}\cmidrule(lr){6-9}",
+         r"Dairy measure $D$: & T1 & T2 & T3 & T4 & T1 & T2 & T3 & T4 \\",
+         r" & (1) & (2) & (3) & (4) & (5) & (6) & (7) & (8) \\", r"\midrule"]
+    R = {k: [] for k in ["b1", "s1", "b2", "s2", "b3", "s3"]}
+    for o, t in cols:
+        r = a4[(a4.outcome == o) & (a4.treatment_id == t)].iloc[0]
+        d = 3 if o == "Poor MH Days" else 1
+        for k, pre in [("1", f"cond_{TCOL[t]}"), ("2", "cond_any_fsis")]:
+            R["b" + k].append(coef(r.get(pre + "_beta"), r.get(pre + "_p"), d))
+            R["s" + k].append(se(r.get(pre + "_se", np.nan), d))
+        R["b3"].append(coef(r.beta, r.p_state, d)); R["s3"].append(se(r.se_state, d))
+    r0 = a4[a4.outcome == "Poor MH Days"].iloc[0]; r1 = a4[a4.outcome == "Frequent Mental Distress"].iloc[0]
+    yes = " & ".join(["Yes"] * 8)
+    L += [r"$D$ ($\beta_1$) & " + " & ".join(R["b1"]) + r" \\", " & " + " & ".join(R["s1"]) + r" \\",
+          r"FSIS plant, $F$ ($\beta_2$) & " + " & ".join(R["b2"]) + r" \\", " & " + " & ".join(R["s2"]) + r" \\",
+          r"$D \times F$ ($\beta_3$) & " + " & ".join(R["b3"]) + r" \\", " & " + " & ".join(R["s3"]) + r" \\",
+          r"\midrule",
+          "Observations & " + " & ".join([f"{int(r0.N):,}"] * 4 + [f"{int(r1.N):,}"] * 4) + r" \\",
+          "Counties & " + " & ".join([f"{int(r0.n_counties):,}"] * 4 + [f"{int(r1.n_counties):,}"] * 4) + r" \\",
+          "Switching counties & " + " & ".join(f"{int(a4[(a4.outcome==o)&(a4.treatment_id==t)].n_switchers.iloc[0]):,}" for o, t in cols) + r" \\",
+          "Controls & " + yes + r" \\", "County FE & " + yes + r" \\", "Year FE & " + yes + r" \\",
+          r"\bottomrule", r"\end{tabular}"]
+    written.append(save("tab_A4.tex", "\n".join(L)))
 
-# ============================================================ A5
+# ------------------------------------------------------------- A5 pre-trends --
 a5 = latest(T4A, "*_A5_event_study.csv")
 if a5 is not None:
-    outs = list(dict.fromkeys(a5.outcome))
-    rows, foot = [], []
-    npre = [len(a5[(a5.outcome == o) & (a5.event_time < -1)]) for o in outs]
-    nsig = [int((a5[(a5.outcome == o) & (a5.event_time < -1)].p_state < 0.05).sum()) for o in outs]
-    rows.append("Pre-period coefficients & " + " & ".join(str(n) for n in npre) + " \\\\")
-    rows.append("Significant at 5\\% & " + " & ".join(
-        (f"\\textbf{{{n}}}" if n else "0") for n in nsig) + " \\\\")
-    rows.append("\\addlinespace")
-    rows.append("Verdict & " + " & ".join(
-        ("\\textbf{FAILS}" if n else "Flat") for n in nsig) + " \\\\")
-    foot.append("Leads/lags & " + " & ".join(["$\\pm8$"] * len(outs)) + " \\\\")
-    foot.append("Omitted period & " + " & ".join(["$t=-1$"] * len(outs)) + " \\\\")
-    tex.append(table(
-        "A5 --- Event study: pre-trend test", "tab:A5", len(outs),
-        " & ".join(f"\\rotatebox{{60}}{{{esc(o)}}}" for o in outs), rows, foot,
-        "TWFE event study around the first positive change, never-treated pooled into the "
-        "omitted category. A \\textbf{FAILS} verdict means counties that later gain a large "
-        "dairy were already on a different trajectory, so that outcome cannot be read causally "
-        "from this design. Treatment timing carries up to five years of measurement error "
-        "(ag census forward-filled), so leads near zero are partly contaminated by "
-        "already-treated periods. Coefficient paths are in the companion figure. This "
-        "estimator inherits the forbidden-comparison problem A6 exists to correct."))
+    reg_lab = {"A5": "Baseline", "A5_popbase": r"+ log pop.\ (2000) $\times$ year"}
+    L = [r"\begin{tabular}{llccc}", r"\toprule",
+         r"Outcome & Specification & Pre-period coefs & Significant at 5\% & Min $p$ \\", r"\midrule"]
+    for o in OUTS:
+        for reg in ["A5", "A5_popbase"]:
+            pre = a5[(a5.registry == reg) & (a5.outcome == o) & (a5.event_time < -1)]
+            if pre.empty:
+                continue
+            L.append(f"{o if reg == 'A5' else ''} & {reg_lab[reg]} & {len(pre)} & "
+                     f"{int((pre.p_state < .05).sum())} & {pre.p_state.min():.3f} \\\\")
+    pre = a5[(a5.registry == "A5_logpop") & (a5.event_time < -1)]
+    if len(pre):
+        L += [r"\midrule", f"Log population (placebo) & No controls & {len(pre)} & "
+              f"{int((pre.p_state < .05).sum())} & {pre.p_state.min():.3f} \\\\"]
+    L += [r"\bottomrule", r"\end{tabular}"]
+    written.append(save("tab_A5_pretrend.tex", "\n".join(L)))
 
-# ============================================================ A6
-cmp_ = latest(T4A, "*_HEADLINE_twfe_vs_cs.csv")
-csag = latest(T4A, "*_A6_cs_aggregated.csv")
-if cmp_ is not None:
-    rows = []
-    for _, r in cmp_.iterrows():
-        u = np.nan
-        if csag is not None and "arm" in csag.columns:
-            m = csag[(csag.agg_level == "overall_ATT") & (csag.outcome == r.outcome)
-                     & (csag.arm == "unconditional")]
-            if len(m):
-                u = float(m.att.iloc[0])
-        tb, ts = cell(r.TWFE_beta, r.TWFE_se, 0.01 if r.TWFE_sig else 0.5)
-        cb, cs_ = cell(r.CS_ATT, r.CS_se, 0.01 if r.CS_sig else 0.5)
-        rows.append(f"{esc(r.outcome)} & {tb} & {u:.4f} & {cb} & {esc(r.verdict)} \\\\")
-        rows.append(f" & {ts} & & {cs_} & \\\\")
-        rows.append("\\addlinespace")
-    foot = ["Treatment & \\multicolumn{3}{c}{\\texttt{tr\\_e2\\_add\\_absorb}} & \\\\",
-            "Covariates & Step-8 & None & Step-8 & \\\\",
-            "Inference & Cluster & \\multicolumn{2}{c}{300-rep bootstrap} & \\\\"]
-    tex.append(table(
-        "A6 --- Callaway--Sant'Anna versus TWFE, treatment held fixed", "tab:A6", 4,
-        "\\textbf{TWFE} & \\textbf{CS uncond.} & \\textbf{CS adjusted} & \\textbf{Verdict}",
-        rows, foot,
-        "All columns use \\texttt{tr\\_e2\\_add\\_absorb}, the binary absorbing treatment the "
-        "Callaway--Sant'Anna cohort definition implies, so the \\textit{only} difference "
-        "between (1) and (3) is the estimator. Column (3) applies outcome-regression "
-        "adjustment on the step-8 covariates measured at base period $g-1$, fitted on the "
-        "clean control group only --- both sides therefore assume parallel trends "
-        "\\textit{conditionally}. \\textbf{Under staggered adoption TWFE uses already-treated "
-        "counties as controls for later-treated ones, and those comparisons can carry negative "
-        "weights}; Callaway--Sant'Anna removes them by construction. A \\textit{TWFE-only} "
-        "verdict is the signature of that problem. Six of seven outcomes are significant under "
-        "TWFE and none survives."))
+# ------------------------------------------------------------- A6 ------------
+a6 = latest(T4A, "*_A6_cs_aggregated.csv")
+if a6 is not None and grid is not None:
+    ov = a6[a6.agg_level == "overall_ATT"].copy()
+    ov["p"] = [pnorm(b, s) for b, s in zip(ov.att, ov.se_state)]
+    d2 = grid[(grid.registry == "A2") & (grid.treatment_id == "E2")].set_index("outcome")
+    L = [r"\begin{tabular}{l*{7}{c}}", r"\toprule", HEAD7,
+         "TWFE (county $+$ year FE) & " + " & ".join(coef(d2.loc[o, "beta"], d2.loc[o, "p_state"], DEC[o]) for o in OUTS) + r" \\",
+         " & " + " & ".join(se(d2.loc[o, "se_state"], DEC[o]) for o in OUTS) + r" \\ \addlinespace"]
+    for arm, lab in [("unconditional", "Callaway--Sant'Anna, unconditional"),
+                     ("covariate-adjusted", "Callaway--Sant'Anna, covariate-adjusted")]:
+        x = ov[ov.arm == arm].set_index("outcome")
+        L.append(lab + " & " + " & ".join(coef(x.loc[o, "att"], x.loc[o, "p"], DEC[o]) if o in x.index else "" for o in OUTS) + r" \\")
+        L.append(" & " + " & ".join(se(x.loc[o, "se_state"], DEC[o]) if o in x.index else "" for o in OUTS) + r" \\ \addlinespace")
+    x = ov[ov.arm == "covariate-adjusted"].set_index("outcome")
+    L += [r"\midrule",
+          "Observations (TWFE) & " + " & ".join(f"{int(d2.loc[o,'N']):,}" for o in OUTS) + r" \\",
+          "Switching counties (TWFE) & " + " & ".join(f"{int(d2.loc[o,'n_switchers']):,}" for o in OUTS) + r" \\",
+          "Cohorts used (CS) & " + " & ".join(f"{int(x.loc[o,'n_cohorts'])}" if o in x.index else "" for o in OUTS) + r" \\",
+          r"\bottomrule", r"\end{tabular}"]
+    written.append(save("tab_A6.tex", "\n".join(L)))
 
-BODY = os.path.join(OUT, "_BODY_regressions.tex")
-open(BODY, "w").write("\n".join(tex[1:]))
-print(f"wrote {BODY}")
+# ------------------------------------------------------------- A7 LP-DiD -----
+a7 = latest(T4A, "*_A7_lpdid.csv")
 
-tex.append("\\end{document}\n")
-p = os.path.join(OUT, "REGRESSION_TABLES.tex")
-open(p, "w").write("\n".join(tex))
-print(f"wrote {p}")
-subprocess.run(["pdflatex","-interaction=nonstopmode","-output-directory",OUT,p],
-               capture_output=True, text=True)
-pdf = os.path.join(OUT, "REGRESSION_TABLES.pdf")
-print(f"compiled -> {pdf}" if os.path.exists(pdf) else "PDF COMPILE FAILED")
-for ext in (".aux",".log",".out"):
-    f = os.path.join(OUT, "REGRESSION_TABLES"+ext)
-    if os.path.exists(f): os.remove(f)
+
+def lp_table(df_, horizons, arm):
+    L = [r"\begin{tabular}{l*{7}{c}}", r"\toprule", HEAD7]
+    for h in horizons:
+        r = df_[(df_.arm == arm) & (df_.h == h)].set_index("outcome")
+        lab = f"$h={h}$" if h < 0 else f"$h=+{h}$" if h > 0 else "$h=0$"
+        L.append(lab + " & " + " & ".join(coef(r.loc[o, "beta"], r.loc[o, "p"], DEC[o]) if o in r.index else "" for o in OUTS) + r" \\")
+        L.append(" & " + " & ".join(se(r.loc[o, "se"], DEC[o]) if o in r.index else "" for o in OUTS) + r" \\")
+    r = df_[(df_.arm == arm) & (df_.h == 0)].set_index("outcome")
+    L += [r"\midrule",
+          "Treated counties ($h=0$) & " + " & ".join(f"{int(r.loc[o,'n_treated']):,}" if o in r.index else "" for o in OUTS) + r" \\",
+          "Clean controls ($h=0$) & " + " & ".join(f"{int(r.loc[o,'n_control']):,}" if o in r.index else "" for o in OUTS) + r" \\",
+          "Event-year FE & " + " & ".join(["Yes"] * 7) + r" \\",
+          "Controls at $t-1$ & " + " & ".join(["Yes" if arm != "no controls" else "No"] * 7) + r" \\",
+          r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(L)
+
+
+if a7 is not None and len(a7):
+    written.append(save("tab_A7_lpdid.tex", lp_table(a7, [-5, -3, -2, 0, 2, 5], "step-8 at t-1")))
+
+# ------------------------------------------------------------- VIF -----------
+vif = latest(T4A, "*_VIF_audit.csv")
+TLAB = {"T1": "T1 presence", "T2": "T2 count", "T3": "T3 per 10,000", "T4": r"T4 $\log(1+$count$)$", "E2": "E2 absorbing"}
+
+
+def vif_table(model, outs, treats, head, show_treat=True):
+    d = vif[vif.model == model]
+    L = [r"\begin{tabular}{l*{%d}{c}}" % len(outs), r"\toprule", head]
+    for t in treats:
+        r = d[d.treatment_id == t].set_index("outcome")
+        L.append(TLAB[t] + " & " + " & ".join(f"{r.loc[o,'vif_max']:.2f}" if o in r.index else "" for o in outs) + r" \\")
+        if show_treat:
+            L.append(" & " + " & ".join(f"({r.loc[o,'vif_treat']:.2f})" if o in r.index else "" for o in outs) + r" \\")
+    L += [r"\midrule", "Max VIF in table & \\multicolumn{%d}{c}{%.2f}" % (len(outs), d.vif_max.max()) + r" \\",
+          r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(L)
+
+
+if vif is not None:
+    for m in ["A1", "A2"]:
+        written.append(save(f"tab_vif_{m}.tex", vif_table(m, OUTS, ["T1", "T2", "T3", "T4", "E2"], HEAD7)))
+    written.append(save("tab_vif_A4.tex", vif_table("A4", ["Poor MH Days", "Frequent Mental Distress"],
+                        ["T1", "T2", "T3", "T4"], " & Poor MH days & Freq.\\ mental distress \\\\\n & (1) & (2) \\\\\n\\midrule")))
+    written.append(save("tab_vif_A5.tex", vif_table("A5", OUTS, ["E2"], HEAD7, show_treat=False)))
+
+# ------------------------------------------------------------- Conley --------
+con = latest(T4A, "*_A2_conley_se.csv")
+if con is not None and grid is not None:
+    L = [r"\begin{tabular}{l*{7}{c}}", r"\toprule", HEAD7]
+    for t in ["T1", "E2"]:
+        g = grid[(grid.registry == "A2") & (grid.treatment_id == t)].set_index("outcome")
+        c = con[con.treatment_id == t].set_index("outcome")
+        L.append(f"\\multicolumn{{8}}{{l}}{{\\textit{{{TLAB[t]}}}}} \\\\")
+        L.append(r"$\hat\beta$ & " + " & ".join(f"{g.loc[o,'beta']:,.{DEC[o]}f}" for o in OUTS) + r" \\")
+        for lab, colname in [("State cluster", "se_state"), ("Conley 100 km", "se_conley_100km"),
+                             ("Conley 250 km", "se_conley_250km"), ("Conley 500 km", "se_conley_500km")]:
+            src = g if colname == "se_state" else c
+            L.append(lab + " & " + " & ".join(se(src.loc[o, colname], DEC[o]) if o in src.index else "" for o in OUTS) + r" \\")
+        L.append(r"\addlinespace")
+    L += [r"\bottomrule", r"\end{tabular}"]
+    written.append(save("tab_A2_conley.tex", "\n".join(L)))
+
+# ------------------------------------------------------------- script4r ------
+r0 = latest(T4R, "*_R0_entry_events.csv")
+if r0 is not None:
+    L = [r"\begin{tabular}{lccc}", r"\toprule",
+         r"Year & First entry & Any increase & Any decrease \\", r"\midrule"]
+    for _, r in r0.iterrows():
+        if str(r.year) == "total":
+            L.append(r"\midrule")
+        L.append(f"{r.year} & {int(r.counties_first_entry)} & {int(r.counties_any_increase)} & {int(r.counties_any_decrease)} \\\\")
+    L += [r"\bottomrule", r"\end{tabular}"]
+    written.append(save("tab_R0_entry_events.tex", "\n".join(L)))
+tw = latest(T4R, "*_R1_R2_twfe.csv")
+if tw is not None:
+    L = [r"\begin{tabular}{l*{7}{c}}", r"\toprule", HEAD7]
+    for i, (mod, title, lab) in enumerate([("R1", "Panel A. Number of slaughter plants (F1), 2017--2023", "Slaughter plants"),
+                                           ("R2", "Panel B. Entry of an additional plant, absorbing (F2), 2012--2023", "Post entry (0/1)")]):
+        r = tw[tw.model == mod].set_index("outcome")
+        L.append(f"\\multicolumn{{8}}{{l}}{{\\textit{{{title}}}}} \\\\")
+        L.append(lab + " & " + " & ".join(coef(r.loc[o, "beta"], r.loc[o, "p_state"], DEC[o]) if o in r.index else "" for o in OUTS) + r" \\")
+        L.append(" & " + " & ".join(se(r.loc[o, "se_state"], DEC[o]) if o in r.index else "" for o in OUTS) + r" \\")
+        for rl, cname, fmt in [("Observations", "N", "{:,.0f}"), ("Switching counties", "n_switchers", "{:,.0f}"),
+                               (r"MDE (within-county SD)", "MDE_sd_within", "{:.3f}")]:
+            L.append(rl + " & " + " & ".join(fmt.format(r.loc[o, cname]) if o in r.index else "" for o in OUTS) + r" \\")
+        if i == 0:
+            L.append(r"\addlinespace")
+    yes = " & ".join(["Yes"] * 7)
+    L += [r"\midrule", "Controls & " + yes + r" \\", "County FE & " + yes + r" \\", "Year FE & " + yes + r" \\",
+          r"\bottomrule", r"\end{tabular}"]
+    written.append(save("tab_R1_R2.tex", "\n".join(L)))
+r4 = latest(T4R, "*_R4_lpdid.csv")
+if r4 is not None and len(r4):
+    written.append(save("tab_R4_lpdid.tex", lp_table(r4, [-4, -3, -2, 0, 2, 4], "step-8 at t-1")))
+
+print("written:", written)
+
+# ------------------------------------------------------------- document ------
+NOTES = {
+ "tab_A2.tex": ("Large dairy CAFOs and county outcomes: two-way fixed effects (A2)",
+   "Each coefficient is from a separate regression of the column outcome on the panel's treatment, county and year fixed effects and the step-8 controls (median household income, unemployment, \\% 65 and older, \\% Hispanic, \\% below 18, children in poverty, \\% Asian/AIAN/NHPI, \\% Black). T2 and T4 also include log population. Only switching counties identify the coefficient. Standard errors clustered by state in parentheses."),
+ "tab_A1.tex": ("Large dairy CAFOs and county outcomes: pooled with state fixed effects (A1)",
+   "As the A2 table, with state rather than county fixed effects. Standard errors clustered by state in parentheses."),
+ "tab_A4.tex": ("Dairy CAFOs, slaughterhouses and mental health, 2017--2023 (A4)",
+   "Each column is one regression of the outcome on dairy measure $D$, FSIS-plant indicator $F$ and $D\\times F$, with county and year fixed effects and step-8 controls. The only agricultural-census transition inside 2017--2023 is 2022; crime and mortality outcomes end earlier and are omitted. Standard errors clustered by state in parentheses."),
+ "tab_A5_pretrend.tex": ("Event-study pre-trend tests (A5)",
+   "Pre-period event-study coefficients ($e<-1$) significant at 5\\%, state-clustered. The second row per outcome adds 2000 log population interacted with year. The placebo uses log population as the outcome."),
+ "tab_A6.tex": ("Two-way fixed effects versus Callaway--Sant'Anna, absorbing treatment E2 (A6)",
+   "All rows use E2. CS: cohort-size-weighted average of post-treatment ATT$(g,t)$ with not-yet- and never-treated controls; standard errors from a 300-replication state cluster bootstrap."),
+ "tab_A7_lpdid.tex": ("LP-DiD, absorbing treatment E2 (A7)",
+   "Each cell is one stacked regression of $Y_{t+h}-Y_{t-1}$ on a newly-treated indicator with event-year fixed effects and step-8 controls at $t-1$, on newly treated and clean (not-yet- and never-treated) counties. $h<-1$ are pre-trend tests. Standard errors clustered by state."),
+ "tab_A2_conley.tex": ("Spatial standard errors for A2",
+   "Conley standard errors with a Bartlett kernel within year at the stated cutoff, plus serial correlation within county."),
+ "tab_R0_entry_events.tex": ("Slaughterhouse entry events by year",
+   "Counties whose number of FSIS slaughter establishments rises, by year. First entry defines the F2 cohort."),
+ "tab_R1_R2.tex": ("Slaughterhouses as the treatment (R1, R2)",
+   "County and year fixed effects, step-8 controls, standard errors clustered by state. MDE at 80\\% power, $2.80\\times$SE, in within-county SDs of the outcome."),
+ "tab_R4_lpdid.tex": ("LP-DiD, slaughterhouse entry (R4)",
+   "As the A7 table, with cohorts defined by first slaughterhouse entry (2018--2023)."),
+}
+body = []
+for name in ["tab_A2.tex", "tab_A1.tex", "tab_A4.tex", "tab_A5_pretrend.tex", "tab_A6.tex",
+             "tab_A7_lpdid.tex", "tab_A2_conley.tex", "tab_R0_entry_events.tex", "tab_R1_R2.tex", "tab_R4_lpdid.tex"]:
+    if name not in written:
+        continue
+    cap, note = NOTES[name]
+    body.append("\\begin{table}[p]\\centering\n\\caption{%s}\n\\adjustbox{max width=\\linewidth}{\\input{tables/%s}}\n"
+                "\\par\\vspace{4pt}\\begin{minipage}{\\linewidth}\\footnotesize\\textit{Notes:} %s %s.\\end{minipage}\n\\end{table}\n"
+                % (cap, name, note, STARNOTE))
+open(os.path.join(LATEX_OUT, "_BODY_regressions.tex"), "w").write("\n".join(body))
+doc = ("\\documentclass[11pt]{article}\n\\usepackage[margin=1in]{geometry}\n\\usepackage{booktabs,amsmath,caption,adjustbox}\n"
+       "\\captionsetup{labelfont=bf,font=small,skip=6pt}\n\\begin{document}\n" + "\n".join(body) + "\\end{document}\n")
+dp = os.path.join(LATEX_OUT, "REGRESSION_TABLES.tex")
+open(dp, "w").write(doc)
+try:
+    subprocess.run(["pdflatex", "-interaction=nonstopmode", "REGRESSION_TABLES.tex"], cwd=LATEX_OUT,
+                   capture_output=True, timeout=120)
+    print("compiled:", os.path.join(LATEX_OUT, "REGRESSION_TABLES.pdf"))
+except Exception as e:
+    print("pdflatex not run:", e)
