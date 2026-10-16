@@ -524,6 +524,20 @@ SPEC_EXTRA_REGRESSORS = {
 }
 
 # ---------------------------------------------------------------------------
+# REPORTING SET -- what the tables, slides and figures show (2026-10-15)
+# ---------------------------------------------------------------------------
+# Team feedback narrowed what is REPORTED. It does NOT change what is ESTIMATED:
+# the estimation scripts (4a, 4b, 4r) still compute every treatment, both FE
+# structures, all three SEs, both CS arms and LP-DiD, so nothing is lost and the
+# full results stay available as robustness. Only the reporting scripts (4n, 4q
+# and the figures in 4a) read these constants to decide what goes in the main
+# exhibits; everything else is written to separate robustness tables.
+REPORT_TREATMENTS = ["T1", "T3", "T4", "E2"]    # T2 not reported
+REPORT_FE         = "A2"                        # county + year FE; A1 (state FE) not reported
+REPORT_SE         = "state"                     # se_state / p_state; county and hetero not reported
+REPORT_CS_ARM     = "covariate-adjusted"        # unconditional CS not reported
+
+# ---------------------------------------------------------------------------
 # A3 CONDITIONING SET -- other large CAFO types (added 2026-09-28)
 # ---------------------------------------------------------------------------
 # The horse race: is the dairy coefficient DAIRY, or is it "this county has a

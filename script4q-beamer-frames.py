@@ -23,12 +23,19 @@ ORDER
     20-21 VIF
     22-23 balance / detectable effect
 
-Output -> LATEX_OUT/BEAMER_FRAMES.tex
+REPORTED vs ROBUSTNESS (2026-10-15, team feedback). Frames in BEAMER_FRAMES.tex
+show only the reported set (script4_treatment.REPORT_*): T1, T3, T4, E2; county +
+year FE; state-clustered SE; CS covariate-adjusted. Frames for what is no longer
+reported (A1 pooled state-FE) go to BEAMER_FRAMES_robustness.tex. Estimation is
+unchanged. Hard-coded sample figures in frame text describe the 2026-10-12 run.
+
+Output -> LATEX_OUT/BEAMER_FRAMES.tex, LATEX_OUT/BEAMER_FRAMES_robustness.tex
 """
 import warnings; warnings.filterwarnings("ignore")
 import glob
 import numpy as np, pandas as pd
-from script4_treatment import db_data, COVARIATE_ORDER, os, date, LATEX_OUT
+from script4_treatment import (db_data, COVARIATE_ORDER, os, date, LATEX_OUT,
+                               REPORT_TREATMENTS, REPORT_CS_ARM)
 
 OUT = LATEX_OUT   # run 2 (2026-10-12)
 T4A = os.path.join(db_data, "output", "tables", "script4a")
@@ -62,6 +69,7 @@ def tbl(colspec, header, rows, note, height="0.62"):
             + "\n".join(rows) + "\n\\bottomrule\n\\end{tabular}}\n\\end{center}\n"
             f"\\vspace{{-2pt}}\n{{\\tiny {note}}}\n")
 
+FR = []   # frames for specifications outside the reported set
 F = ["% ==========================================================================\n"
      "% BEAMER FRAMES -- script4q-beamer-frames.py\n"
      f"% Panel 2026-09-23 | step-8 controls | generated {date.today()}\n"
@@ -76,7 +84,7 @@ F.append(frame("$D_i$: treatment definitions", r"""\vspace{-4pt}
 ID & Name & Definition & Panel column \\
 \midrule
 \textbf{T1} & Presence & $1$ if the county has $\geq 1$ large dairy operation that year & \texttt{tr\_e1\_lg\_bin} \\[0.3em]
-\textbf{T2} & Count & Raw number of large dairy operations & \texttt{tr\_i3\_lg\_count} \\[0.3em]
+\textbf{T2}$^\dagger$ & Count & Raw number of large dairy operations & \texttt{tr\_i3\_lg\_count} \\[0.3em]
 \textbf{T3} & Per capita & Large dairy operations per 10{,}000 residents & \texttt{tr\_i4\_lg\_p10k} \\[0.3em]
 \textbf{T4} & Log(count) & $\log(1+\text{count})$ & \texttt{tr\_c3\_log\_lg} \\
 \bottomrule
@@ -86,6 +94,7 @@ ID & Name & Definition & Panel column \\
 {\footnotesize
 \textbf{Size:} large $=$ 500$+$ milk cows (USDA NASS top inventory bin). \emph{Not} EPA's 700$+$ regulatory threshold --- USDA publishes no 700 cutpoint.\\[0.3em]
 \textbf{$\log(1+\cdot)$:} the $+1$ is required, not cosmetic --- 81.4\% of county-years have zero large dairy operations and plain $\log$ would discard them.\\[0.3em]
+$^\dagger$ T2 is estimated but not reported (robustness only).\\[0.3em]
 \textbf{Specification regressors:} T2 and T4 enter $\log$ population; a raw or logged count otherwise partly picks up county size. T1 is binary and T3 is already population-normalised.}"""))
 
 F.append(frame("$D_i$: timing of treatment variation", r"""  Treatment is measured at agricultural census waves and forward-filled between them.
@@ -190,12 +199,12 @@ if b is not None:
     for _, r in h[h.step <= 8].iterrows():
         nm = "(treatment only)" if r.step == 0 else r.covariate_added.replace("_", r"\_").replace("%", r"\%")
         rows.append(f"{int(r.step)} & \\texttt{{\\scriptsize {nm}}} & {r.beta:.4f} & "
-                    f"({r.se_county:.4f}) & {int(r.N):,} & {int(r.n_switchers):,} & {r.vif_max:.2f} \\\\")
+                    f"({r.se_state:.4f}) & {int(r.N):,} & {int(r.n_switchers):,} & {r.vif_max:.2f} \\\\")
     F.append(frame("Covariates entered one at a time", tbl(
         "rlrrrrr",
         "Step & Covariate added & $\\beta$ & (SE) & $N$ & Switchers & Max VIF \\\\", rows,
-        r"T1, Poor MH Days, county $+$ year FE, county-clustered SE. "
-        r"The full run covers 4 treatments $\times$ 7 outcomes $\times$ 2 FE structures "
+        r"T1, Poor MH Days, county $+$ year FE, state-clustered SE. "
+        r"The run estimates 4 treatments $\times$ 7 outcomes $\times$ 2 FE structures "
         r"$\times$ 15 steps $=$ 840 regressions. "
         r"Sample and switcher count are constant through step 8; from step 9 partial-coverage "
         r"covariates enter and the sample falls, so later steps confound the covariate with "
@@ -264,7 +273,7 @@ NIBRS curated total & Arrests per 100{,}000 & NIBRS & 2000--21 & 309.94 & 271.38
 # =========================================================== 10+. MODELS
 g = latest(T4A, "*_A1_A2_treatment_grid.csv")
 
-F.append(frame("A1: pooled cross-section --- specification", r"""  $$Y_{it} = \beta D_{it} + X_{it}\gamma + \alpha_{s(i)} + \delta_t + \varepsilon_{it}$$
+FR.append(frame("A1: pooled cross-section --- specification", r"""  $$Y_{it} = \beta D_{it} + X_{it}\gamma + \alpha_{s(i)} + \delta_t + \varepsilon_{it}$$
   \vspace{0.3em}
   \begin{itemize}\footnotesize
     \item \textbf{State} $+$ year fixed effects
@@ -287,16 +296,20 @@ if g is not None:
          r"(T1 253, T3 707), so $N$ alone does not describe the evidence behind a column.")]:
         v = g[g.registry == reg]
         rows = []
-        for tid in ["T1", "T2", "T3", "T4", "E2"]:
+        # A2 (reported) shows the reported treatments; A1 (robustness) shows all five.
+        shown = ([t for t in ["T1", "T2", "T3", "T4", "E2"] if t in REPORT_TREATMENTS]
+                 if reg == "A2" else ["T1", "T2", "T3", "T4", "E2"])
+        for tid in shown:
             cells = [cf(v[(v.treatment_id==tid)&(v.outcome==o)].iloc[0].beta,
                         v[(v.treatment_id==tid)&(v.outcome==o)].iloc[0].se_state,
                         v[(v.treatment_id==tid)&(v.outcome==o)].iloc[0].p_state)
                      if len(v[(v.treatment_id==tid)&(v.outcome==o)]) else "---" for o in OUTS]
             rows.append(f"\\textbf{{{tid}}} & " + " & ".join(cells) + " \\\\")
         sw = [f"{int(v[(v.treatment_id==t)&(v.outcome=='Poor MH Days')].iloc[0].n_switchers):,}"
-              for t in ["T1","T2","T3","T4","E2"]]
-        rows += ["\\midrule", "Switchers & \\multicolumn{%d}{l}{\\tiny T1 %s \; T2 %s \; T3 %s \; T4 %s \; E2 %s \\quad (Poor MH Days)} \\\\" % (len(OUTS), *sw)]
-        F.append(frame(title, tbl("l"+"r"*len(OUTS),
+              for t in shown]
+        rows += ["\\midrule", "Switchers & \\multicolumn{%d}{l}{\\tiny %s \\quad (Poor MH Days)} \\\\"
+                 % (len(OUTS), " \\; ".join(f"{t} {n}" for t, n in zip(shown, sw)))]
+        (F if reg == "A2" else FR).append(frame(title, tbl("l"+"r"*len(OUTS),
                                   " & " + " & ".join(SHORT[o] for o in OUTS) + " \\\\",
                                   rows, note)))
 
@@ -330,6 +343,7 @@ F.append(frame("A4: dairy $\\times$ slaughterhouse --- specification", r"""  $$Y
   Those five outcomes are suppressed rather than reported: with zero switchers county FE absorbs the dairy term and the coefficient is not interpretable.}"""))
 
 a4 = latest(T4A, "*_A4_fsis_interaction.csv")
+A4_SHOWN = [t for t in ["T1", "T2", "T3", "T4"] if t in REPORT_TREATMENTS]
 if a4 is not None and "identified" in a4.columns:
     ok = a4[a4.identified]
     rows = []
@@ -338,11 +352,11 @@ if a4 is not None and "identified" in a4.columns:
                     ok[(ok.treatment_id==t)&(ok.outcome==o)].iloc[0].se_state,
                     ok[(ok.treatment_id==t)&(ok.outcome==o)].iloc[0].p_state)
                  if len(ok[(ok.treatment_id==t)&(ok.outcome==o)]) else "---"
-                 for t in ["T1","T2","T3","T4"]]
+                 for t in A4_SHOWN]
         rows.append(f"{SHORT[o]} & " + " & ".join(cells) + " \\\\")
-    rows += ["\\midrule", "$N$ & \\multicolumn{4}{l}{\\tiny 17{,}975 \\quad switchers 89 (T1)} \\\\"]
+    rows += ["\\midrule", "$N$ & \\multicolumn{%d}{l}{\\tiny 17{,}975 \\quad switchers 89 (T1)} \\\\" % len(A4_SHOWN)]
     F.append(frame("A4: dairy $\\times$ slaughterhouse --- results", tbl(
-        "lrrrr", " & T1 & T2 & T3 & T4 \\\\", rows,
+        "l" + "r" * len(A4_SHOWN), " & " + " & ".join(A4_SHOWN) + " \\\\", rows,
         r"Coefficient on the interaction. County $+$ year FE, step-8 controls, state-clustered SE. "
         r"2017--2023. $^{***}p<0.01$, $^{**}p<0.05$, $^{*}p<0.10$. Five outcomes (despair and all four crime measures) "
         r"have zero treatment switchers in this window and are not shown.")))
@@ -384,7 +398,7 @@ F.append(frame("A6: Callaway--Sant'Anna --- specification", r"""  $$\mathrm{ATT}
     \item Inference: 300-replication cluster bootstrap over states
   \end{itemize}
   \vspace{0.4em}
-  {\footnotesize \textbf{Two arms.} \emph{Unconditional}: raw difference of long differences; parallel trends assumed unconditionally. \emph{Covariate-adjusted}: outcome regression on the step-8 covariates at base period $g-1$, fitted on the clean control group only, so parallel trends is assumed conditionally --- matching A2.\\[0.3em]
+  {\footnotesize \textbf{Two arms estimated; the covariate-adjusted arm is reported.} \emph{Unconditional}: raw difference of long differences; parallel trends assumed unconditionally. \emph{Covariate-adjusted}: outcome regression on the step-8 covariates at base period $g-1$, fitted on the clean control group only, so parallel trends is assumed conditionally --- matching A2.\\[0.3em]
   Cohorts observed: 2007 (284 counties), 2012 (142), 2017 (101), 2022 (45). A cohort is usable only if $g-1$ falls inside the outcome's year range, so CHR outcomes beginning in 2010 lose the 2007 cohort.}"""))
 
 cmp_ = latest(T4A, "*_HEADLINE_twfe_vs_cs.csv")
@@ -392,15 +406,11 @@ csag = latest(T4A, "*_A6_cs_aggregated.csv")
 if cmp_ is not None:
     rows = []
     for _, r in cmp_.iterrows():
-        u = np.nan
-        if csag is not None and "arm" in csag.columns:
-            m = csag[(csag.agg_level=="overall_ATT")&(csag.outcome==r.outcome)&(csag.arm=="unconditional")]
-            if len(m): u = float(m.att.iloc[0])
         rows.append(f"{SHORT[r.outcome]} & "
                     f"{cf(r.TWFE_beta, r.TWFE_se, 0.01 if r.TWFE_sig else 0.5)} & "
-                    f"{u:.3f} & {cf(r.CS_ATT, r.CS_se, 0.01 if r.CS_sig else 0.5)} \\\\")
+                    f"{cf(r.CS_ATT, r.CS_se, 0.01 if r.CS_sig else 0.5)} \\\\")
     F.append(frame("A6: Callaway--Sant'Anna --- results", tbl(
-        "lrrr", " & TWFE & CS unconditional & CS adjusted \\\\", rows,
+        "lrr", " & TWFE & CS adjusted \\\\", rows,
         r"All columns use \texttt{tr\_e2\_add\_absorb}, so treatment definition is held fixed and "
         r"only the estimator varies. CS adjusted conditions on the same step-8 set as the TWFE "
         r"column. 300-rep state cluster bootstrap. $^{**}p<0.05$. "
@@ -449,7 +459,7 @@ if va is not None:
 # =========================================================== BALANCE
 bal = latest(OUT, "*_balance_panel.csv")
 if bal is not None:
-    for tid in ["T1", "T2", "T3", "T4", "E2"]:
+    for tid in [t for t in ["T1", "T2", "T3", "T4", "E2"] if t in REPORT_TREATMENTS]:
         v = bal[bal.treatment_id == tid]
         if v.empty: continue
         lab = v.treatment.iloc[0]
@@ -467,5 +477,6 @@ if bal is not None:
 
 p = os.path.join(OUT, "BEAMER_FRAMES.tex")
 open(p, "w").write("".join(F))
+open(os.path.join(OUT, "BEAMER_FRAMES_robustness.tex"), "w").write("".join(FR))
 n = sum(1 for x in F if x.startswith("\\begin{frame}"))
 print(f"wrote {p}\n  {n} frames")

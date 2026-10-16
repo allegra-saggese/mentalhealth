@@ -91,7 +91,7 @@ from scipy.stats import norm as _norm
 
 from script4_treatment import (
     load_panel, OUTCOMES, TREATMENTS, CORE_TREATMENTS, CORE_TREATMENT_LABELS,
-    SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER,
+    SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, REPORT_TREATMENTS,
     db_data, figs_dir, tables_dir, os, date,
 )
 from functions import latest_file_glob
@@ -909,13 +909,16 @@ plt.rcParams.update({"figure.dpi": 110, "font.size": 9})
 
 outs = [o for o in OUTCOMES if o in set(grid.outcome)]
 
-# --- F1: A2 within coefficients, step-8 controls, all treatments -------------
+# --- F1: A2 within coefficients, step-8 controls, REPORTED treatments ---------
+# The estimation above covers every treatment; the figure shows the reported set
+# (script4_treatment.REPORT_TREATMENTS, 2026-10-15).
 if len(outs):
     n = len(outs); ncol = 4; nrow = int(np.ceil(n / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 3.2 * nrow), squeeze=False)
     for ax, okey in zip(axes.ravel(), outs):
         v = grid[(grid.registry == "A2") & (grid.outcome == okey)
-                 & (grid.control_set.str.startswith("step8"))].sort_values("treatment_id")
+                 & (grid.control_set.str.startswith("step8"))
+                 & grid.treatment_id.isin(REPORT_TREATMENTS)].sort_values("treatment_id")
         if v.empty:
             ax.axis("off"); continue
         y = np.arange(len(v))
