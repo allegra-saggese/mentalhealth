@@ -48,6 +48,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from packages import db_data  # noqa: E402
 
+# add in key line (will remov ewhen public)
+USDA_NASS_API_KEY = "30643212-7739-359A-B451-0EAD3D345DB9"
+
 RAW_DIR = os.path.join(db_data, "raw", "usda")
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
 YEAR = 2022
@@ -59,12 +62,20 @@ CLASSES = {"cows, milk": "inventory of milk cows",
 def nass(endpoint, params):
     req = Request(f"{NASS_BASE}{endpoint}/?{urlencode(params)}",
                   headers={"User-Agent": "mentalhealth-ag-script/1.0"})
-    try:
-        with urlopen(req) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        # The URL carries the key, so report only the status and NASS's message.
-        raise RuntimeError(f"NASS API HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:300]}") from None
+    print(f"  requesting NASS {endpoint} ...", flush=True)
+    for attempt in (1, 2, 3):
+        try:
+            # timeout: without one, a stalled NASS connection waits forever.
+            with urlopen(req, timeout=90) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # The URL carries the key, so report only the status and NASS's message.
+            raise RuntimeError(f"NASS API HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:300]}") from None
+        except (TimeoutError, urllib.error.URLError, OSError) as e:
+            print(f"  attempt {attempt} failed ({type(e).__name__}); "
+                  f"{'retrying' if attempt < 3 else 'giving up'}", flush=True)
+            time.sleep(3)
+    raise RuntimeError(f"NASS {endpoint} did not respond after 3 attempts of 90 s")
 
 
 def pull_totals(key):
