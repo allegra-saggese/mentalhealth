@@ -19,7 +19,11 @@ codes 158 counties that demonstrably HAD a large dairy CAFO in 2002 as untreated
 2000-01 -- 7.1% of the Deaths of Despair estimating sample.
 
 RULE ENFORCED HERE: treatment is NaN wherever the underlying CAFO count is NaN.
-There is no fillna(0) anywhere in this module.
+UPDATED 2026-10-16: a blank CAFO count from the first census year (2002) onward is
+first set to ZERO in load_panel (no census row = no operations; verified against
+NASS, see the block in load_panel). Only 2000-01 stay NaN, because they were never
+measured. The fillna(0) that caused the 158-county problem was applied to ALL years
+including 2000-01; this one is not.
 
 Size definition
 ---------------
@@ -256,6 +260,26 @@ def load_panel(animal="dairy", verified_waves_only=False):
     sm_ = f"cafo_{animal}_small"
     tot = f"cafo_{animal}_total"
 
+    # ---- MISSING CAFO COUNT = ZERO, FROM THE FIRST CENSUS YEAR (2026-10-16) ---
+    # A blank cafo_{animal}_* count in the panel means the county has CAFO rows for
+    # some other species but no row for this one (script1b zero-fills only when a
+    # county has no CAFO row for ANY species). The ag census is exhaustive, so no
+    # row means no operations. Checked against NASS for dairy in all five census
+    # waves: every county with milk-cow operations has a bin row, a head-count row
+    # and a NASS total, and bins sum exactly to the NASS county total (2022 total
+    # pulled 2026-10-16: 2,362 of 2,362 counties, 0 suppressed). None of the blank
+    # cells has any NASS milk-cow record.
+    # 2000-01 stay NaN: no census was taken in them in this pipeline, so a blank is
+    # an unmeasured year, not an absent operation. Filling them would code the 158
+    # counties that had a large dairy in 2002 as untreated in 2000-01 (see above).
+    _cafo_cols = [c for c in df.columns
+                  if c.startswith(f"cafo_{animal}_") and pd.api.types.is_numeric_dtype(df[c])]
+    _fill = (df["year"] >= min(CENSUS_YEARS))
+    _n_filled = int((df.loc[_fill, _cafo_cols].isna()).to_numpy().sum())
+    df.loc[_fill, _cafo_cols] = df.loc[_fill, _cafo_cols].fillna(0)
+    print(f"load_panel: {_n_filled:,} missing cafo_{animal}_* values set to 0 "
+          f"(year >= {min(CENSUS_YEARS)}); 2000-01 left missing")
+
     df["log_pop"] = np.log(df["population"].where(df["population"] > 0))
 
     # ---- OUTCOME CONSTRUCTION (moved here from script4-model-test.py) -------
@@ -377,6 +401,7 @@ def load_panel(animal="dairy", verified_waves_only=False):
     df["cond_smbase_x_t"] = df["cond_log_sm_base"] * (df["year"] - df["year"].min())
 
     df.attrs["panel_path"] = path
+    df.attrs["n_cafo_values_zero_filled"] = _n_filled   # set here: attrs are lost on merge
     df.attrs["events"] = ev
     return df
 

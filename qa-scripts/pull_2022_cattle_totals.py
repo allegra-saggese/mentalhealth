@@ -48,9 +48,6 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from packages import db_data  # noqa: E402
 
-# add in key line (will remov ewhen public)
-USDA_NASS_API_KEY = "30643212-7739-359A-B451-0EAD3D345DB9"
-
 RAW_DIR = os.path.join(db_data, "raw", "usda")
 NASS_BASE = "https://quickstats.nass.usda.gov/api/"
 YEAR = 2022
@@ -139,7 +136,8 @@ if __name__ == "__main__":
 
     key = os.environ.get("USDA_NASS_API_KEY")
     if not key:
-        sys.exit("USDA_NASS_API_KEY is not set in the environment. Export it and rerun.")
+        sys.exit("USDA_NASS_API_KEY is not set in the environment. Export it (Terminal) or set "
+                 "os.environ[\"USDA_NASS_API_KEY\"] in the Spyder console, then rerun.")
 
     totals = pull_totals(key)
     if totals.empty:

@@ -20,10 +20,12 @@ Species      dairy, beef, hogs, chickens    (the four modelled)
              multi-species. It appears only in the appendix nesting check.
 Present      cafo_{species}_large > 0 in the county-year. "Large" is the USDA NASS
              top size bin for that species (500+ milk cows for dairy).
-Missing      a missing large-CAFO count is treated as ZERO (no large operation),
-             not as a dropped observation. Every county-year stays in every table.
-             The number of values recoded this way, by species, is written to
-             <date>_species_nan_as_zero.csv so the recode is visible.
+Missing      from 2002 on, a missing large-CAFO count is treated as ZERO (no large
+             operation), not as a dropped observation: every county-year from 2002 stays
+             in every table. 2000-01 are EXCLUDED from all tables, because no census
+             was taken in them and a blank there is an unmeasured year, not a zero
+             (same rule as script4_treatment.load_panel). The number of values recoded
+             this way, by species and year, is written to <date>_species_nan_as_zero.csv.
 
 CENSUS YEARS VS ALL YEARS
 -------------------------
@@ -61,6 +63,7 @@ TODAY = date.today().strftime("%Y-%m-%d")
 SPECIES        = ["dairy", "beef", "hogs", "chickens"]
 ALL_COLUMNS    = SPECIES + ["cattle"]      # cattle is read only for the appendix check
 CENSUS_YEARS   = [2002, 2007, 2012, 2017, 2022]
+FIRST_YEAR     = min(CENSUS_YEARS)         # 2000-01 are unmeasured and left out
 
 
 # =============================================================================
@@ -78,15 +81,18 @@ large = {s: panel[f"cafo_{s}_large"] for s in ALL_COLUMNS}
 
 def presence(species):
     """0/1 frame: does the county-year have >=1 large operation of each species?
-    A missing count is a zero (no large operation); no county-year is dropped."""
+    A missing count is a zero (no large operation). Years before FIRST_YEAR are not
+    measured and are dropped, never filled."""
     cols = pd.concat([large[s].rename(s) for s in species], axis=1)
-    return panel[["fips", "year"]].copy(), (cols.fillna(0) > 0).astype(int)
+    keep = panel["year"] >= FIRST_YEAR
+    return panel.loc[keep, ["fips", "year"]].copy(), (cols.loc[keep].fillna(0) > 0).astype(int)
 
 
 # How many missing counts the zero rule recodes, so the choice is auditable.
-nan_rows = (panel[["year"]].join(pd.concat([large[s].isna().rename(s) for s in ALL_COLUMNS], axis=1))
+_p = panel[panel["year"] >= FIRST_YEAR]
+nan_rows = (_p[["year"]].join(pd.concat([large[s].loc[_p.index].isna().rename(s) for s in ALL_COLUMNS], axis=1))
             .groupby("year").sum().reset_index())
-nan_rows.insert(1, "n_county_years", panel.groupby("year").size().values)
+nan_rows.insert(1, "n_county_years", _p.groupby("year").size().values)
 nan_rows.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_species_nan_as_zero.csv"), index=False)
 
 
@@ -104,9 +110,9 @@ by_year["share_multi_species"] = by_year["n_multi_species"] / by_year["n_county_
 by_year["census_year"] = by_year.index.isin(CENSUS_YEARS)
 by_year = by_year.reset_index().rename(columns={"index": "year"})
 by_year.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_species_count_by_year.csv"), index=False)
-n_recoded = int(sum(large[s].isna().sum() for s in SPECIES))
-print(f"\nspecies tracked: {SPECIES}   missing counts set to zero: {n_recoded:,} of "
-      f"{len(panel) * len(SPECIES):,} species-county-years")
+n_recoded = int(sum(large[s].loc[_p.index].isna().sum() for s in SPECIES))
+print(f"\nspecies tracked: {SPECIES}   missing counts set to zero (2002 on): {n_recoded:,} of "
+      f"{len(_p) * len(SPECIES):,} species-county-years")
 print(by_year[by_year.census_year].to_string(index=False))
 
 

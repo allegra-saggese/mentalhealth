@@ -17,8 +17,7 @@ from functions import *
 import time
 
 # ----------------------- Config -----------------------
-DEFAULT_NASS_API_KEY = "30643212-7739-359A-B451-0EAD3D345DB9"
-NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY", DEFAULT_NASS_API_KEY)
+NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY")   # environment only; never write the key in code
 if not NASS_API_KEY:
     raise RuntimeError("Missing USDA_NASS_API_KEY env var")
 

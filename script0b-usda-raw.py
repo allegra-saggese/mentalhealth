@@ -53,8 +53,7 @@ outf = os.path.join(db_data, "clean")
 # PART 1 : API SETUP AND CACHE-OR-PULL HELPERS
 # =============================================================================
 
-DEFAULT_NASS_API_KEY = "30643212-7739-359A-B451-0EAD3D345DB9"
-NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY", DEFAULT_NASS_API_KEY)
+NASS_API_KEY = os.environ.get("USDA_NASS_API_KEY")   # environment only; never write the key in code
 if not NASS_API_KEY:
     raise RuntimeError("Missing USDA_NASS_API_KEY env var. Set it before running this script.")
 
