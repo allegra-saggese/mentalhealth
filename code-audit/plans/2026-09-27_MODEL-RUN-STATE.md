@@ -1,3 +1,5 @@
+**SUPERSEDED 2026-10-17 by `2026-10-17_MODEL-RUN-STATE.md`.** Kept as the record of the 09-27 state.
+
 # Model run state — what has been run, on which panel
 **2026-09-27** · supersedes the run-state sections of `2026-09-18_ANALYSIS-STATUS.md`
 

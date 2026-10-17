@@ -683,3 +683,119 @@ to the cohort definition is a legitimate robustness question and is **not curren
 
 **Downstream:** `script4g-slides.py` and `script4h-result-tables.py` still read
 `tables_dir/script4f`. Both are stale and must be repointed when rebuilt.
+
+
+---
+
+### D-31 · Run 2 (2026-10-12): changes made on the Sept 30 feedback
+Recorded retroactively; these changes were made in code on 10-12 without an entry here.
+- **A3 (other-animal horse race) dropped.** `script4l-a3-horserace.py` retired to `z-archive/`.
+- **Step-8 control set revised** in `script4_treatment`: `%_female` removed, the Asian / AIAN /
+  NHPI shares combined into one, `%_black` added. The *pre-commitment logic of D-16 is unchanged*
+  (the set is fixed before any coefficient is read), but the membership differs from the set
+  that D-16 originally named, so the stability results in `script4b`/`4c` (run 09-23/09-27) were
+  computed on the earlier membership.
+- **A4** now saves SEs for every term (dairy, FSIS, interaction).
+- **A5** also run (a) with 2000 log population × year and (b) with log population as the outcome
+  (depopulation placebo).
+- **A6** event-time ATTs carry bootstrap SEs (aggregated inside each draw).
+- **Added:** A7 LP-DiD (`estimators.lpdid`), Conley spatial SEs on the A2 grid, and
+  `script4r-fsis-treatment.py` (slaughterhouses as a treatment in their own right).
+
+### D-32 · Team feedback (2026-10-15): what is REPORTED vs what is ESTIMATED
+The team asked for **T1, T3, T4 and E2** (T2 removed), **county FE only**, **state-clustered SEs
+only**, **TWFE and Callaway–Sant'Anna (covariate-adjusted) only**, and **no LP-DiD**.
+
+**Decision: these are choices about reporting, not about estimation.** The estimation scripts
+still compute everything (T2, A1 state-FE, county and heteroskedastic SEs, CS-unconditional,
+LP-DiD, Conley) so no work is lost and the full set stays available as robustness. Implemented
+as `REPORT_TREATMENTS / REPORT_FE / REPORT_SE / REPORT_CS_ARM` in `script4_treatment`, read by:
+- `script4n` — main tables show the reported set; the rest are written as separate tables
+  collected in `_BODY_robustness.tex` (A2 with T2, A1, A4 with T2, both CS arms, LP-DiD, Conley).
+- `script4q` — main frames show the reported set; A1 frames go to `BEAMER_FRAMES_robustness.tex`.
+- `script4a` — figure F1 shows the reported treatments only.
+
+Treatment IDs are **not renumbered** (T3 and T4 keep their names, so D-27 and earlier output still
+refer to the same variable). **Naming:** the team's "E2 (T5)" is `tr_e2_add_absorb`; it is called
+**E2** everywhere, because T5 was previously the dropped log-per-capita treatment (2026-09-23).
+`script4b`/`4c` are deliberately left as they were (robustness; the step-8 pre-commitment stands).
+**T3 is kept at the team's request despite D-27** (per-capita variation partly reflects
+population-denominator drift); it should carry that caveat wherever it appears.
+
+### D-33 · CS-unconditional vs CS-adjusted: report the adjusted arm
+Answer to the team's question. **Unconditional:** ATT(g,t) is a raw difference of long
+differences; parallel trends assumed with no covariates. **Adjusted:** outcome regression on the
+step-8 set measured at base period g−1, fitted on clean controls only; parallel trends assumed
+*conditional on X*, the same assumption TWFE makes, so the TWFE-vs-CS comparison isolates the
+estimator. On the 10-12 run: **0 fallback cells** and the **same sign on all 7 outcomes**;
+magnitudes differ (overall ATT, unconditional → adjusted: Poor MH Days 0.042 → 0.039; Frequent
+Mental Distress 143 → 51; Deaths of Despair 0.027 → 0.057; Aggravated Assault 3.05 → 2.56;
+Assault, all severities 14.0 → 20.6; Violence index 6.6 → 7.3; NIBRS total 17.1 → 26.6).
+
+### D-34 · Missing CAFO count = zero from 2002 on; 2000–01 stay missing — 2026-10-16
+**Rule** (in `script4_treatment.load_panel`, no panel rebuild): a blank `cafo_{species}_*` count in
+a census-covered year is set to 0. **Why blanks arise:** the panel is every rural county-year
+(65,828 rows, not subset to dairy). `script1b` zero-fills a census-year county only when it has no
+CAFO row for *any* species (lines 373–383), so a county with a hog row but no dairy row keeps blank
+dairy columns. The ag census is exhaustive, so no dairy row means no dairy operations.
+
+**Evidence that these are zeros, not suppression** (dairy, all five census waves):
+- The raw NASS operations pulls contain **no "(D)" values at all** (601,720 rows); suppression of
+  operations is by omission. "(D)" appears only in head counts.
+- A head-count row (number or "(D)") exists for **100%** of counties with milk-cow operations in
+  every wave, including 2022 (2,362 of 2,362). The converse holds for the blanks: **none of the
+  947 blank census cells has any NASS milk-cow record** (no total, no head-count row).
+- 2002–2017: in all 10,110 dairy rows the size bins sum **exactly** to NASS's county total.
+- 2022: see D-35.
+
+**2000–01 are not filled.** No census is taken in them in this pipeline; a blank is an unmeasured
+year. Filling them would code **158 counties** (266 county-years in the Deaths of Despair sample)
+that had a large dairy in 2002 as untreated, then switching on in 2002 — spurious timing.
+
+**Effect on the data:** treatment non-missing rows 55,719 → 60,170; E2-treated counties
+572 → 576 (cohorts 2007/2012/2017/2022: 284/142/101/45 → 288/141/102/45); estimating samples
++3.3% to +5.5%; 17,804 `cafo_dairy_*` values recoded. **Effect on the headline A2 estimates**
+(T1, T3, T4, E2 × 7 outcomes, county + year FE, step-8, state SE): **0 sign changes, 2 of 28
+significance changes** (E2 on Poor MH Days p<0.01 → p<0.05; E2 on Violence index p<0.05 →
+p<0.10); T1/T3/T4 coefficients move typically 1–6%, E2 by 1–10%. CS not re-estimated.
+**Open:** the logic belongs in `script1b` (species-aware) and should move there at the next panel
+rebuild; until then `load_panel` is the single place it is applied.
+
+### D-35 · 2022 verification: NASS totals were never pulled, not unavailable — 2026-10-16
+The 2022 raw cache (dated 2026-05-06) predates `script0b`'s total-operations request, and
+`script0b` never re-pulls a cached year, so 2022 had bins but no cattle TOTAL rows and was labelled
+"dark". Re-pulled with `qa-scripts/pull_2022_cattle_totals.py` (file
+`2026-10-16_usda_2022_api_cafo_ops_totals_raw.csv`, 16,432 rows). **Result, 2022:** milk cows
+2,362 of 2,362 counties bins = total (national 36,024 on both sides); beef cows 3,053 of 3,053
+(622,162); incl. calves 3,060 of 3,060 (732,123); **0 suppressed, 0 bins above total, 0 total-only,
+0 bins-only.** A head-count cross-check (bins vs numeric 2022 head counts, 1,512 counties) finds
+0 over-counts and 0 under-counts, as in every earlier wave. **2022 is therefore verified and
+needs no exception in D-34.** *Not yet done:* `script0b` does not read the new totals file, so a
+re-run would label 2022 "dark" again, and `VERIFIED_WAVES` in `script4_treatment` still lists
+2002–2017 only.
+
+### D-36 · Species set for overlap and per-species runs — 2026-10-16
+**Dairy, beef, hogs, chickens.** `cattle` is excluded as a species: the USDA cattle inventory
+contains the dairy and beef herds (dairy without cattle: 0–2 county-years per wave; beef without
+cattle: 0), so counting it makes nearly every dairy county look multi-species. `script4s` writes
+the descriptives. **Results (census waves 2002–2022, 2002 on, blank = 0):** 27–29% of rural
+counties have large CAFOs of 2+ species; of large-dairy counties, 43–48% also have hogs, 41–46%
+beef, 14–21% chickens; 633 of 759 counties that ever have a large dairy share a wave with another
+species; 884 counties have 2+ species in at least two waves. Dairy alone is the single most common
+dairy-containing cell (≈110–150 counties per wave); the 3- and 4-species cells are thin.
+**Caveat for E2 by species:** 70–75% of positive changes in large-dairy counts occur while the
+county's total dairy operations fall (consolidation); check hogs and beef before interpreting E2.
+**Caveat on power:** chickens have large operations in ≈6.5% of county-years; expect CS to be
+underpowered there. Joint modelling of species has not been decided.
+
+### D-37 · Credentials removed from code — 2026-10-16
+A NASS API key was hard-coded in `script0b` (line 56), `qa-scripts/qa_2017_dta_vs_api.py`,
+`z-archive/script0p-usda-2022-api-only.py` and, briefly, `qa-scripts/pull_2022_cattle_totals.py`.
+It is in git history (commit `6bdb09f`) and in the pushed commit `c1fa465`. **Removed from the
+working files; all four now read `USDA_NASS_API_KEY` from the environment only.** Removing it
+from the files does not remove it from history: **the key must be revoked and replaced at NASS.**
+
+### D-38 · Repository hygiene — 2026-10-17
+`__pycache__/` (three Python versions), `.spyproject/` and `.DS_Store` files (71 files) were
+tracked and are now untracked; Python and editor rules added to `.gitignore`. Remaining packaging
+gaps for a public release are listed in `2026-10-17_MODEL-RUN-STATE.md`.
