@@ -51,3 +51,22 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.spyproject/
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets: keys live in the environment, never in files
+.env
+*.key
