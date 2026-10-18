@@ -9,7 +9,7 @@ This project combines US health, crime, population, and agriculture data into on
 
 - Python 3.11+ (most recent runs on 3.13)
 - Core packages (set in `packages.py`): `pandas`, `numpy`, `glob`, `re`, `matplotlib`, `seaborn`
-- ML / estimation packages (`sklearn`, `statsmodels`, `linearmodels`, `differences`): imported directly by `script3-ridge.py` and the `script4*` estimation scripts; check each script's imports
+- ML / estimation packages (`sklearn`, `statsmodels`, `linearmodels`, `differences`): imported directly by the `script4*` estimation scripts (and the first-stage pilots in `first-stage-testing/`); check each script's imports
 - Optional: `plotly` + `kaleido` (used in `script2f-maps.py` and other figure scripts for choropleth maps; scripts degrade gracefully if unavailable)
 - Helper utilities in `functions.py`: FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `latest_files_by_descriptor()`, `normalize_panel_key()`, `to_numeric_series()`, `log_per10k()`, `load_county_geojson()`
 - **USDA NASS API key** required for `script0b` — set env var `USDA_NASS_API_KEY`
@@ -34,7 +34,7 @@ mentalhealth/
 ├── script0a … script0g-*.py   # Stage 0 — raw ingestion
 ├── script1a, script1b-*.py    # Stage 1 — QA & panel build
 ├── script2a … script2f-*.py   # Stage 2 — QA, descriptive figures, maps
-├── script3-ridge.py           # Stage 3 — ridge/LASSO pilot (stub)
+├── first-stage-testing/       # first-phase pilots and test versions, kept for provenance, NOT run (see its README)
 ├── script4*.py                # Stage 4 — design-based estimates, tables, slides
 ├── functions.py, packages.py  # shared helpers; db_base path lives in packages.py
 ├── fsis-scripts/              # FSIS sub-scripts, called by script0f
@@ -109,12 +109,8 @@ Each script reads from `Data/raw/` and writes panel-ready CSVs to `Data/clean/`.
 | `script2e-hispanic-chr-explorer.py` | Hispanic population as confounder and heterogeneity dimension | `Data/output/figs/hispanic-chr/` |
 | `script2f-maps.py` | Plotly choropleths: FSIS counts, mental-outcome coverage, ag first-differences | `Data/output/figs/{fsis-choropleth,mental-outcome-coverage-maps,ag-first-diff-maps}/` |
 
-### Stage 3 — Pilot
-
-| Script | Purpose | Note |
-|--------|---------|------|
-| `script3-ridge.py` | LASSO/Ridge variable selection, panel OLS with county × year FE, DiD event study around census years | Pilot — not for interpretation |
-| `script4-model-test.py` | Independent replication of an external dairy-CAFO memo's finding | Legacy; superseded by the Part A scripts below |
+### Stage 3 — Pilot (moved)
+The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test (`script4-model-test.py`) now live in `first-stage-testing/` as `firststage_*.py`. They were the first phase of development, are not part of the pipeline, and are not used for any reported result. ML variable selection remains specified-only (B-series in `code-audit/plans/2026-09-27_MODEL-NAMING.md`).
 
 ### Stage 4 — Part A: design-based estimates
 
@@ -128,11 +124,10 @@ All models run over treatments **T1–T4** (large-CAFO presence, count, per 10k,
 | `script4b-covariate-sequence.py` | Covariate-sequence grid: 840 regressions adding controls one at a time |
 | `script4c-covariate-stability.py` | Synthesis of 4b — how far each coefficient moves along the sequence (no new estimation) |
 | `script4d-balance-panel.py` | Balance table on the corrected panel |
-| `script4d-power-balance.py` | Sample, power and coverage workbook for Part A (older; pre-rebuild) |
 | `script4j-control-diagnostics.py` | Coverage, causal role and pre-trends for each control |
 | `script4k-variable-register.py` | Master variable register, one row per panel column |
-| `script4e-latex-tables.py`, `script4h-result-tables.py`, `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and the combined appendix (no estimation) |
-| `script4g-slides.py`, `script4q-beamer-frames.py` | Beamer deck and drop-in frames, generated from result CSVs |
+| `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and the combined appendix (no estimation); reported exhibits plus a separate robustness set |
+| `script4q-beamer-frames.py` | Beamer drop-in frames generated from result CSVs (reported set; robustness frames in a second file) |
 
 **Run state.** The panel was rebuilt on 2026-09-23 to fix the CHR release-year misalignment. Outputs dated before that predate the fix and should not be cited; `code-audit/plans/2026-09-27_MODEL-RUN-STATE.md` records which script was last run on which panel — check it before citing any output. `qa-scripts/` holds one-off diagnostics (population-column comparison, 2017 .dta vs API check).
 
