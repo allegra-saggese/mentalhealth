@@ -13,6 +13,7 @@ import os
 import re
 import glob
 import json
+import numpy as np      # log_per10k() below uses np; it was never imported, so the function raised NameError
 import pandas as pd
 import urllib.error
 from urllib.parse import urlencode
