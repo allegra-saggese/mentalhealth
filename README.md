@@ -7,14 +7,14 @@ This project combines US health, crime, population, and agriculture data into on
 
 ## Requirements
 
-- Python 3.11+ (most recent runs on 3.13)
-- Core packages (set in `packages.py`): `pandas`, `numpy`, `glob`, `re`, `matplotlib`, `seaborn`
-- ML / estimation packages (`sklearn`, `statsmodels`, `linearmodels`, `differences`): imported directly by the `script4*` estimation scripts (and the first-stage pilots in `first-stage-testing/`); check each script's imports
-- Optional: `plotly` + `kaleido` (used in `script2f-maps.py` and other figure scripts for choropleth maps; scripts degrade gracefully if unavailable)
-- Helper utilities in `functions.py`: FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `latest_files_by_descriptor()`, `normalize_panel_key()`, `to_numeric_series()`, `log_per10k()`, `load_county_geojson()`
-- **USDA NASS API key** required for `script0b` — set env var `USDA_NASS_API_KEY`
-- **HUD API token** required for `script0f` FSIS pipeline — set env var `HUD_API_TOKEN`
-- `script0g` downloads SAIPE, BLS LAUS, SAHIE and Census PEP directly (no key); the BLS host `download.bls.gov` must be reachable
+- **Python 3.13** (results produced on 3.13.5; macOS). Install the pinned packages with either
+  `pip install -r requirements.txt` or `conda env create -f environment.yml` (the conda file installs Python and then the same pinned `requirements.txt`).
+  Key packages: `pandas`, `numpy`, `scipy`, `matplotlib`, `seaborn`, `scikit-learn`, **`pyfixest`** (all estimation), `requests`, `openpyxl`, `pyarrow`; optional `plotly` + `kaleido` for maps.
+- **R 4.x** only for `script4w-honestdid.R` (Rambachan–Roth sensitivity analysis): `install.packages("HonestDiD")` (see `r-requirements.txt`).
+- **LaTeX (`pdflatex`)** only for compiling the table and slide fragments written by `script4n`, `script4p` and `script4q`; without it the `.tex` files are still written.
+- Shared helpers: `packages.py` (imports and directory definitions) and `functions.py` (FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `normalize_panel_key()`, `log_per10k()`, `load_county_geojson()`).
+- **Credentials are read from the environment only, never from code:** `USDA_NASS_API_KEY` (`script0b`, `qa-scripts/pull_2022_cattle_totals.py`) and `HUD_API_TOKEN` (`script0f` / `fsis-scripts/`). Both are free to request from the agencies.
+- `script0g` downloads SAIPE, BLS LAUS, SAHIE and Census PEP directly (no key); the BLS host `download.bls.gov` must be reachable.
 
 ### Hardcoded paths that must change per user
 | Script | Variable | What it points to |
@@ -37,6 +37,8 @@ mentalhealth/
 ├── first-stage-testing/       # first-phase pilots and test versions, kept for provenance, NOT run (see its README)
 ├── script4*.py                # Stage 4 — design-based estimates, tables, slides
 ├── functions.py, packages.py  # shared helpers; db_base path lives in packages.py
+├── did_cs.py, estimators.py   # shared estimator code (Callaway–Sant'Anna; legacy LP-DiD / Conley, not reported)
+├── requirements.txt, environment.yml, r-requirements.txt   # pinned environment
 ├── fsis-scripts/              # FSIS sub-scripts, called by script0f
 ├── qa-scripts/                # one-off diagnostics (not part of the run order)
 ├── code-audit/                # internal documentation: decision logs and model status
@@ -114,22 +116,70 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 
 ### Stage 4 — Part A: design-based estimates
 
-All models run over treatments **T1–T4** (large-CAFO presence, count, per 10k, log(1+count)) × 7 outcomes (3 mental-health / mortality, 4 crime), county-clustered SEs as the headline. Every `script4*` file takes its panel, treatments and controls from the single shared module `script4_treatment.py` so each variable is defined in exactly one place. Model IDs follow `code-audit/plans/2026-09-27_MODEL-NAMING.md` (A = implemented, B = specified only).
+**What is reported.** Per the team's 2026-10-15 feedback the reported set is treatments **T1** (large-dairy presence), **T3** (per 10,000 residents), **T4** (log(1 + count)) and **E2** (first expansion: 0 until the first census wave at which the large-dairy count rises, 1 from then on), **county + year fixed effects**, **standard errors clustered by state**, and the estimators **TWFE** and **Callaway–Sant'Anna covariate-adjusted** (CS). These choices live in `REPORT_*` in `script4_treatment.py` and only decide what the exhibit scripts show: the estimation scripts still compute the other specifications (T2 count, pooled state-FE A1, unconditional CS, LP-DiD), which appear only in the robustness exhibits. The **control set** is the 8 full-coverage controls `COVARIATE_ORDER[:8]`, pre-committed before any result was read (decision D-16, revised D-31). Every `script4*` file takes its panel, treatments and controls from `script4_treatment.py`, so each variable is defined in exactly one place. Outcomes: 7 (3 mental-health / mortality, 4 crime).
 
 | Script | Role |
 |--------|------|
-| `script4_treatment.py` | **Shared module** — treatment, sample and control definitions (importable; not run) |
-| `script4a-design-estimates.py` | A1 pooled OLS (state+year FE), A2 TWFE (county+year FE, headline), A4 dairy × FSIS, A5 event study, A6 Callaway–Sant'Anna |
-| `script4l-a3-horserace.py` | A3 — dairy conditional on other large CAFO types |
-| `script4b-covariate-sequence.py` | Covariate-sequence grid: 840 regressions adding controls one at a time |
-| `script4c-covariate-stability.py` | Synthesis of 4b — how far each coefficient moves along the sequence (no new estimation) |
-| `script4d-balance-panel.py` | Balance table on the corrected panel |
+| `script4_treatment.py` | **Shared module** — treatment, sample, outcome and control definitions; the missing-count-is-zero rule (from 2002) is applied in `load_panel` (importable; not run) |
+| `script4a-design-estimates.py` | A2 TWFE (headline), A4 dairy × FSIS, A5 event study, A6 Callaway–Sant'Anna; also A1 pooled state-FE and A7 LP-DiD (computed, not reported) |
+| `script4b-…`, `script4c-…` | Earlier run of adding controls in a fixed order and its summary; **superseded by `script4y`**, kept unchanged as the record of the 09-23 run |
+| `script4d-balance-panel.py` | Balance and detectable-effect tables |
 | `script4j-control-diagnostics.py` | Coverage, causal role and pre-trends for each control |
 | `script4k-variable-register.py` | Master variable register, one row per panel column |
-| `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and the combined appendix (no estimation); reported exhibits plus a separate robustness set |
-| `script4q-beamer-frames.py` | Beamer drop-in frames generated from result CSVs (reported set; robustness frames in a second file) |
+| `script4r-fsis-treatment.py` | Slaughterhouses as the treatment (R0–R3; R4 LP-DiD computed, not reported) |
+| `script4s-species-overlap.py` | How many counties have large CAFOs of more than one species (dairy, beef, hogs, chickens) |
+| `script4t-pretrend-leads.py` | Outcome pre-trends (leads) for T1, T3, T4, E2 and first entry |
+| `script4u-did-by-treatment.py` | TWFE, event study and CS for first expansion and **first entry** (0 → 1+ large dairies, clean controls) with the pre-trend adjustments: county trends, state × year FE, baseline characteristics × time polynomial, past outcomes in CS |
+| `script4v-trend-plots.py` | Raw outcome trends by county group, event-time paths, pre-treatment slope tests (figures + tables) |
+| `script4w-honestdid-export.py`, `script4w-honestdid.R` | Rambachan–Roth sensitivity analysis on the TWFE event studies (Python writes inputs, R runs `HonestDiD`) |
+| `script4x-species-forest.py` | Per-species TWFE and CS estimates (large and all-sizes counts) and the forest plots |
+| `script4y-control-set-selection.py` | **How the control set was chosen:** cumulative add-one-in, each control added alone, take-one-out of the final 8, take-one-out of all 14, and one selection table. Documents the pre-committed set; does not choose it |
+| `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and combined appendix (no estimation): reported exhibits plus a separate robustness set |
+| `script4q-beamer-frames.py` | Beamer drop-in frames from the result CSVs (reported set; robustness frames in a second file) |
+| `did_cs.py` | Shared Callaway–Sant'Anna code used by `4u` and `4x`; `4a` still holds its own copy (merge pending) |
 
 **Run state.** The panel was rebuilt on 2026-09-23 to fix the CHR release-year misalignment. Outputs dated before that predate the fix and should not be cited; `code-audit/plans/2026-09-27_MODEL-RUN-STATE.md` records which script was last run on which panel — check it before citing any output. `qa-scripts/` holds one-off diagnostics (population-column comparison, 2017 .dta vs API check).
+
+---
+
+## Running the reported results
+
+After the panel exists in `Data/merged/` (stages 0–1), the reported results are produced in this order. Each script writes dated files to `Data/output/`; the exhibit scripts read the newest file, so run in order and archive old outputs first (see `code-audit/plans/2026-10-17_MODEL-RUN-STATE.md`).
+
+```bash
+python3 script4j-control-diagnostics.py      # control pre-trends
+python3 script4a-design-estimates.py         # A2, A4, A5, A6 (and unreported A1, A7)        ~7 min
+python3 script4r-fsis-treatment.py           # slaughterhouse treatment
+python3 script4d-balance-panel.py            # balance tables
+python3 script4t-pretrend-leads.py           # outcome leads, all treatments
+python3 script4u-did-by-treatment.py         # first entry + pre-trend adjustments          ~30 min
+python3 script4v-trend-plots.py              # raw trend figures
+python3 script4w-honestdid-export.py && Rscript script4w-honestdid.R   # sensitivity analysis
+python3 script4x-species-forest.py           # per-species results and forest plots         ~25 min
+python3 script4y-control-set-selection.py    # control-set selection exhibit
+python3 script4n-regression-tables.py && python3 script4p-full-appendix.py && python3 script4q-beamer-frames.py
+```
+
+`script4u` and `script4x` check themselves: for the first-expansion / dairy-large case they must reproduce `script4a`'s TWFE and CS estimates exactly (they assert or print the difference).
+
+---
+
+## Data availability and access
+
+No raw data is stored in this repository (`*.csv` and `*.xlsx` are git-ignored); the panel is rebuilt from the sources below by stages 0–1. All are US federal public data or public-use extracts; check each source's terms of use. The one non-downloadable input is the FSIS file, which was obtained by FOIA request.
+
+| Source | Script | Access |
+|---|---|---|
+| US Census population estimates and FIPS crosswalk | `script0a` | Public; four vintage CSVs plus FIPS files from the Census Bureau, placed in `raw/population` and `raw/fips` |
+| USDA NASS Census of Agriculture, CAFO operations by size | `script0b` | Public, via the NASS Quick Stats API (free key; `USDA_NASS_API_KEY`); `.dta` fallbacks in `raw/usda` |
+| County Health Rankings | `script0c` | Public annual CSVs from County Health Rankings & Roadmaps, manual download to `raw/mental` |
+| CDC WONDER deaths of despair (county-year) | `script0c` | Public-use extracts by manual query (annual CSVs); WONDER's data-use restrictions apply, and counts below 10 are suppressed by CDC |
+| FBI UCR / NIBRS annual incident files (arrestee segment) | `script0d` | Public bulk files, manual download to `raw/crime/total-v1` |
+| NCHS urban-rural classification | `script0e` | Public NCHS file, manual download to `raw/nchs` |
+| USDA FSIS establishment data | `script0f`, `fsis-scripts/` | **FOIA response (April 2026), not redistributable**; ZIP-to-county fill uses the HUD USPS crosswalk API (`HUD_API_TOKEN`) |
+| SAIPE, BLS LAUS, SAHIE, Census PEP | `script0g` | Public; downloaded automatically |
+
+Replicating without the FSIS file is possible for everything except the slaughterhouse analyses (`script4r` and the FSIS interaction A4).
 
 ---
 
@@ -145,6 +195,8 @@ All sources are normalized to a 5-digit zero-padded string FIPS via `normalize_p
 The USDA Agricultural Census runs every five years (2002, 2007, 2012, 2017, 2022). `script0b` outputs **census years only** — no inter-census duplication in the compact file. `script1b` then forward-fills each census year's values to subsequent years (2002 → 2003–2006, 2007 → 2008–2011, etc.), treating the most recent census as the best available observation until the next one supersedes it.
 
 **CAFO zero-fill**: Counties absent from the census in a census year are confirmed to have zero operations (the agricultural census is exhaustive). Those county-years are set to 0 before forward-filling, so the confirmed zero propagates correctly to inter-census years. Only census years `{2002, 2007, 2012, 2017, 2022}` are zero-filled — non-census-year absences are left as NaN.
+
+**Missing counts (D-34, 2026-10-16).** `script1b` zero-fills only a county with no CAFO row for *any* species, so a county with, say, a hog row but no dairy row keeps blank dairy columns. Because the census is exhaustive (checked against NASS for dairy in all five waves), `script4_treatment.load_panel` sets a missing `cafo_{species}_*` count to zero from 2002 on. 2000–01 stay missing: no census was taken in them, so a blank is an unmeasured year, not an absent operation.
 
 **5 commodity types**: cattle (incl calves), beef (cows beef), dairy (cows milk), hogs (all classes), chickens (layers). Beef and dairy are subsets of cattle — aggregate totals use only cattle + hogs + chickens to avoid double-counting. Beef and dairy get separate `_total` columns for disaggregated analysis.
 

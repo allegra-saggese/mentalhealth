@@ -1,0 +1,10 @@
+# conda environment for the mentalhealth pipeline.  Create:  conda env create -f environment.yml
+# Packages are installed with pip from requirements.txt so the pinned versions are exactly those used for the results.
+name: mentalhealth
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - -r requirements.txt
