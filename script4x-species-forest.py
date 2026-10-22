@@ -1,36 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4x-species-forest.py  --  PER-SPECIES RESULTS AND FOREST PLOTS  (added 2026-10-17; team request 10-15)
+script4x-species-forest.py -- per-species TWFE and Callaway-Sant'Anna estimates and forest plots.
 
-For each CAFO species (dairy, beef, hogs, chickens) and each exposure scope
-    large       operations in the top size bin only
-    all sizes   operations of every size (small + medium + large)
-estimate, for each of the 7 outcomes, five estimates:
-    T1   presence               1 if the county has >= 1 operation                 TWFE
-    T3   per 10,000 residents   count / population x 10,000                        TWFE
-    T4   log(1 + count)         (log population also enters)                       TWFE
-    E2   first expansion        0 until the first census wave at which the count   TWFE
-                                rises, 1 from then on
-    CS   Callaway-Sant'Anna     cohorts = the same first-expansion year; covariate-adjusted overall ATT
-TWFE: county FE + year FE, the 8 controls, SE clustered by state. CS: did_cs.py, 300 bootstrap draws over states.
-
-COUNTS. Same rule as script4_treatment.load_panel (D-34): from 2002 on a missing count is a zero; 2000-01 are
-missing. The rule was verified against NASS for dairy (all waves) and for beef cows / incl. calves (2022);
-hogs and chickens rely on the same logic and are NOT yet checked against NASS totals (QA doc).
-
-VALIDATION. For dairy / large the T1, T3, T4, E2 variables must equal script4_treatment's, and the TWFE and CS
-results must equal script4a's. The script asserts this (full run only for the CS standard errors).
-
-FIGURES. One forest plot per species, large | all sizes side by side, 7 outcomes x 5 estimates. x-axis = the
-coefficient divided by the outcome's within-county SD, so all rows share one scale; the treatment unit differs by
-row (see labels): T1, E2 and CS compare treated with not treated, T3 is per 10,000 residents, T4 per unit of
-log(1+count). Bars = 95% intervals, state-clustered (CS: bootstrap over states).
-
-OUTPUTS -> Data/output/tables/script4x/<date>_species_results.csv ; figs/script4x/<date>_forest_<species>.png
-Usage:  python3 script4x-species-forest.py            full (about 20-30 minutes, runs species x scope in parallel)
-        python3 script4x-species-forest.py --plot-only redraw the figures from the latest saved results (no estimation)
-        python3 script4x-species-forest.py --quick    dairy only, 2 outcomes, 20 bootstrap draws
+Species: dairy, beef, hogs, chickens. Scope: large operations, and all sizes. Estimates: T1, T3, T4, E2 (TWFE) and CS-adjusted, for 7 outcomes.
+Reads:   panel via script4_treatment.load_panel()
+Writes:  Data/output/tables/script4x/<date>_species_results.csv and figs/script4x/<date>_forest_<species>.png
+Run:     python3 script4x-species-forest.py     (about 25 minutes; --plot-only redraws the figures; --quick is a test run)
+Method:  METHODS.md sections 1, 2 and 5. Dairy / large is checked against script4a. Plot x-axis = coefficient / outcome within-county SD.
 """
 import warnings; warnings.filterwarnings("ignore")
 import sys
@@ -44,8 +21,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from did_cs import run_cs
-from script4_treatment import (load_panel, OUTCOMES, COVARIATE_ORDER, CENSUS_YEARS, SPEC_EXTRA_REGRESSORS,
-                               CORE_TREATMENTS, figs_dir, tables_dir, os, date)
+from did_tools import clean
+from designs import species_treatments
+from script4_treatment import load_panel, OUTCOMES, COVARIATE_ORDER, figs_dir, tables_dir, os, date
 
 QUICK = "--quick" in sys.argv
 PLOT_ONLY = "--plot-only" in sys.argv
@@ -62,40 +40,10 @@ ESTS = [("T1", "T1  presence (0/1)"), ("T3", "T3  per 10,000 residents"), ("T4",
         ("E2", "E2  first expansion (0/1)"), ("CS", "CS  Callaway-Sant'Anna")]
 
 
-def clean(n):
-    return (n.replace("%", "pct").replace("-", "_").replace(" ", "_").replace("(", "").replace(")", "")
-             .replace("/", "_").replace("+", "p").replace(",", "_"))
-
-
-def build_treatments(df, species, bins):
-    """Count and the five treatment variables for one species x scope. Returns a frame aligned to df."""
-    cols = [f"cafo_{species}_{b}" for b in bins]
-    raw = df[cols]
-    filled = raw.where(df["year"] < min(CENSUS_YEARS), raw.fillna(0))       # D-34: zero from 2002, 2000-01 stay missing
-    C = filled.sum(axis=1, min_count=1)
-    out = pd.DataFrame(index=df.index)
-    out["count"] = C
-    out["T1"] = (C > 0).astype(float).where(C.notna())
-    out["T3"] = C / df["population"].replace(0, np.nan) * 10_000
-    out["T4"] = np.log1p(C)
-    # first census wave at which the county's count rises relative to its PREVIOUS OBSERVED wave. Mirrors
-    # script4_treatment._wave_events: the lag is the previous wave the county has a row for (a county missing a
-    # wave is compared with the one before it), not a calendar-based diff.
-    w = pd.DataFrame({"fips": df["fips"], "year": df["year"], "C": C})
-    w = w[w.year.isin(CENSUS_YEARS)].dropna(subset=["C"]).sort_values(["fips", "year"])
-    w["lag"] = w.groupby("fips")["C"].shift(1)
-    rises = w[w["lag"].notna() & (w["C"] - w["lag"] > 0)]
-    first = rises.groupby("fips")["year"].min()
-    out["add_year"] = df["fips"].map(first)
-    D = np.where(out["add_year"].notna() & (df["year"] >= out["add_year"]), 1.0, 0.0)
-    out["E2"] = pd.Series(D, index=df.index).where(C.notna())
-    return out
-
-
 def one_task(args):
     species, scope = args
     df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
-    tr = build_treatments(df, species, SCOPES[scope])
+    tr = species_treatments(df, species, SCOPES[scope])
     data = pd.concat([df[["fips", "year", "state_fips", "population", "log_pop"] + CONTROLS + list(OUTCOME_LIST.values())], tr], axis=1)
     check = None
     if species == "dairy" and scope == "large":                                # validation against script4_treatment

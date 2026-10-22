@@ -1,45 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4d-balance-panel.py  --  rebuilds BALANCEpanel.pdf on the corrected panel.
+script4d-balance-panel.py -- balance and detectable-effect tables for each treatment and outcome.
 
-REPLACES the 2026-09-18 version of script4d-power-balance.py, which produced
-BALANCEpanel.pdf against the pre-CHR-fix panel, the legacy 12-treatment grid,
-6 outcomes and the retired CORE_9 control set.
-
-WHAT CHANGED
-------------
-    panel       2026-09-23 (10 controls re-sourced to correct data years)
-    treatments  T1-T4 + E2   (was 12 legacy definitions; T5 dropped, T6 retired)
-    outcomes    7            (was 6; four crime outcomes settled under D-11)
-    controls    step-8 pre-committed set, D-16/D-29  (was CORE_9)
-
-WHAT EACH COLUMN MEANS
-----------------------
-    N                 estimating-sample rows after listwise deletion
-    Treated/Control   county-year observations with treatment >0 / ==0. For the
-                      continuous treatments (T2, T3, T4) this split is
-                      DESCRIPTIVE ONLY -- the estimator uses the full continuous
-                      variation, not a dichotomy.
-    Counties          total, and those ever treated
-    Switch./Trans.    counties whose treatment CHANGES, and the number of changes.
-                      Under county FE only switchers identify beta. This is the
-                      honest denominator on every result in the deck.
-    SE                cluster-robust at the state level, from the actual A2
-                      regression (county + year FE, step-8 controls)
-    MDE               minimum detectable effect at 80% power, two-sided a=0.05:
-                      2.8016 x SE, expressed in WITHIN-COUNTY standard deviations
-                      of the outcome. Within-county, not raw, because that is the
-                      variation a county-FE model can actually use.
-
-Output -> LATEX_OUT (Data/output/latex-outputs-run2/)
-              BALANCEpanel.tex / .pdf        (one table per treatment + outcomes)
-              <date>_balance_panel.csv       (same numbers, machine readable)
+Reads:   panel via script4_treatment.load_panel()
+Writes:  LATEX_OUT/BALANCEpanel.tex and .pdf, _BODY_balance.tex, and <date>_balance_panel.csv
+Run:     python3 script4d-balance-panel.py
+Method:  column definitions and the MDE formula in METHODS.md section 7; SEs from the A2 regression (state-clustered).
 """
 import warnings; warnings.filterwarnings("ignore")
 import subprocess
 import numpy as np, pandas as pd, pyfixest as pf
 
+from did_tools import clean as _clean
 from script4_treatment import (
     load_panel, OUTCOMES, CORE_TREATMENTS, CORE_TREATMENT_LABELS,
     SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, db_data, os, date, LATEX_OUT,
@@ -57,10 +30,6 @@ GRID = {tid: (col, SPEC_EXTRA_REGRESSORS.get(tid, []), CORE_TREATMENT_LABELS[tid
 GRID["E2"] = ("tr_e2_add_absorb", [],
               "First positive change in large dairy ops (absorbing)")
 BINARY = {"T1", "E2"}
-
-def _clean(n):
-    return (str(n).replace("%","pct").replace("-","_").replace("/","_").replace(" ","_")
-                  .replace("(","").replace(")","").replace("+","p").replace(",","_"))
 
 def esc(s):
     return str(s).replace("_", r"\_").replace("%", r"\%").replace("&", r"\&")

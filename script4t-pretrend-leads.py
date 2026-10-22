@@ -1,45 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4t-pretrend-leads.py  --  OUTCOME PRE-TRENDS (LEADS) FOR EACH REPORTED TREATMENT (added 2026-10-17)
+script4t-pretrend-leads.py -- outcome pre-trends (leads) for each reported treatment.
 
-QUESTION
---------
-Before treatment, do outcomes already move differently in counties that go on to be treated?
-Answered for every reported treatment definition, next to the covariate pre-trends from
-script4j. DESCRIPTIVE TESTS ONLY: no verdict labels are assigned here.
-
-TWO DESIGNS, because the treatments are of two kinds
-----------------------------------------------------
-Absorbing event treatments (E2 first positive change; E3 first entry, 0 -> 1+ large dairy):
-    EVENT STUDY. Y_it = sum_{e != -1} theta_e 1[t - g_i = e] + X_it'gamma + county FE + year FE.
-    Event time e = year - cohort year, clipped to [-8, 8]; reference e = -1; never-treated
-    counties sit in the reference category. Leads are e = -8 ... -2.
-
-Non-absorbing / continuous treatments (T1 presence, T3 per 10k, T4 log count):
-    LEAD TEST. Y_it = b0 D_it + sum_{k=1..4} b_k D_{i,t+k} + [log_pop for T4] + X_it'gamma
-    + county FE + year FE. D_{i,t+k} is the county's own treatment k years AHEAD. If treatment
-    does not predict the outcome before it changes, b_1 ... b_4 are zero. Because treatment moves
-    only at census waves (2007, 2012, 2017, 2022) and is forward-filled, a lead differs from D_it
-    only in the k years before a wave. The last four panel years drop out (no lead available).
-
-Both use the pre-committed control set (COVARIATE_ORDER[:8]), state-clustered SEs.
-JOINT TEST: Wald chi-square that all leads are zero, with the state-clustered covariance.
-With about 49 clusters and several leads, the chi-square approximation is rough: read the
-joint p alongside the individual leads.
-
-OUTPUTS -> Data/output/tables/script4t/
-    <date>_leads_coefficients.csv    every lead coefficient (treatment, outcome, lead, beta, se, p)
-    <date>_leads_joint_tests.csv     one row per treatment x outcome: n leads, Wald chi2, p, N
-    (the covariate pre-trends are read from script4j's <date>_control_pretrends.csv and printed alongside)
+Event-study leads for E2 and E3; lead test (treatment 1-4 years ahead) for T1, T3, T4. Prints the covariate pre-trends from script4j alongside.
+Reads:   panel via script4_treatment.load_panel(); Data/output/tables/script4a/<date>_control_pretrends.csv
+Writes:  Data/output/tables/script4t/<date>_{leads_coefficients, leads_joint_tests}.csv
+Run:     python3 script4t-pretrend-leads.py
+Method:  METHODS.md section 3. Control set, county + year FE, state-clustered SEs; no verdict labels are assigned.
 """
 import warnings; warnings.filterwarnings("ignore")
 import glob
 import numpy as np
 import pandas as pd
 import pyfixest as pf
-from scipy.stats import chi2, norm
 
+from did_tools import clean, joint_wald
 from script4_treatment import (
     load_panel, OUTCOMES, COVARIATE_ORDER, SPEC_EXTRA_REGRESSORS,
     CORE_TREATMENTS, tables_dir, os, date,
@@ -51,23 +27,6 @@ CONTROLS = COVARIATE_ORDER[:8]
 CLIP = 8             # event-time window for the event studies
 N_LEADS = 4          # years of treatment leads for the continuous treatments
 REPORTED = ["T1", "T3", "T4", "E2", "E3"]
-
-
-def clean(name):
-    return (name.replace("%", "pct").replace("-", "_").replace(" ", "_").replace("(", "")
-                .replace(")", "").replace("/", "_").replace("+", "p").replace(",", "_"))
-
-
-def joint_wald(model, names):
-    """Wald chi-square that the named coefficients are all zero (state-clustered covariance)."""
-    cn = list(model._coefnames)
-    idx = [cn.index(n) for n in names if n in cn]
-    if not idx:
-        return np.nan, 0, np.nan
-    b = np.asarray(model.coef())[idx]
-    V = np.asarray(model._vcov)[np.ix_(idx, idx)]
-    stat = float(b @ np.linalg.solve(V, b))
-    return stat, len(idx), float(1 - chi2.cdf(stat, len(idx)))
 
 
 df = load_panel()
@@ -146,10 +105,6 @@ coefs = pd.DataFrame(coef_rows)
 joint = pd.DataFrame(joint_rows)
 coefs.to_csv(os.path.join(OUT, f"{TODAY}_leads_coefficients.csv"), index=False)
 joint.to_csv(os.path.join(OUT, f"{TODAY}_leads_joint_tests.csv"), index=False)
-
-
-def st(p):
-    return "***" if p < .01 else "**" if p < .05 else "*" if p < .10 else ""
 
 
 print("\n" + "=" * 100)

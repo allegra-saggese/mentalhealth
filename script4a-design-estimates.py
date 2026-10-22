@@ -1,85 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4a-design-estimates.py  --  PART A: the design-based estimates.
+script4a-design-estimates.py -- main design-based estimates: TWFE (A2), dairy x FSIS (A4), event study (A5), Callaway-Sant'Anna (A6).
 
-REBUILT 2026-09-28 on the corrected panel. The previous file
-(z-archive/script4a-twfe-eventstudy_PRE-REBUILD_2026-09-18.py) ran on the
-pre-CHR-fix panel and used the old A-numbering. Two things changed:
-
-  1. PANEL. Ten control variables were re-sourced to their correct data years
-     (SAIPE / BLS LAUS / SAHIE / Census PEP). See 2026-09-21_CHR-YEAR-MISALIGNMENT.md.
-  2. NAMING. A = built and runnable, B = specified only. See 2026-09-27_MODEL-NAMING.md.
-
-MODELS IN THIS FILE
--------------------
-    A1   Pooled OLS                 state + year FE          benchmark
-    A2   TWFE within-county         county + year FE         HEADLINE
-    A4   Dairy x FSIS interaction   2017-2023, thin sample   exploratory
-    A5   Event study                leads/lags around entry
-    A6   Callaway-Sant'Anna         staggered DiD, ATT(g,t)
-
-    A3 (other-animal horse race) was DROPPED 2026-10-12 (Sept 30 feedback).
-    script4l-a3-horserace.py is retired and no longer part of the pipeline.
-
-RUN 2 ADDITIONS (2026-10-12)
-----------------------------
-* Controls: step-8 set revised in script4_treatment (no %_female; combined
-  Asian+AIAN+NHPI share; %_black).
-* A4 saves SEs for EVERY term (dairy, FSIS, interaction), not just the interaction.
-* A5 also run (a) with baseline (2000) log population x year, and (b) with log
-  population as the OUTCOME -- the depopulation placebo.
-* A6 event-time ATTs now carry bootstrap SEs (aggregated inside each draw).
-* A7 LP-DiD (estimators.lpdid) on the same E2 cohorts as A5/A6.
-* Conley spatial SEs on the A2 grid when county centroids are available
-  (Data/raw/gazetteer/; see estimators.load_centroids).
-
-WHAT CHANGED SUBSTANTIVELY FROM THE 09-18 VERSION
---------------------------------------------------
-* TREATMENTS. A1/A2 now run over CORE_TREATMENTS (T1-T4) -- the decided
-  treatment set -- not the legacy 12-definition TREATMENTS dict. T5 was dropped
-  and T6 retired (D-17), so T1-T4 is the complete set with no unrun members.
-  The legacy grid is still available via --legacy-grid for continuity checks.
-* OUTCOMES. 7, not 6 (the four crime outcomes were settled 2026-09-21, D-11).
-* CONTROLS. ONE control set: the D-16 PRE-COMMITTED STEP-8 SET
-  (COVARIATE_ORDER[:8]). All eight are annually measured at 99.7-99.9% coverage,
-  the estimating sample stays intact (99.7% of outcome rows), and every one can
-  be tested for pre-trends.
-  CONTROL_PRETREAT (18) was REMOVED as a robustness arm on 2026-09-29 (D-29).
-  Its ten extra members are each excluded for a stated substantive reason --
-  two colliders (adult_smoking, teen_births), a spliced measure break
-  (access_to_healthy_foods), an unusable series (driving_alone_to_work), a
-  variable with no usable variation in non-metro counties
-  (%_native_hawaiian/other_pacific_islander), and five that cannot be tested for
-  pre-trends because they are rolling or model-smoothed. Running that set as a
-  "robustness check" would imply the exclusions were arbitrary. They are not.
-  THE STEP-8 SET IS PRE-COMMITTED. It was fixed in D-16 before the stability
-  table in script4c was read. Choosing it afterwards would have been
-  post-selection inference and would invalidate every p-value below.
-
-STANDARD ERRORS
----------------
-Three variance estimators side by side on every estimate:
-    se_state   CRV1 on state_fips   <- HEADLINE. Treatment assignment is
-                                       spatially correlated within state (dairy
-                                       regions), and it is the most conservative
-                                       of the three here.
-    se_county  CRV1 on fips
-    se_hetero  heteroskedasticity-robust
-Reporting all three is the answer to the SE question raised in review; the
-headline choice is not an understatement of uncertainty.
-
-ESTIMATION uses pyfixest.feols, never the legacy within_transform() helper --
-that applied a SINGLE demeaning pass, exact only for balanced panels. This panel
-is unbalanced (77.3% have the full span) and one-shot demeaning gave
-beta = +0.08466 where correct alternating projections give +0.07970: a 6.2%
-error in the POINT ESTIMATE, not just the SE.
-
-IDENTIFYING VARIATION is reported inline (n_switchers, n_transitions). Under
-county FE only counties whose treatment CHANGES contribute to beta, so a row
-with 30 switchers is not the same evidence as one with 300 even at equal N.
-
-Outputs -> Data/output/tables/script4a/  and  figs/script4a/
+Reads:   panel via script4_treatment.load_panel(); Data/merged/*_panel_fsis.csv (A4 only)
+Writes:  Data/output/tables/script4a/<date>_{A1_A2_treatment_grid, A4_fsis_interaction, A5_event_study, A6_cs_att_gt,
+         A6_cs_aggregated, HEADLINE_twfe_vs_cs, VIF_audit}.csv and figs/script4a/*.png
+Run:     python3 script4a-design-estimates.py     (about 7 minutes; 300 bootstrap draws)
+Method:  METHODS.md sections 1-2; state-clustered SEs; CS functions come from did_cs.py.
+Notes:   A1 (pooled state FE) and A7 (LP-DiD) are computed but not reported (D-32).
 """
 import warnings; warnings.filterwarnings("ignore")
 import sys
@@ -96,6 +25,8 @@ from script4_treatment import (
 )
 from functions import latest_file_glob
 from estimators import lpdid, conley_se, load_centroids
+from did_cs import att_gt_table, base_period_covariates
+from did_tools import clean as _clean
 
 OUT_FIGS   = os.path.join(figs_dir,   "script4a")
 OUT_TABLES = os.path.join(tables_dir, "script4a")
@@ -132,14 +63,6 @@ RNG    = np.random.default_rng(20260928)
 # =============================================================================
 # Helpers
 # =============================================================================
-def _clean(name):
-    # "/" must be stripped: %_native_hawaiian/other_pacific_islander otherwise
-    # splits into two tokens and pyfixest's formula parser fails.
-    return (name.replace("%", "pct").replace("-", "_").replace(" ", "_")
-                .replace("(", "").replace(")", "").replace("/", "_")
-                .replace("+", "p").replace(",", "_"))
-
-
 def prep(df, cols):
     """Subset to `cols`, drop incomplete rows, return (frame, {orig: clean})."""
     cols = list(dict.fromkeys(cols))
@@ -535,100 +458,6 @@ print(f"  cohorts: {[int(c) for c in COHORTS]}")
 print(f"  control group: not-yet-treated (cohort > t) + never-treated")
 print(f"  inference: {N_BOOT}-rep cluster bootstrap over states")
 print(f"  covariates: NONE -- unconditional parallel trends. See docstring.\n")
-
-
-def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None,
-                 Xbase=None, use_cov=False, min_n=10):
-    """All ATT(g,t) for one outcome. `wide` is fips x year.
-
-    use_cov=False  UNCONDITIONAL. ATT(g,t) is a raw difference of long
-                   differences. Parallel trends assumed unconditionally.
-
-    use_cov=True   OUTCOME-REGRESSION ADJUSTED (merged in from the former
-                   script4i, 2026-09-29). Parallel trends assumed CONDITIONAL on
-                   X, which is the same assumption A2 makes -- so the
-                   TWFE-vs-CS comparison becomes assumption-matched instead of
-                   confounding the estimator with the conditioning set.
-
-                   For cohort g and period t:
-                     1. dY_i = Y_i,t - Y_i,(g-1) for every unit
-                     2. fit dY = X'b ON THE CLEAN CONTROL GROUP ONLY, where X is
-                        measured at the BASE PERIOD g-1 -- pre-treatment by
-                        construction, so this cannot condition on a
-                        post-treatment variable
-                     3. predict each treated unit's counterfactual dYhat = X'b
-                     4. ATT(g,t) = mean(dY | treated) - mean(dYhat | treated)
-
-                   Fitting on controls only is what makes this an adjustment
-                   rather than a regression that absorbs the treatment effect.
-                   Cells too thin to fit the adjustment fall back to the
-                   unconditional estimate and are flagged with fallback=1, so a
-                   "conditional" aggregate that is silently part unconditional
-                   cannot be reported as if it were not.
-    """
-    out = []
-    idx = wide.index if keep_fips is None else wide.index.intersection(keep_fips)
-    coh = cohort_of.reindex(idx)
-    for g in cohorts:
-        base = g - 1
-        if base not in wide.columns:
-            continue
-        treated = idx[(coh == g).values]
-        if len(treated) < min_n:
-            continue
-        Xb = Xbase.get(base) if (use_cov and Xbase) else None
-        for t in years:
-            if t == base or t not in wide.columns:
-                continue
-            ctrl = idx[((coh.isna()) | (coh > max(t, g))).values]
-            d_all = wide[t] - wide[base]
-            dt, dc = d_all.reindex(treated).dropna(), d_all.reindex(ctrl).dropna()
-            if len(dt) < min_n or len(dc) < min_n:
-                continue
-            rec = {"cohort": int(g), "year": int(t), "event_time": int(t - g)}
-
-            if Xb is None:
-                out.append({**rec, "att": float(dt.mean() - dc.mean()),
-                            "n_treated": int(len(dt)), "n_control": int(len(dc)),
-                            "fallback": 0})
-                continue
-
-            Xc = Xb.reindex(dc.index).dropna()
-            Xt = Xb.reindex(dt.index).dropna()
-            if len(Xc) < max(min_n, Xb.shape[1] + 5) or len(Xt) < min_n:
-                out.append({**rec, "att": float(dt.mean() - dc.mean()),
-                            "n_treated": int(len(dt)), "n_control": int(len(dc)),
-                            "fallback": 1})
-                continue
-            yc = dc.reindex(Xc.index).values
-            A  = np.column_stack([np.ones(len(Xc)), Xc.values])
-            try:
-                b, *_ = np.linalg.lstsq(A, yc, rcond=None)
-            except np.linalg.LinAlgError:
-                continue
-            pred = np.column_stack([np.ones(len(Xt)), Xt.values]) @ b
-            out.append({**rec,
-                        "att": float(dt.reindex(Xt.index).mean() - pred.mean()),
-                        "n_treated": int(len(Xt)), "n_control": int(len(Xc)),
-                        "fallback": 0})
-    return out
-
-
-def base_period_covariates(d, cohorts, xcols):
-    """Covariates at each candidate base period g-1, standardised.
-
-    Standardising inside the base period keeps the control-group regression
-    numerically well behaved when covariates are on wildly different scales
-    (dollars of income against a percentage). It does not change ATT.
-    """
-    Xbase = {}
-    for g in cohorts:
-        b = g - 1
-        sub = d[d.year == b].set_index("fips")[xcols]
-        if len(sub):
-            sd = sub.std().replace(0, np.nan)
-            Xbase[b] = ((sub - sub.mean()) / sd).dropna(axis=1, how="all")
-    return Xbase
 
 
 X_CS = [c for c in CONTROLS_HEADLINE if c in df.columns]

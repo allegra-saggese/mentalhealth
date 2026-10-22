@@ -1,34 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4v-trend-plots.py  --  WHAT DO THE OUTCOME TRENDS LOOK LIKE?  (added 2026-10-17)
+script4v-trend-plots.py -- raw outcome trends by county group, event-time paths, and pre-treatment slope tests (descriptive).
 
-Descriptive pictures and simple time regressions, no controls and no fixed effects, so the raw
-paths are visible before any model is applied. Nothing here is an estimate of a treatment effect.
-
-GROUPS (county level, from the zero-filled CAFO counts in load_panel)
-    never large dairy        no large dairy operation in any census wave                      (comparison)
-    enters                   first goes from 0 to 1+ large dairies at some wave (first entry)
-    expands only             a positive change in an existing large-dairy count, never enters
-    large dairy throughout   has a large dairy at some wave, never enters or expands
-
-FIGURES  (-> Data/output/figs/script4v/)
-    F1  outcome means by calendar year, one line per group, 7 panels (own y-axis each)
-    F2  event-time path: mean change in the outcome since the year before treatment (g-1), treated
-        counties vs comparison counties, for each of the two treatment definitions
-    F3  pre-treatment slope difference by cohort: treated minus comparison, in outcome SDs per year
-
-TABLES  (-> Data/output/tables/script4v/): the numbers behind every figure.
-
-SIMPLE TIME REGRESSION (F3 / pre_window_slopes.csv)
-    For cohort g, window = the 5 years before treatment (g-5 ... g-1), counties with >= 3 years of data:
-        Y_it = a_i + b * year_t + c * (treated_i x year_t) + e_it       county FE, SE clustered by state
-    c = how much faster (or slower) treated counties' outcomes were already moving per year.
-    Outcomes that start late (poor mental-health days from 2010, frequent mental distress from 2016) have
-    no usable window for early cohorts; those cells are simply absent.
-
-COLOURS: categorical slots 1-4 of the reference palette (validated; the aqua/yellow contrast warning is
-met with a legend, different line styles and the CSV tables).
+Groups: never large dairy; enters; expands only; large dairy throughout (designs.county_groups).
+Reads:   panel via script4_treatment.load_panel()
+Writes:  Data/output/figs/script4v/<date>_{F1_means_by_group, F2_event_time_expansion, F2_event_time_entry, F3_pre_window_slope_difference}.png
+         and the numbers behind them in Data/output/tables/script4v/
+Run:     python3 script4v-trend-plots.py
+Method:  slope test in METHODS.md section 3. No controls and no fixed effects, so the raw paths are visible.
 """
 import warnings; warnings.filterwarnings("ignore")
 import numpy as np
@@ -38,7 +18,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from script4_treatment import load_panel, OUTCOMES, CENSUS_YEARS, figs_dir, tables_dir, os, date
+from designs import county_groups
+from script4_treatment import load_panel, OUTCOMES, figs_dir, tables_dir, os, date
 
 OUT_F = os.path.join(figs_dir, "script4v"); os.makedirs(OUT_F, exist_ok=True)
 OUT_T = os.path.join(tables_dir, "script4v"); os.makedirs(OUT_T, exist_ok=True)
@@ -52,20 +33,7 @@ SHORT = {"Poor MH Days": "Poor mental-health days", "Frequent Mental Distress": 
 df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
 
 # ------------------------------------------------------------------ groups
-waves = df[df.year.isin(CENSUS_YEARS)].pivot(index="fips", columns="year", values="cafo_dairy_large")
-ever_large = (waves.fillna(0) > 0).any(axis=1)
-info = df.groupby("fips").agg(entry=("entry_year", "first"), add=("add_year", "first"))
-info["ever_large"] = ever_large.reindex(info.index).fillna(False)
-
-
-def grp(r):
-    if pd.notna(r.entry): return "enters"
-    if pd.notna(r["add"]): return "expands only"
-    if r.ever_large: return "large dairy throughout"
-    return "never large dairy"
-
-
-info["group"] = info.apply(grp, axis=1)
+info = county_groups(df)
 df["group"] = df["fips"].map(info["group"])
 GROUPS = [("never large dairy", "#2a78d6", "-"), ("enters", "#eb6834", "--"),
           ("expands only", "#1baf7a", "-."), ("large dairy throughout", "#eda100", ":")]

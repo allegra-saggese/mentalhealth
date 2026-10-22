@@ -1,56 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4u-did-by-treatment.py  --  DiD ESTIMATES FOR TWO "FIRST TREATED YEAR" DEFINITIONS (added 2026-10-17)
+script4u-did-by-treatment.py -- TWFE, event study and Callaway-Sant'Anna for first expansion and first entry, with pre-trend adjustments.
 
-Runs the same three estimators for two definitions of when a county becomes treated, and adds the
-pre-trend adjustments the team asked about. Written as a new script (script4a untouched) with the CS
-code in did_cs.py; a built-in check reproduces script4a's results for the first definition.
-
-TREATMENT DEFINITIONS   (g = a county's first treated year; always a census wave: 2007/12/17/22)
-    first expansion   tr_e2_add_absorb  g = first wave the county's number of large dairies goes UP.
-                      Sample: every rural county (same as script4a).
-    first entry       tr_e3_entry_absorb g = first wave the count goes from 0 to 1+.
-                      Sample: entry counties + counties that NEVER have a large dairy in any census
-                      wave (clean comparison group). Counties that only expand an existing large dairy
-                      or have one throughout are LEFT OUT, because they are not valid "untreated"
-                      comparisons for an entry design (decision Q-A, 2026-10-17).
-
-ESTIMATORS    (all: 8 controls from COVARIATE_ORDER[:8], county + year fixed effects, SE clustered by state)
-    static TWFE      Y_it = b D_it + X_it'c + a_i + d_t + e_it
-    event study      Y_it = sum_{e != -1} theta_e 1[t - g_i = e] + X_it'c + a_i + d_t + e_it,
-                     e = year - g clipped to [-8, 8], reference e = -1, never-treated in the reference.
-                     Leads (e < -1) are the pre-trend test; joint Wald chi-square that all leads are 0.
-    Callaway-Sant'Anna, covariate-adjusted (see did_cs.py), bootstrap over states.
-
-PRE-TREND ADJUSTMENTS    (each is a second specification next to the baseline)
-    county trends    adds a county-specific linear time trend l_i * t to the static TWFE and the event study.
-                     NOT done with pyfixest's  fips[year]  syntax: in pyfixest 0.60 that term is silently
-                     ignored (tested 2026-10-17: identical coefficient to the model without it). Instead the
-                     outcome and every regressor are residualized on county intercepts + county linear trends +
-                     year effects by alternating projections (Frisch-Waugh), then OLS with state-clustered
-                     SEs (fe_ols below). fe_ols with no trend is checked to equal pyfixest.
-    past outcomes    adds the outcome's own levels in years g-1 and g-2 to the CS covariates, so comparison
-                     counties are matched on their pre-treatment outcome path.
-    state x year FE  replaces the year effects with state-by-year effects: treated counties are compared only
-                     with comparison counties in the SAME STATE and year, which removes regional drift.
-                     (checked: every treated county sits in a state that also has comparison counties.)
-    baseline x time  adds baseline (2002) county characteristics x (year-2002) and x (year-2002)^2:
-                     log population, median household income, % Hispanic, % 65+, unemployment, and the 2002
-                     number of dairy operations (all sizes, and large). Lets different kinds of counties drift
-                     differently using only pre-treatment information, without a free slope per county.
-    (the HonestDiD sensitivity analysis is a separate step, not in this script.)
-
-OUTPUTS -> Data/output/tables/script4u/
-    <date>_static_twfe.csv           design, spec, outcome, beta, se, p, N, treated counties
-    <date>_event_study.csv           design, spec, outcome, event_time, beta, se, p
-    <date>_event_study_leads_joint.csv   joint Wald test of the leads
-    <date>_cs_att_gt.csv, <date>_cs_aggregated.csv   design, spec, outcome, ATT(g,t) / event-time / overall
-    <date>_validation_vs_script4a.csv   max abs difference from script4a for the first-expansion baseline
-
-Usage:  python3 script4u-did-by-treatment.py            full run (300 bootstrap draws; about 30 minutes)
-        python3 script4u-did-by-treatment.py --no-cs    TWFE and event studies only (minutes); the CS files are left as they were
-        python3 script4u-did-by-treatment.py --quick    20 draws, two outcomes (for testing)
+Designs: first expansion (all rural counties); first entry (entry counties plus never-large counties as controls; D-32).
+Adjustments: county trends, state x year FE, baseline characteristics x time polynomial, past outcomes in CS.
+Reads:   panel via designs.load_designs()
+Writes:  Data/output/tables/script4u/<date>_{static_twfe, event_study, event_study_leads_joint, cs_att_gt, cs_aggregated, validation_vs_script4a}.csv
+Run:     python3 script4u-did-by-treatment.py   (about 30 minutes; --no-cs skips CS; --quick is a test run)
+Method:  METHODS.md sections 2-3. The first-expansion baseline is checked against script4a; the CS code is in did_cs.py.
 """
 import warnings; warnings.filterwarnings("ignore")
 import glob
@@ -62,9 +20,9 @@ import pyfixest as pf
 from scipy.stats import chi2
 
 from did_cs import run_cs
-from script4_treatment import (
-    load_panel, OUTCOMES, COVARIATE_ORDER, CENSUS_YEARS, tables_dir, os, date,
-)
+from did_tools import clean, joint_wald, fe_ols, event_study_frame, stars as st
+from designs import load_designs
+from script4_treatment import OUTCOMES, COVARIATE_ORDER, tables_dir, os, date
 
 QUICK = "--quick" in sys.argv
 NO_CS = "--no-cs" in sys.argv
@@ -76,100 +34,13 @@ CLIP = 8
 OUTCOME_LIST = dict(list(OUTCOMES.items())[:2]) if QUICK else OUTCOMES
 
 
-def clean(name):
-    return (name.replace("%", "pct").replace("-", "_").replace(" ", "_").replace("(", "")
-                .replace(")", "").replace("/", "_").replace("+", "p").replace(",", "_"))
-
-
-def residualize(frame, cols, trend, tol=1e-11, max_iter=500):
-    """Remove county intercepts, (optionally) county linear trends and year effects from `cols`
-    by alternating projections. Returns a residualized copy of frame[cols]."""
-    V = frame[cols].to_numpy(dtype=float).copy()
-    g = pd.Series(frame["fips"].to_numpy())
-    yr = pd.Series(frame["year"].to_numpy(dtype=float))
-    t = yr - yr.groupby(g).transform("mean")           # centred within county
-    tt = (t ** 2).groupby(g).transform("sum").replace(0, np.nan)
-    for _ in range(max_iter):
-        prev = V.copy()
-        for j in range(V.shape[1]):
-            v = pd.Series(V[:, j])
-            v = v - v.groupby(g).transform("mean")                         # county intercept
-            if trend:
-                slope = ((t * v).groupby(g).transform("sum") / tt).fillna(0.0)
-                v = v - slope * t                                           # county linear trend
-            v = v - v.groupby(yr).transform("mean")                         # year effect
-            V[:, j] = v.to_numpy()
-        if np.max(np.abs(V - prev)) < tol:
-            break
-    return pd.DataFrame(V, columns=cols, index=frame.index)
-
-
-def fe_ols(frame, y, xcols, trend):
-    """OLS of y on xcols after removing county FE, year FE and (if trend) county linear trends.
-    SE clustered on state_fips with pyfixest's small-sample convention G/(G-1)*(N-1)/(N-K)."""
-    R = residualize(frame, [y] + xcols, trend)
-    X, yv = R[xcols].to_numpy(), R[y].to_numpy()
-    XtXi = np.linalg.inv(X.T @ X)
-    b = XtXi @ X.T @ yv
-    e = yv - X @ b
-    cl = frame["state_fips"].to_numpy()
-    meat = np.zeros((X.shape[1], X.shape[1]))
-    for c in np.unique(cl):
-        idx = cl == c
-        sc = X[idx].T @ e[idx]
-        meat += np.outer(sc, sc)
-    G, N, K = len(np.unique(cl)), len(yv), X.shape[1]
-    Vc = XtXi @ meat @ XtXi * (G / (G - 1)) * ((N - 1) / (N - K))
-    se = np.sqrt(np.diag(Vc))
-    from scipy.stats import t as tdist
-    p = 2 * (1 - tdist.cdf(np.abs(b / se), G - 1))
-    return pd.DataFrame({"beta": b, "se": se, "p": p}, index=xcols), Vc, N
-
-
-def joint_wald(model, names):
-    cn = list(model._coefnames)
-    idx = [cn.index(n) for n in names if n in cn]
-    if not idx:
-        return np.nan, 0, np.nan
-    b = np.asarray(model.coef())[idx]
-    V = np.asarray(model._vcov)[np.ix_(idx, idx)]
-    stat = float(b @ np.linalg.solve(V, b))
-    return stat, len(idx), float(1 - chi2.cdf(stat, len(idx)))
-
-
-df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
-
-# ---- baseline characteristics x time polynomial (columns added to df) ----
-BASE_YEAR = 2002
-BL_VARS = ["log_pop", "median_household_income", "%_hispanic", "%_65_and_older", "unemployment_per100k",
-           "cafo_dairy_total", "cafo_dairy_large"]
-_bl = df[df["year"] == BASE_YEAR].set_index("fips")[BL_VARS]
-_bl = (_bl - _bl.mean()) / _bl.std()                         # standardised so the interactions are well scaled
-_t1 = (df["year"] - BASE_YEAR) / 10.0
-POLY_COLS = []
-for k, v in enumerate(BL_VARS):
-    b = df["fips"].map(_bl[v])
-    df[f"bl{k}_t1"], df[f"bl{k}_t2"] = b * _t1, b * _t1 ** 2
-    POLY_COLS += [f"bl{k}_t1", f"bl{k}_t2"]
+df, DESIGNS, POLY_COLS, _counts = load_designs(with_polynomial=True)
 PF_SPECS = [("baseline", "fips + year", []),
             ("state x year FE", "fips + state_fips^year", []),
             ("baseline chars x time polynomial", "fips + year", POLY_COLS)]
 
-# ---- sample for the entry design: entry counties + counties that never have a large dairy ----
-waves = df[df.year.isin(CENSUS_YEARS)].pivot(index="fips", columns="year", values="cafo_dairy_large")
-never_large = set(waves.index[~(waves.fillna(0) > 0).any(axis=1)])
-entry_counties = set(df.loc[df["entry_year"].notna(), "fips"].unique())
-df_entry = df[df["fips"].isin(never_large | entry_counties)].copy()
-print(f"entry design: {len(entry_counties)} entry counties + {len(never_large)} never-large counties "
-      f"= {df_entry.fips.nunique()} of {df.fips.nunique()} counties")
-
-DESIGNS = {
-    "first expansion": dict(data=df, cohort="add_year", treat="tr_e2_add_absorb"),
-    "first entry (clean controls)": dict(data=df_entry, cohort="entry_year", treat="tr_e3_entry_absorb"),
-}
-for d in DESIGNS.values():
-    d["data"] = d["data"].copy()
-    d["data"]["t_rel"] = d["data"]["year"] - d["data"][d["cohort"]]
+print(f"entry design: {_counts['n_entry']} entry counties + {_counts['n_never_large']} never-large counties "
+      f"= {_counts['n_entry_sample']} of {_counts['n_all']} counties")
 
 static_rows, es_rows, joint_rows, gt_all, agg_all, fe_checks = [], [], [], [], [], []
 
@@ -202,15 +73,9 @@ for dname, D in DESIGNS.items():
             except Exception as e:
                 print(f"  static [{dname}|{spec}|{okey}] failed: {type(e).__name__}: {e}")
         # ----------------------------- event study -----------------------------
-        def build_es(extra):
-            need = list(dict.fromkeys(["fips", "year", "state_fips", ocol, "t_rel"] + CONTROLS + extra))
-            e_ = data[need].copy()
-            e_["ev"] = e_["t_rel"].clip(-CLIP, CLIP)
-            e_.loc[e_["t_rel"].isna(), "ev"] = -1
-            return e_.drop(columns=["t_rel"]).dropna().rename(columns={c: clean(c) for c in e_.columns if c != "t_rel"})
         for spec, fe, extra in PF_SPECS:
             try:
-                es = build_es(extra)
+                es = event_study_frame(data, ocol, CONTROLS, extra, CLIP)
                 f = (f"{clean(ocol)} ~ i(ev, ref=-1) + " + " + ".join(clean(c) for c in CONTROLS + extra) + f" | {fe}")
                 m = pf.feols(f, data=es, vcov={"CRV1": "state_fips"}); tid = m.tidy()
                 leads = []
@@ -230,7 +95,7 @@ for dname, D in DESIGNS.items():
                 print(f"  event [{dname}|{spec}|{okey}] failed: {type(e).__name__}: {e}")
         # county trends: event-time dummies built by hand, residualized with county trends
         try:
-            es = build_es([])
+            es = event_study_frame(data, ocol, CONTROLS, [], CLIP)
             evs = sorted(int(x) for x in es["ev"].unique() if x != -1)
             D_ = pd.DataFrame({f"ev_{e}": (es["ev"] == e).astype(float) for e in evs}, index=es.index)
             ee = pd.concat([es.reset_index(drop=True), D_.reset_index(drop=True)], axis=1)
@@ -295,10 +160,6 @@ val.append({"check": "fe_ols (no trend) vs pyfixest, static beta", "max_abs_diff
 val.append({"check": "fe_ols (no trend) vs pyfixest, static se (RELATIVE diff)", "max_abs_diff": float(fc.se_diff.max()), "n": len(fc)})
 val = pd.DataFrame(val)
 val.to_csv(os.path.join(OUT, f"{TODAY}_validation_vs_script4a.csv"), index=False)
-
-
-def st(p):
-    return "***" if p < .01 else "**" if p < .05 else "*" if p < .10 else ""
 
 
 print("\n" + "=" * 100 + "\nVALIDATION: first-expansion baseline vs script4a (should be ~0)\n" + "=" * 100)

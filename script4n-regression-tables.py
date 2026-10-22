@@ -1,32 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4n-regression-tables.py  --  regression tables in standard paper format.
+script4n-regression-tables.py -- regression tables in paper format (no estimation).
 
-REWRITTEN 2026-10-12 (run 2). Reads the latest CSVs from script4a (A1, A2, A4,
-A5, A6, A7, VIF, Conley) and script4r (slaughterhouse R0-R4). NO estimation.
-
-FORMAT (applies to every table)
--------------------------------
-    columns  = outcomes (1)-(7), grouped Mental health | Mortality | Arrests
-    panels   = treatments (Panel A, B, ...), one coefficient row each,
-               standard error in parentheses directly below
-    bottom   = Observations, Counties, State clusters, Controls, FE rows
-    stars    = *** p<0.01, ** p<0.05, * p<0.10   (state-clustered p-values)
-Notes go in the document, not inside the tabular, so each fragment can be
-\\input into a paper, a slide or the appendix unchanged.
-
-A3 was dropped 2026-10-12 and is no longer read.
-
-REPORTED vs ROBUSTNESS (2026-10-15, team feedback). script4_treatment.REPORT_*
-sets what appears in the MAIN exhibits: treatments T1, T3, T4, E2; county + year
-FE (A2); state-clustered SEs; Callaway-Sant'Anna covariate-adjusted. Nothing is
-dropped: the other specifications (T2, A1 state FE, CS-unconditional, LP-DiD,
-Conley, the all-treatment grid) are still written, as separate tables collected
-in _BODY_robustness.tex and the second half of REGRESSION_TABLES.tex.
-
-Output -> LATEX_OUT/tables/*.tex, LATEX_OUT/REGRESSION_TABLES.tex (+ .pdf if
-pdflatex is available), LATEX_OUT/_BODY_regressions.tex for script4p.
+Reads:   the newest CSVs from script4a and script4r
+Writes:  LATEX_OUT/tables/*.tex, _BODY_regressions.tex (reported exhibits), _BODY_robustness.tex (cut specifications),
+         REGRESSION_TABLES.tex and .pdf
+Run:     python3 script4n-regression-tables.py
+Method:  the reported set is REPORT_* in script4_treatment (D-32); the other specifications go to the robustness tables.
 """
 import warnings; warnings.filterwarnings("ignore")
 import glob, math, subprocess
