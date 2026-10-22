@@ -146,7 +146,10 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 
 After the panel exists in `Data/merged/` (stages 0–1), the reported results are produced in this order. Each script writes dated files to `Data/output/`; the exhibit scripts read the newest file, so run in order and archive old outputs first (see `code-audit/plans/2026-10-17_MODEL-RUN-STATE.md`).
 
+**Set `PYTHONHASHSEED=0` before running.** `pyfixest`'s results depend on Python's per-process string-hash seed: the same script run twice can differ by about 2e-5 in the standard errors (coefficients by about 1e-8) depending on the seed. Nothing material changes, but unseeded runs are not byte-for-byte reproducible. `environment.yml` sets it automatically for the conda environment; otherwise export it.
+
 ```bash
+export PYTHONHASHSEED=0
 python3 script4j-control-diagnostics.py      # control pre-trends
 python3 script4a-design-estimates.py         # A2, A4, A5, A6 (and unreported A1, A7)        ~7 min
 python3 script4r-fsis-treatment.py           # slaughterhouse treatment

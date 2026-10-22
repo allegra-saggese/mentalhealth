@@ -8,3 +8,5 @@ dependencies:
   - pip
   - pip:
       - -r requirements.txt
+variables:
+  PYTHONHASHSEED: "0"      # pyfixest results depend on the hash seed at about 2e-5 in SEs; fixing it makes runs reproducible
