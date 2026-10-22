@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+designs.py -- the treatment designs and county groups shared by the stage-4 scripts (4u, 4v, 4w, 4x).
+
+load_designs()      panel + the two designs (first expansion; first entry with clean controls)
+add_baseline_polynomial   2002 characteristics x time polynomial columns (used by script4u)
+county_groups()     enters / expands only / large dairy throughout / never large dairy
+species_treatments()  count and T1, T3, T4, E2 for one species and size scope (script4x)
+
+Definitions are in METHODS.md section 1.
+KNOWN DISCREPANCY (QA #28): 17 counties have no row in any census year. load_designs() leaves them out of the
+never-large set (2,103 counties); county_groups() counts them as never-large (2,120). Both are kept as they were so
+that no result changes; decide on one definition separately.
+"""
+import numpy as np
+import pandas as pd
+
+from script4_treatment import load_panel, CENSUS_YEARS
+
+BASE_YEAR = 2002
+BL_VARS = ["log_pop", "median_household_income", "%_hispanic", "%_65_and_older", "unemployment_per100k",
+           "cafo_dairy_total", "cafo_dairy_large"]
+
+
+def add_baseline_polynomial(df, base_year=BASE_YEAR):
+    """Add baseline-characteristic x time columns bl{k}_t1, bl{k}_t2 to df (in place) and return their names."""
+    _bl = df[df["year"] == base_year].set_index("fips")[BL_VARS]
+    _bl = (_bl - _bl.mean()) / _bl.std()                         # standardised so the interactions are well scaled
+    _t1 = (df["year"] - base_year) / 10.0
+    cols = []
+    for k, v in enumerate(BL_VARS):
+        b = df["fips"].map(_bl[v])
+        df[f"bl{k}_t1"], df[f"bl{k}_t2"] = b * _t1, b * _t1 ** 2
+        cols += [f"bl{k}_t1", f"bl{k}_t2"]
+    return cols
+
+
+def load_designs(with_polynomial=False):
+    """Returns (df, designs, poly_cols, counts). designs maps a name to dict(data, cohort, treat) with
+    t_rel = year - cohort; counts has the sizes of the entry sample for logging."""
+    df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
+    poly_cols = add_baseline_polynomial(df) if with_polynomial else []
+    waves = df[df.year.isin(CENSUS_YEARS)].pivot(index="fips", columns="year", values="cafo_dairy_large")
+    never_large = set(waves.index[~(waves.fillna(0) > 0).any(axis=1)])
+    entry_counties = set(df.loc[df["entry_year"].notna(), "fips"].unique())
+    df_entry = df[df["fips"].isin(never_large | entry_counties)].copy()
+    designs = {
+        "first expansion": dict(data=df, cohort="add_year", treat="tr_e2_add_absorb"),
+        "first entry (clean controls)": dict(data=df_entry, cohort="entry_year", treat="tr_e3_entry_absorb"),
+    }
+    for d in designs.values():
+        d["data"] = d["data"].copy()
+        d["data"]["t_rel"] = d["data"]["year"] - d["data"][d["cohort"]]
+    counts = dict(n_entry=len(entry_counties), n_never_large=len(never_large),
+                  n_entry_sample=df_entry.fips.nunique(), n_all=df.fips.nunique())
+    return df, designs, poly_cols, counts
+
+
+def county_groups(df):
+    """One row per county with entry/add years, ever_large, and the group label used in the trend figures."""
+    waves = df[df.year.isin(CENSUS_YEARS)].pivot(index="fips", columns="year", values="cafo_dairy_large")
+    ever_large = (waves.fillna(0) > 0).any(axis=1)
+    info = df.groupby("fips").agg(entry=("entry_year", "first"), add=("add_year", "first"))
+    info["ever_large"] = ever_large.reindex(info.index).fillna(False)
+
+    def grp(r):
+        if pd.notna(r.entry): return "enters"
+        if pd.notna(r["add"]): return "expands only"
+        if r.ever_large: return "large dairy throughout"
+        return "never large dairy"
+
+    info["group"] = info.apply(grp, axis=1)
+    return info
+
+
+def species_treatments(df, species, bins):
+    """Count and the five treatment variables for one species x scope. Returns a frame aligned to df."""
+    cols = [f"cafo_{species}_{b}" for b in bins]
+    raw = df[cols]
+    filled = raw.where(df["year"] < min(CENSUS_YEARS), raw.fillna(0))       # D-34: zero from 2002, 2000-01 stay missing
+    C = filled.sum(axis=1, min_count=1)
+    out = pd.DataFrame(index=df.index)
+    out["count"] = C
+    out["T1"] = (C > 0).astype(float).where(C.notna())
+    out["T3"] = C / df["population"].replace(0, np.nan) * 10_000
+    out["T4"] = np.log1p(C)
+    # first census wave at which the county's count rises relative to its PREVIOUS OBSERVED wave. Mirrors
+    # script4_treatment._wave_events: the lag is the previous wave the county has a row for (a county missing a
+    # wave is compared with the one before it), not a calendar-based diff.
+    w = pd.DataFrame({"fips": df["fips"], "year": df["year"], "C": C})
+    w = w[w.year.isin(CENSUS_YEARS)].dropna(subset=["C"]).sort_values(["fips", "year"])
+    w["lag"] = w.groupby("fips")["C"].shift(1)
+    rises = w[w["lag"].notna() & (w["C"] - w["lag"] > 0)]
+    first = rises.groupby("fips")["year"].min()
+    out["add_year"] = df["fips"].map(first)
+    D = np.where(out["add_year"].notna() & (df["year"] >= out["add_year"]), 1.0, 0.0)
+    out["E2"] = pd.Series(D, index=df.index).where(C.notna())
+    return out
