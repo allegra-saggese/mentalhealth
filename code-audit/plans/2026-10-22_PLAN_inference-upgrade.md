@@ -24,8 +24,8 @@ Three separate questions follow: are the cluster-robust p-values reliable with 4
 
 | Family | Members | Correction | Purpose |
 |---|---|---|---|
-| F1 confirmatory | Poor MH Days and Frequent Mental Distress × {T1, T3, T4, E2} (8 tests) | Holm (family-wise error); Romano–Wolf step-down using the joint wild-bootstrap draws from Part 1 | the claim about mental health |
-| F2 exploratory | all 28 reported A2 cells (adds deaths of despair and the four crime outcomes) | Benjamini–Hochberg (false discovery rate) | screening, labelled exploratory; crime outcomes fail pre-trends (D-23) |
+| F1 confirmatory | Poor MH Days and Frequent Mental Distress × {T1, T3, T4, E2} (8 tests) | Holm over all 8; Romano–Wolf step-down within each outcome, using the joint wild-bootstrap draws (D-43) | the claim about mental health |
+| F2 exploratory | all 28 reported A2 cells (adds deaths of despair and the four crime outcomes) | Benjamini–Hochberg (false discovery rate) on the analytic state-clustered p-values | screening, labelled exploratory; crime outcomes fail pre-trends (D-23) |
 
 Report unadjusted and adjusted p-values side by side; the family and the correction go in the table note. Romano–Wolf needs the bootstrap statistics for all members of a family drawn with the same state weights (Part 1 must keep the draws).
 
@@ -34,7 +34,7 @@ HonestDiD on the CS event study needs a bootstrap covariance matrix (open item i
 
 ## Implementation (nothing built yet)
 - New helper module `inference_tools.py` (**created and tested 2026-10-22**, `tests/test_inference_tools.py`): `wild_cluster_pvalue`, `permutation_pvalue`, `holm`, `romano_wolf`, `bh_qvalues`. Each tested on a simulated panel with known truth and on a null panel (size near 5%).
-- New script `script4z-inference.py` (or `script4zb-…` if the triangulation script takes `4z`) writing dated CSVs; exhibit scripts read them; no estimation in exhibit scripts.
+- `script4z-inference.py` (**written and run for Part 1 and Part 3, 2026-10-22**) writes dated CSVs; the triangulation script then takes the next free letter (`4za`). Part 2 (permutation) is not yet built.
 - `PYTHONHASHSEED=0`, `default_rng(seed)` once, seeds recorded in the output file.
 
 ## Verification

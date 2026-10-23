@@ -59,7 +59,8 @@ def romano_wolf(t_obs, t_boot):
 def wild_cluster_test(fit, param, reps=9999, seed=None, weights_type="webb", bootstrap_type="11", impose_null=True):
     """Wild cluster bootstrap-t for one coefficient of a fitted pyfixest `feols` model.
 
-    The clustering variable is the one the model was fitted with (state in this project). Webb six-point
+    The clustering variable is the one the model was fitted with (state in this project) and must be numeric:
+    wildboottest compiles with numba and fails on an object-dtype column (use pd.factorize first). Webb six-point
     weights are the default because state sizes are very uneven; use weights_type="rademacher" as a check.
     bootstrap_type is one of "11", "31", "13", "33" (wildboottest). Returns a dict with the observed t,
     the bootstrap p-value, the bootstrap t draws, and the settings used.

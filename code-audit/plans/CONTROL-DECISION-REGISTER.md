@@ -833,3 +833,13 @@ exploratory. The crime outcomes and deaths of despair are not part of the confir
 shown this family's unadjusted count (6 of 8 cells significant at 5%) and its Holm and Benjamini–Hochberg count
 (1 of 8). The family was not fixed blind; any adjusted value reported later for it carries that label.
 Implementation: `2026-10-22_PLAN_inference-upgrade.md`, Part 3.
+
+### D-43 · DECIDED 2026-10-22 · Romano–Wolf is applied within each outcome; Holm across the family (refines D-42)
+**Decision (the owner's):** Romano–Wolf step-down needs every test to use the same resampling weights in each bootstrap
+draw. The four treatments of one outcome share one sample and the same 48 states, so one seed gives them identical state
+weights (check: the bootstrap t-statistics correlate at 0.42 or more across treatments). The two outcomes have different
+samples, so no valid joint draws exist across outcomes. Therefore: **Romano–Wolf within each outcome (4 tests each)**, and
+**Holm over all 8 wild-bootstrap p-values** for the cross-outcome family-wise correction. A single Romano–Wolf over all 8 is
+not reported. Implemented in `script4z-inference.py` (9,999 draws, Webb weights, seed 20261022); the script first reproduces
+script4a's A2 coefficient and p-value for each cell and stops if they differ. Exploratory family F2 (28 cells):
+Benjamini–Hochberg on the analytic state-clustered p-values (a wild bootstrap of all 28 was not run).

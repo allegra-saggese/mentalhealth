@@ -1,0 +1,10 @@
+# Optional cross-check estimators (independent implementations used to audit did_cs.py and to run the
+# triangulation plan). Install into a SEPARATE environment so the pinned results environment does not change:
+#   python3 -m venv .venv && ./.venv/bin/pip install -r requirements-crosscheck.txt      (.venv/ is git-ignored)
+# Tested 2026-10-22 on Python 3.13.5: all four recover a known effect of 2.0 on a simulated staggered panel.
+csdid==0.4.2                  # Callaway-Sant'Anna (Python port of the R package)
+moderndid==0.3.1              # Callaway-Sant'Anna and de Chaisemartin-D'Haultfoeuille
+py-did-multiplegt-dyn==0.1.9  # de Chaisemartin-D'Haultfoeuille DID_l; reproduces the R package's estimates
+polars==1.44.2                # must stay below 2.0: py-did-multiplegt-dyn 0.1.9 calls pl.count(), removed in polars 2.0
+numpy==2.5.4
+pandas==3.1.0
