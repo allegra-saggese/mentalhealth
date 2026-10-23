@@ -26,3 +26,31 @@ The pre-period results (CS shows 5 of 11 significant pre-period event times for 
 convention. **Not decided:** which convention the paper's CS event study should use. If the packages' convention is adopted, the pre-period
 placebo cells and their significance would be re-estimated; that is a researcher choice (estimand-adjacent) and would get a D-number. Standard errors
 were not compared (`did_cs.py` bootstraps over states; the packages use analytic influence functions).
+
+## Resolution (2026-10-23): D-44 adopted, re-estimated, verified
+The packages' convention was adopted (D-44; commit `5d0745b`). After the change `did_cs.py` agrees with R `did`, `csdid` and `moderndid`
+in all 44 compared cells (largest gap 0.0). `script4a`, `script4u` and `script4x` were re-run in full (`PYTHONHASHSEED=0`); the exhibit
+scripts `script4n`, `4p`, `4q` were re-run afterwards.
+
+**Unchanged, verified against the 2026-10-22 outputs:** every post-treatment ATT(g,t) and the overall ATT and event-time estimates at e >= 0 in
+`script4a` (A6) and `script4u` (largest difference 0.0); all 56 CS rows and all 224 TWFE rows of `script4x` (0.0); the self-checks of `script4u`
+against `script4a` are identical to the previous run (1e-14 or smaller).
+
+**Changed:** pre-treatment cells in the covariate-adjusted arm (268 of 536 att_gt cells and 112 of 224 aggregated rows in `script4a`; 427 of 428
+pre-treatment rows in `script4u`). Pre-treatment event times significant at 5%, covariate-adjusted CS, before -> after:
+
+| Outcome (`script4a`, A6) | Pre-treatment event times | Significant before | Significant after |
+|---|---|---|---|
+| Poor MH Days | 11 | 5 | 6 |
+| Frequent Mental Distress | 5 | 0 | 0 |
+| Deaths of Despair | 16 | 2 | 3 |
+| Aggravated Assault | 20 | 6 | 5 |
+| Assault, all severities | 20 | 4 | 6 |
+| Violence index (partial) | 20 | 5 | 3 |
+| NIBRS curated total | 20 | 5 | 5 |
+
+`script4u`, specification "controls": first expansion 27 -> 28 of 112; first entry (clean controls) 9 -> 12 of 102.
+
+**Reading.** The convention did not cause the pre-period problem: Poor MH Days stays at about half of its pre-treatment event times significant (5 of 11
+before, 6 of 11 after). These are single-cell tests at 5%, many far leads rest on one cohort, and no joint pre-trend test for CS has been run; the TWFE leads
+test (p = 0.43 for Poor MH Days) and the CS pre-period cells still disagree, and that disagreement is open (needs a CS joint pre-test and HonestDiD on CS).
