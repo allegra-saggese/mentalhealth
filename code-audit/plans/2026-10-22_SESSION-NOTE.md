@@ -19,7 +19,10 @@ Setup and planning only; no reported result was re-run or changed. Commits on `m
 - pyfixest's wild-bootstrap docs list `weights_type="normal"`, which fails; `py-did-multiplegt-dyn` 0.1.9 needs polars below 2.0; `wildboottest` needs a numeric cluster column.
 
 ## Open
-- **Full inference run** (`PYTHONHASHSEED=0 python3 script4z-inference.py`, 9,999 draws, about an hour) was started the evening of 2026-10-22; its CSVs land in `Data/output/tables/script4z/` only when it finishes. If that folder has no 2026-10-22 files, it did not finish: rerun it. The 499-draw quick run (folder `script4z_quick`) is preliminary: only Poor MH Days with T4 survives Holm and Romano-Wolf.
+- **Full inference run finished** (`script4z-inference.py`, 9,999 draws, Webb weights, seed 20261022; CSVs in `Data/output/tables/script4z/`, dated 2026-10-22). Confirmatory family (8 tests), wild-bootstrap p / Holm over 8 / Romano-Wolf within outcome:
+  Poor MH Days: T4 0.003 / 0.022 / 0.005; E2 0.023 / 0.160 / 0.067; T1 0.045 / 0.268 / 0.079; T3 0.048 / 0.268 / 0.079.
+  Frequent Mental Distress: T4 0.056 / 0.268 / 0.187; E2 0.062 / 0.268 / 0.187; T1 0.164 and T3 0.163 (Holm 0.326, Romano-Wolf 0.234).
+  Only Poor MH Days with T4 survives both corrections at 5%. Adjusted values were computed after the family was chosen (D-42). Exploratory family: 13 of 28 cells significant unadjusted, 3 after Benjamini-Hochberg. The 499-draw quick run gave the same pattern.
 - Not built: permutation inference (plan Part 2), the estimator-triangulation script, cross-check of `did_cs.py` against `did`/`csdid`, wild-bootstrap pre-trend reconciliation (CS shows 5 of 11 significant pre-periods for Poor MH Days; TWFE leads look flat).
 - Standing: A21 (full-panel vs 2010-2020 window), the NASS API key still in git history (revoke it), `functions.py` scores 75 on the quality gate (hardcoded user path at line 527; committing that file will be refused until it moves to `packages.py`), no LICENSE.
 - Citations in the plans were checked by a fresh-context verifier on 2026-10-22; re-verify before any enters the paper.
