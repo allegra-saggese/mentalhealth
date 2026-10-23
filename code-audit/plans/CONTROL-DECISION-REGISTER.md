@@ -843,3 +843,15 @@ samples, so no valid joint draws exist across outcomes. Therefore: **Romano–Wo
 not reported. Implemented in `script4z-inference.py` (9,999 draws, Webb weights, seed 20261022); the script first reproduces
 script4a's A2 coefficient and p-value for each cell and stops if they differ. Exploratory family F2 (28 cells):
 Benjamini–Hochberg on the analytic state-clustered p-values (a wild bootstrap of all 28 was not run).
+
+### D-44 · DECIDED 2026-10-23 · Callaway–Sant'Anna covariates are measured at the earlier of year t and the base year g−1
+**Decision (the owner's):** adopt the convention of R `did`, `csdid` and `moderndid`. In the covariate-adjusted arm the covariates for
+cell (g,t) are measured in year `min(t, g−1)`: the base year g−1 for every post-treatment cell (unchanged), year t for a pre-treatment cell
+before the base year (changed; previously g−1). **Alternative not taken:** keep covariates at g−1 for every cell.
+**Reason:** `did_cs.py` then reproduces all three independent implementations in every cell, not only the post-treatment ones.
+**Evidence:** `2026-10-23_CS-CROSSCHECK.md`. Before the change 17 of 44 pre-treatment cells differed (largest gap 0.0116 days for
+Poor MH Days; 16.2 for Frequent Mental Distress); after it every cell agrees (largest gap 0.0) for both mental-health outcomes.
+**Pre-committed or after seeing results:** after seeing the size of the pre-period differences, before seeing the re-estimated
+pre-period results. **Effect:** pre-treatment cells and their significance change in `script4a` (A6, both CS arms), `script4u` (CS arms) and
+`script4x` (CS rows); post-treatment cells and the overall ATT are unchanged by construction and were checked against the
+2026-10-22 outputs. **Code:** `did_cs.att_gt_table` and `base_period_covariates`; `METHODS.md` section 2 updated.

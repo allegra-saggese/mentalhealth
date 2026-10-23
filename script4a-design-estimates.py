@@ -461,7 +461,7 @@ print(f"  covariates: NONE -- unconditional parallel trends. See docstring.\n")
 
 
 X_CS = [c for c in CONTROLS_HEADLINE if c in df.columns]
-print(f"  covariate-adjusted arm uses the step-8 set ({len(X_CS)} vars) at base period g-1\n")
+print(f"  covariate-adjusted arm uses the step-8 set ({len(X_CS)} vars) at the earlier of year t and base period g-1 (D-44)\n")
 print(f"  {'outcome':26s} {'ATT uncond':>11s} {'ATT cond':>10s} {'se':>8s} {'cells':>6s} {'fallback':>9s}")
 
 cs_rows, csagg_rows = [], []

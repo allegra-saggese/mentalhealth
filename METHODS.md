@@ -63,10 +63,11 @@ test ("leads"). Joint test: Wald χ² that all leads are zero, using the state-c
 
 Comparison counties are never treated or not yet treated at `max(t, g)`; a county that is already treated is never a comparison.
 
-*Covariate-adjusted* (the reported arm): fit `m_{g,t}(x) = E[ Y_t − Y_{g−1} | X_{g−1} = x, comparison ]` by linear regression on the comparison
-counties, with `X` measured in the base year `g−1`, then
+*Covariate-adjusted* (the reported arm): fit `m_{g,t}(x) = E[ Y_t − Y_{g−1} | X_s = x, comparison ]` by linear regression on the comparison
+counties, with `X` measured in year `s = min(t, g−1)` (D-44: the base year `g−1` for every post-treatment cell, year `t` for a
+pre-treatment cell before the base year, the convention of R `did`, `csdid` and `moderndid`), then
 
-    ATT_adj(g,t) = mean over cohort-g counties of [ (Y_t − Y_{g−1}) − m̂_{g,t}(X_{g−1}) ]
+    ATT_adj(g,t) = mean over cohort-g counties of [ (Y_t − Y_{g−1}) − m̂_{g,t}(X_s) ]
 
 Cells too thin to fit the adjustment fall back to the unconditional estimate and are counted (`n_fallback_cells`; 0 in all runs so far).
 The *unconditional* arm skips the adjustment (kept for robustness).
@@ -101,7 +102,7 @@ observed wave. Event-time paths therefore mix real timing with measurement error
 | county trends | adds `λ_i · t`: a county-specific linear time trend. Implemented by residualizing on county intercepts, county trends and year effects (alternating projections); `pyfixest`'s varying-slope syntax is silently ignored (QA #24) |
 | state × year FE | replaces `d_t` with state-by-year effects: treated counties are compared only with comparison counties in the same state and year |
 | baseline × time polynomial | adds 2002 values of log population, median household income, % Hispanic, % 65+, unemployment and the 2002 number of dairy operations (all sizes and large), each interacted with `(year−2002)/10` and its square |
-| past outcomes (CS) | adds the outcome's own levels in `g−1` and `g−2` to `X_{g−1}` |
+| past outcomes (CS) | adds the outcome's own levels in `g−1` and `g−2` to `X_s` |
 
 County trends can absorb a treatment effect that builds gradually (Wolfers 2006; Meer & West 2016), so they are a robustness check, not the headline specification.
 

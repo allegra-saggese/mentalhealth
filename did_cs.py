@@ -17,9 +17,11 @@ def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None,
     """All ATT(g,t) for one outcome. `wide` is fips x year. Unchanged from script4a.
 
     use_cov=False  unconditional.   use_cov=True  outcome-regression adjusted: fit dY = X'b on the
-    clean comparison group only, X measured at base year g-1, predict each treated county's
-    counterfactual change, ATT = mean(dY treated) - mean(predicted). Cells too thin to fit fall back
-    to the unconditional estimate and are flagged fallback=1.
+    clean comparison group only, predict each treated county's counterfactual change,
+    ATT = mean(dY treated) - mean(predicted). X is measured at the EARLIER of year t and the base year g-1
+    (D-44): at g-1 for every post-treatment cell, at year t for a pre-treatment cell before the base year,
+    as in R `did`, `csdid` and `moderndid`. Cells too thin to fit, or with no covariates for that year,
+    fall back to the unconditional estimate and are flagged fallback=1.
     """
     out = []
     idx = wide.index if keep_fips is None else wide.index.intersection(keep_fips)
@@ -31,10 +33,10 @@ def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None,
         treated = idx[(coh == g).values]
         if len(treated) < min_n:
             continue
-        Xb = Xbase.get(base) if (use_cov and Xbase) else None
         for t in years:
             if t == base or t not in wide.columns:
                 continue
+            Xb = Xbase.get(min(t, base)) if (use_cov and Xbase) else None
             ctrl = idx[((coh.isna()) | (coh > max(t, g))).values]
             d_all = wide[t] - wide[base]
             dt, dc = d_all.reindex(treated).dropna(), d_all.reindex(ctrl).dropna()
@@ -45,7 +47,7 @@ def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None,
             if Xb is None:
                 out.append({**rec, "att": float(dt.mean() - dc.mean()),
                             "n_treated": int(len(dt)), "n_control": int(len(dc)),
-                            "fallback": 0})
+                            "fallback": int(use_cov)})
                 continue
 
             Xc = Xb.reindex(dc.index).dropna()
@@ -70,14 +72,15 @@ def att_gt_table(wide, cohort_of, cohorts, years, keep_fips=None,
 
 
 def base_period_covariates(d, cohorts, xcols, wide=None, outcome_lags=0):
-    """Covariates at each candidate base year g-1, standardised within that year.
+    """Covariates for every year in `d`, standardised within that year, keyed by year.
 
-    outcome_lags = 0 reproduces script4a. outcome_lags = k > 0 adds the outcome's own levels in
-    years g-1, g-2, ..., g-k (from `wide`, fips x year) as extra columns.
+    att_gt_table picks the year min(t, g-1) for each cell (D-44), so the base years g-1 and every earlier year are
+    needed; `cohorts` is kept for the callers' signature. outcome_lags = 0 gives the covariates only.
+    outcome_lags = k > 0 adds the outcome's own levels in years y, y-1, ..., y-k+1 (from `wide`, fips x year)
+    as extra columns, where y is the covariate year.
     """
     Xbase = {}
-    for g in cohorts:
-        b = g - 1
+    for b in sorted(d.year.unique()):
         sub = d[d.year == b].set_index("fips")[xcols]
         if outcome_lags and wide is not None:
             for k in range(outcome_lags):
