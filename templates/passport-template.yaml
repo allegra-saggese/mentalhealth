@@ -1,0 +1,129 @@
+# Passport: claims-provenance template
+#
+# Copy to quality_reports/passports/<paper-slug>.yaml and fill in.
+# Each `claims:` entry records ONE numeric claim from the manuscript
+# along with the script + output file + tolerance that produced it
+# (the VERTICAL link: claim -> code) and every artifact that DISPLAYS
+# it (the HORIZONTAL link: display <-> display).
+#
+# See .claude/rules/replication-protocol.md "Claims Provenance" section
+# for the full contract, status semantics, and integration points
+# (/audit-reproducibility, /commit, /review-paper).
+
+paper:
+  slug: example-paper            # used in filename + report headings
+  title: "Replace with the full paper title"
+  branch: main                   # git branch on which this passport is current
+  last_audit: 2026-05-20T00:00:00Z
+  last_audit_by: human           # human / /audit-reproducibility / other
+
+claims:
+  # Example claim 1 — point estimate from a regression table
+  - id: C1
+    claim: "ATT = -1.632 (SE 0.584, N=4291)"
+    location: "manuscript.tex:Table 2, Col 3"   # primary display
+    # Every artifact that DISPLAYS this number. `location:` above stays the
+    # primary display and is repeated here as the first entry; the rest are the
+    # siblings that must not drift from it. Three fields per entry:
+    #   path              — the file a reader sees the number in
+    #   locator           — where inside that file (table + column, frame title,
+    #                       chunk label) — enough for a human to find it
+    #   display_precision — decimals SHOWN at that location (0 = integer)
+    # Two displays are compared at the COARSER of their precisions, so a deck
+    # that rounds harder than the paper is not a mismatch — but a deck showing
+    # last month's value is. A path/locator that cannot be found resolves to
+    # FAIL, never to "skip". See replication-protocol.md "The horizontal check".
+    appears_in:
+      - path: manuscript.tex
+        locator: "Table 2, Col 3 (row 'Treatment')"
+        display_precision: 3
+      - path: Slides/Lecture04_Results.tex
+        locator: "frame 'Treatment effect', headline number"
+        display_precision: 2       # -1.63 — coarser, so this pair is
+                                   # compared at 2 decimals, not 3
+    source_file: scripts/R/03_analyze.R
+    source_line: 147
+    output_file: output/main_did.rds
+    output_field: att_overall
+    tolerance:                      # typed: pass if |x-y| <= atol + rtol*|reported|
+      point_estimate: 0.01         # absolute tolerance for the headline value
+      standard_error: 0.05         # absolute tolerance for SE / CI half-width
+      n: exact                     # sample-size mismatch is never tolerated
+    last_verified_on: 2026-05-20T00:00:00Z
+    last_verified_by: "/audit-reproducibility"
+    status: UNVERIFIED             # PASS | FAIL | EXPLAINED | STALE | UNVERIFIED
+    notes: |
+      Optional notes. Use this field to record:
+      - Known small discrepancies and why they're within tolerance
+        (e.g., "SE differs in 4th decimal due to clustering df
+        adjustment").
+      - Cross-references to other claims that depend on this one
+        (e.g., "C5 derives a derived quantity from C1; both must
+        update together").
+      - To downgrade an out-of-tolerance FAIL to EXPLAINED, a CONCRETE
+        named alternative spec (e.g., "reghdfe vs feols clustering-df
+        adjustment; published value matches under the reghdfe correction").
+        A blank or vague note ("unclear") never downgrades a FAIL.
+
+  # Example claim 2 — a percentage figure from a robustness check
+  - id: C2
+    claim: "Effect persists at 73% magnitude in the leave-one-out
+            specification (Appendix Table A.3)."
+    location: "manuscript.tex:Appendix A, A.3"
+    appears_in:                    # one display only — still declare it
+      - path: manuscript.tex
+        locator: "Appendix A, Table A.3, row 'Retention'"
+        display_precision: 0       # shown as "73%"
+    source_file: scripts/R/04_robustness.R
+    source_line: 89
+    output_file: output/loo_robustness.rds
+    output_field: avg_retention_pct
+    tolerance:
+      point_estimate: 0.1          # 0.1 percentage points for percentages
+      n: exact
+    last_verified_on: 2026-05-20T00:00:00Z
+    last_verified_by: "/audit-reproducibility"
+    status: UNVERIFIED
+    notes: ""
+
+  # Example claim 3 — ONE number, THREE displays (the horizontal case).
+  # A generic regression coefficient that the paper reports, the supplement
+  # repeats, and a lecture deck quotes. The deck is the artifact that silently
+  # goes stale: the paper gets regenerated from the rerun, the slide does not.
+  - id: C3
+    claim: "Coefficient on the treatment indicator = 0.342 (SE 0.091, N=1204)"
+    location: "manuscript.tex:Table 1, Col 2"
+    appears_in:
+      - path: manuscript.tex
+        locator: "Table 1, Col 2 (row 'Treated')"
+        display_precision: 3       # 0.342 — the primary display
+      - path: supplement.tex
+        locator: "Table S2, Col 1"
+        display_precision: 3       # 0.342
+      - path: Slides/Lecture04_Results.tex
+        locator: "frame 'Main result', highlight box"
+        display_precision: 2       # 0.34 — coarser, so this pair is
+                                   # compared at 2 decimals, not 3
+    source_file: scripts/R/03_analyze.R
+    source_line: 62
+    output_file: output/main_model.rds
+    output_field: coef_treated
+    tolerance:
+      point_estimate: 0.001
+      standard_error: 0.01
+      n: exact
+    last_verified_on: 2026-05-20T00:00:00Z
+    last_verified_by: "/audit-reproducibility"
+    status: UNVERIFIED
+    notes: |
+      The deck rounds to 2 decimals, so the deck-vs-paper comparison runs at
+      2 decimals: 0.34 against 0.342 agrees. A deck still showing 0.29 from
+      an earlier run does not, and is a FAIL against the horizontal check —
+      the paper alone would have passed every vertical check.
+
+# When you run /audit-reproducibility against this passport, the skill
+# will update last_verified_on, last_verified_by, and status per claim.
+# It checks each claim BOTH ways: against the output that produced it, and
+# against every artifact in appears_in. If a tolerance is exceeded, if two
+# displays disagree, or if a declared display cannot be located in its file,
+# status flips to FAIL and the discrepancy is recorded in notes.

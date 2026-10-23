@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# Pre-commit gate for the mentalhealth pipeline (public repo).
+# Install once per clone:  ./scripts/install-hooks.sh   (sets core.hooksPath=.githooks)
+#
+# Hard checks on STAGED changes (abort the commit):
+#   1. python -m py_compile on staged .py files
+#   2. secret / API-key literals in staged additions
+#   3. staged data files (csv, xlsx, dta, parquet, rds, zip) or anything under Data/
+#   4. hardcoded user paths (/Users/..., ~/Dropbox) in staged .py additions other than packages.py
+# Then the quality score (>= 80) on staged .py files via scripts/quality_score.py.
+#
+# Escape hatches (give the reason in the commit message):
+#   SKIP_QUALITY_GATE=1 git commit ...   # skips only the score, not the hard checks
+#   git commit --no-verify ...           # skips everything (last resort)
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "pre-commit: not in a git work tree" >&2; exit 2; }
+cd "$ROOT" || exit 2
+
+FAIL=0
+fail() { echo "pre-commit BLOCKED: $1" >&2; FAIL=1; }
+
+STAGED="$(git diff --cached --name-only --diff-filter=ACM)"
+PYFILES="$(printf '%s\n' "$STAGED" | grep -E '\.py$' || true)"
+
+# 1. syntax
+for f in $PYFILES; do
+  python3 -m py_compile "$f" 2>/dev/null || fail "syntax error in $f"
+done
+
+# 2. secrets in added lines (key-like literals assigned to key/token/secret/password names)
+if git diff --cached -U0 | grep -E '^\+' | grep -vE '^\+\+\+' \
+   | grep -iE "(api[_-]?key|token|secret|passwd|password)[\"' ]*[:=][ ]*[\"'][A-Za-z0-9_\-]{16,}[\"']" >/dev/null; then
+  fail "possible API key / secret literal in staged changes (credentials come from the environment only)"
+fi
+
+# 3. data files
+BAD="$(printf '%s\n' "$STAGED" | grep -E '(^Data/|\.(csv|xlsx|xls|dta|parquet|rds|zip|sav)$)' || true)"
+[ -n "$BAD" ] && fail "data files staged (data never goes in git): $(echo "$BAD" | tr '\n' ' ')"
+
+# 4. hardcoded user paths
+for f in $PYFILES; do
+  [ "$(basename "$f")" = "packages.py" ] && continue
+  if git diff --cached -U0 -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+' | grep -E '(/Users/[A-Za-z0-9_]+|~/Dropbox|/home/[A-Za-z0-9_]+)' >/dev/null; then
+    fail "hardcoded user path added in $f (use packages.py)"
+  fi
+done
+
+[ "$FAIL" -ne 0 ] && { echo "Fix the above, or see header for escape hatches." >&2; exit 1; }
+
+# Quality score (soft gate)
+if [ -n "$PYFILES" ] && [ "${SKIP_QUALITY_GATE:-0}" != "1" ] && [ -f scripts/quality_score.py ]; then
+  # shellcheck disable=SC2086
+  python3 scripts/quality_score.py $PYFILES || { echo "pre-commit BLOCKED: quality score below 80 (SKIP_QUALITY_GATE=1 to override, with a reason)" >&2; exit 1; }
+fi
+exit 0

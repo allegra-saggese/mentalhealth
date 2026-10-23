@@ -1,0 +1,81 @@
+"""Shared figure style for all exhibits (Nature / Science family).
+
+Single source of truth for size, fonts, colours and saving; the standards are in
+.claude/rules/figure-and-table-standards.md. Change a value here, not in an exhibit script.
+
+Typical use in an exhibit script:
+    import figstyle
+    figstyle.apply_style()
+    fig, ax = figstyle.new_figure("single", height_mm=60)
+    ax.plot(...)
+    figstyle.panel_label(ax, "a")
+    figstyle.save_figure(fig, figs_dir / "event-study", "twfe_first_expansion")
+"""
+from datetime import date
+from pathlib import Path
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+MM_PER_INCH = 25.4
+WIDTH_MM = {"single": 89.0, "one-and-half": 120.0, "double": 183.0}
+MAX_HEIGHT_MM = 247.0
+PNG_DPI = 600                      # line art; use 300 for photographic images and maps
+
+# Okabe-Ito colour-blind-safe categorical palette (fixed order: same variable, same colour everywhere)
+PALETTE = {
+    "black": "#000000", "orange": "#E69F00", "sky": "#56B4E9", "green": "#009E73",
+    "yellow": "#F0E442", "blue": "#0072B2", "vermillion": "#D55E00", "purple": "#CC79A7",
+}
+CYCLE = [PALETTE[k] for k in ("blue", "vermillion", "green", "orange", "sky", "purple", "black")]
+SEQUENTIAL_CMAP = "viridis"        # continuous, perceptually uniform, greyscale-safe
+DIVERGING_CMAP = "RdBu_r"          # signed quantities; centre on zero with a TwoSlopeNorm
+
+
+def apply_style():
+    """Set matplotlib rcParams once, at the top of an exhibit script."""
+    mpl.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+        "font.size": 6.5, "axes.labelsize": 6.5, "axes.titlesize": 7,
+        "xtick.labelsize": 6, "ytick.labelsize": 6, "legend.fontsize": 6,
+        "axes.linewidth": 0.5, "lines.linewidth": 0.8, "lines.markersize": 3,
+        "xtick.major.width": 0.5, "ytick.major.width": 0.5,
+        "axes.spines.top": False, "axes.spines.right": False,
+        "axes.prop_cycle": mpl.cycler(color=CYCLE),
+        "axes.grid": False, "legend.frameon": False,
+        "figure.dpi": 150, "savefig.dpi": PNG_DPI, "savefig.bbox": "standard",
+        "pdf.fonttype": 42, "ps.fonttype": 42,          # embed TrueType fonts in vector output
+    })
+
+
+def new_figure(width="single", height_mm=60.0, **subplot_kw):
+    """Figure at final print size. `width` is a key of WIDTH_MM; returns (fig, ax)."""
+    if width not in WIDTH_MM:
+        raise ValueError(f"width must be one of {sorted(WIDTH_MM)}")
+    if height_mm > MAX_HEIGHT_MM:
+        raise ValueError(f"height {height_mm} mm exceeds {MAX_HEIGHT_MM} mm")
+    fig, ax = plt.subplots(figsize=(WIDTH_MM[width] / MM_PER_INCH, height_mm / MM_PER_INCH),
+                           layout="constrained", **subplot_kw)
+    return fig, ax
+
+
+def panel_label(ax, letter):
+    """Bold lower-case panel label (a, b, c) at the top left, outside the axes."""
+    ax.text(-0.12, 1.06, letter, transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
+
+
+def dated(stem):
+    """Date-stamped file stem, YYYY-MM-DD_stem, as used for all outputs."""
+    return f"{date.today().isoformat()}_{stem}"
+
+
+def save_figure(fig, directory, stem, png_dpi=PNG_DPI):
+    """Save a vector PDF and a PNG side by side; returns the two paths."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    base = directory / dated(stem)
+    pdf, png = base.with_suffix(".pdf"), base.with_suffix(".png")
+    fig.savefig(pdf)
+    fig.savefig(png, dpi=png_dpi)
+    return pdf, png

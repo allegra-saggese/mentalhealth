@@ -1,0 +1,34 @@
+# Project Memory
+
+Corrections and learned facts that persist across sessions. This file is committed to a **public** repo: no keys, machine paths, data values or private names.
+When a mistake is corrected, append a `[LEARN:category]` entry below (most recent at the bottom): `wrong -> right`, plus the reason in one clause.
+
+---
+
+## Communication
+
+[LEARN:communication] Private shorthand ("E2", "E3", "leads", "dark", "step-8 sequence") -> plain terms ("first expansion", "first entry", "pre-treatment years", "the control set"), defined before first use; show the estimator equation when asking for a method choice. Reason: the user defends these specifications to a team and to referees.
+
+[LEARN:communication] Interpretation mixed into results -> show results first, with no interpretation; give flags separately and only when asked.
+
+[LEARN:communication] The wrap-up box fired before the written answer and the answer was lost -> write the full answer as text first; the box ends the turn.
+
+## Scope and safety
+
+[LEARN:scope] Deleting a specification the team narrowed -> keep estimating it and filter at the reporting level (`REPORT_*` in `script4_treatment.py`); archive old outputs by moving, never deleting.
+
+[LEARN:scope] Changing shared or major files, or re-running estimation, without showing a diff -> ask first, show the diff, then run. Never push; licence choice belongs to the owner.
+
+## Verification
+
+[LEARN:verification] Syntax that may silently do nothing (a pyfixest `fips[year]` term was ignored) -> test that each term changes the fit before relying on it; build checks that reproduce an earlier result exactly.
+
+[LEARN:verification] Unseeded pyfixest runs differ by about 2e-5 in SEs across processes -> always run with `PYTHONHASHSEED=0`; compare outputs with `tests/compare_outputs.py`.
+
+[LEARN:citations] A plausible-looking citation that was not checked -> search and verify every citation; state what could not be verified.
+
+## Data
+
+[LEARN:data] Treating blank `cafo_*` counts as missing for 2002 onward -> the agricultural census is exhaustive, so blank means zero from 2002 (rule D-34); 2000-01 stay missing because no census was taken.
+
+[LEARN:data] Loading FSIS columns from the main panel -> FSIS columns exist only in `*_panel_fsis.csv` (2017+).

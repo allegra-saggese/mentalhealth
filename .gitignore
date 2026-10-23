@@ -70,3 +70,11 @@ venv/
 # Secrets: keys live in the environment, never in files
 .env
 *.key
+
+# Data and local working records (public repo): data live on Dropbox, plans/logs stay local
+Data/
+*.dta
+*.parquet
+*.rds
+*.zip
+quality_reports/

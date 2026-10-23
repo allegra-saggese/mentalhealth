@@ -1,0 +1,2 @@
+Which agent name does this skill spawn for verification?
+claim-verifier

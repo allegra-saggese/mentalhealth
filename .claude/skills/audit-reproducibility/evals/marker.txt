@@ -1,0 +1,2 @@
+What phrase does this skill use about whether the manuscript is the source of truth?
+manuscript is not the oracle
