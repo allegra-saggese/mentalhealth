@@ -9,7 +9,7 @@ This project combines US health, crime, population, and agriculture data into on
 
 - **Python 3.13** (results produced on 3.13.5; macOS). Install the pinned packages with either
   `pip install -r requirements.txt` or `conda env create -f environment.yml` (the conda file installs Python and then the same pinned `requirements.txt`).
-  Key packages: `pandas`, `numpy`, `scipy`, `matplotlib`, `seaborn`, `scikit-learn`, **`pyfixest`** (all estimation), `requests`, `openpyxl`, `pyarrow`; optional `plotly` + `kaleido` for maps.
+  Key packages: `pandas`, `numpy`, `scipy`, `matplotlib`, `seaborn`, `scikit-learn`, **`pyfixest`** (all estimation), `statsmodels` and `wildboottest` (multiple-testing corrections and wild cluster bootstrap), `requests`, `openpyxl`, `pyarrow`; optional `plotly` + `kaleido` for maps.
 - **R 4.x** only for `script4w-honestdid.R` (Rambachan–Roth sensitivity analysis): `install.packages("HonestDiD")` (see `r-requirements.txt`).
 - **LaTeX (`pdflatex`)** only for compiling the table and slide fragments written by `script4n`, `script4p` and `script4q`; without it the `.tex` files are still written.
 - Shared helpers: `packages.py` (imports and directory definitions) and `functions.py` (FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `normalize_panel_key()`, `log_per10k()`, `load_county_geojson()`).

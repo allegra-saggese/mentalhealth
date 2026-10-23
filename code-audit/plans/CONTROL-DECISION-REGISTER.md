@@ -799,3 +799,37 @@ from the files does not remove it from history: **the key must be revoked and re
 `__pycache__/` (three Python versions), `.spyproject/` and `.DS_Store` files (71 files) were
 tracked and are now untracked; Python and editor rules added to `.gitignore`. Remaining packaging
 gaps for a public release are listed in `2026-10-17_MODEL-RUN-STATE.md`.
+
+### D-39 · OPEN (drafted 2026-10-22, awaiting decision) · Multiple-testing family and correction
+**Finding** (`2026-10-22_ANALYSIS-ASSESSMENT.md`): of the 28 reported A2 cells (T1, T3, T4, E2 × 7
+outcomes) 13 are significant at 5% unadjusted, 3 survive Holm or Benjamini–Hochberg; for E2 across the
+7 outcomes none survive. **Not decided:** which family is confirmatory. Options to choose from before any
+new result is read: (a) Poor MH Days only, with E2 as the single primary test (D-16 already names it the
+headline); (b) the two mental-health outcomes × the reported treatments; (c) all 28 cells. Correction
+candidates: Holm (family-wise error), Romano–Wolf step-down using the joint bootstrap draws, Benjamini–Hochberg
+for exploratory families. Report unadjusted and adjusted values. Plan: `2026-10-22_PLAN_inference-upgrade.md`.
+
+### D-40 · OPEN (drafted 2026-10-22, awaiting decision) · Timing resolution of treatment
+Treatment can change only at the five census waves, so the true change falls in the five years before the
+wave at which it is observed (METHODS.md §2). Event-time paths therefore mix real timing with measurement
+error, and annual leads and lags overstate the timing precision. **Not decided:** whether to add a design on
+a census-wave panel (outcomes averaged in the windows around 2002/07/12/17/22) as a robustness arm, and
+whether annual event-study figures carry a note on this. No result depends on the choice yet.
+
+### D-41 · 2026-10-22 · A22 (event-study control group) is answered by the CS arm; write it down
+`did_cs.py` uses never-treated and not-yet-treated counties as comparisons at `max(t, g)` and never an
+already-treated county (METHODS.md §2). The implicit comparison group of the TWFE event
+study is not stated anywhere (this is A22). A22 should be closed by stating this in the paper's design section and by reporting the CS
+event study as the primary event-study exhibit; the TWFE event study stays as a robustness exhibit
+(it is still estimated, not deleted). A21 (full-panel vs 2010–2020 window) remains open.
+
+### D-42 · DECIDED 2026-10-22 · Confirmatory family for multiple testing (closes D-39)
+**Decision (the owner's):** the confirmatory family is the **two mental-health outcomes (Poor MH Days, Frequent
+Mental Distress) across the four reported treatments T1, T3, T4 and E2: 8 tests.** Correction: Holm (family-wise
+error) and Romano–Wolf step-down on the joint wild-bootstrap draws; unadjusted and adjusted values reported side
+by side. All 28 reported A2 cells form an **exploratory** family, corrected with Benjamini–Hochberg and labelled
+exploratory. The crime outcomes and deaths of despair are not part of the confirmatory claim (D-14, D-23).
+**Made after seeing results, and recorded as such:** when the choice was made the 2026-10-22 review had already
+shown this family's unadjusted count (6 of 8 cells significant at 5%) and its Holm and Benjamini–Hochberg count
+(1 of 8). The family was not fixed blind; any adjusted value reported later for it carries that label.
+Implementation: `2026-10-22_PLAN_inference-upgrade.md`, Part 3.
