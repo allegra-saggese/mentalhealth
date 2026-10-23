@@ -27,6 +27,10 @@ When a mistake is corrected, append a `[LEARN:category]` entry below (most recen
 
 [LEARN:citations] A plausible-looking citation that was not checked -> search and verify every citation; state what could not be verified.
 
+[LEARN:verification] A test fixture or regex that contains the forbidden pattern trips the hook that guards it (the pre-commit gate blocked its own self-test and its own scorer) -> build such literals by concatenation (`api_%s` filled with `key`; the path regex split as `~/` `Dropbox`). Reason: both false positives appeared only when the hook ran on its own files.
+
+[LEARN:verification] A planted-effect test fell just under its threshold (0.78 vs 0.8 on 40 simulated panels) -> measure the reference test's power on the same simulated data first (here the wild bootstrap 0.85 vs the analytic test 0.87); if they match it was sampling noise, so raise the planted effect or the number of simulations instead of lowering the threshold. Reason: a lowered threshold hides a real power loss.
+
 ## Data
 
 [LEARN:data] Treating blank `cafo_*` counts as missing for 2002 onward -> the agricultural census is exhaustive, so blank means zero from 2002 (rule D-34); 2000-01 stay missing because no census was taken.
