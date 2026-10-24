@@ -60,6 +60,16 @@ def new_figure(width="single", height_mm=60.0, **subplot_kw):
     return fig, ax
 
 
+def new_grid(nrows, ncols, width="double", height_mm=120.0, **subplot_kw):
+    """Multi-panel figure at final print size; returns (fig, axes) with axes a 2-D array (nrows x ncols)."""
+    if width not in WIDTH_MM:
+        raise ValueError(f"width must be one of {sorted(WIDTH_MM)}")
+    if height_mm > MAX_HEIGHT_MM:
+        raise ValueError(f"height {height_mm} mm exceeds {MAX_HEIGHT_MM} mm")
+    return plt.subplots(nrows, ncols, figsize=(WIDTH_MM[width] / MM_PER_INCH, height_mm / MM_PER_INCH),
+                        layout="constrained", squeeze=False, **subplot_kw)
+
+
 def panel_label(ax, letter):
     """Bold lower-case panel label (a, b, c) at the top left, outside the axes."""
     ax.text(-0.12, 1.06, letter, transform=ax.transAxes, fontsize=8, fontweight="bold", va="bottom")
