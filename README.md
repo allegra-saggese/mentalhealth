@@ -13,8 +13,8 @@ This project combines US health, crime, population, and agriculture data into on
 - **R 4.x** only for `script4w-honestdid.R` (Rambachan–Roth sensitivity analysis): `install.packages("HonestDiD")` (see `r-requirements.txt`).
 - **LaTeX (`pdflatex`)** only for compiling the table and slide fragments written by `script4n`, `script4p` and `script4q`; without it the `.tex` files are still written.
 - Shared helpers: `packages.py` (imports and directory definitions) and `functions.py` (FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `normalize_panel_key()`, `log_per10k()`, `load_county_geojson()`).
-- **Credentials are read from the environment only, never from code:** `USDA_NASS_API_KEY` (`script0b`, `qa-scripts/pull_2022_cattle_totals.py`) and `HUD_API_TOKEN` (`script0f` / `fsis-scripts/`). Both are free to request from the agencies.
-- `script0g` downloads SAIPE, BLS LAUS, SAHIE and Census PEP directly (no key); the BLS host `download.bls.gov` must be reachable.
+- **Credentials are read from the environment only, never from code:** `USDA_NASS_API_KEY` (`script0b`, `qa-scripts/pull_2022_cattle_totals.py`) and `HUD_API_TOKEN` (`script0e` / `fsis-scripts/`). Both are free to request from the agencies.
+- `script0c` (Part 2) downloads SAIPE, BLS LAUS, SAHIE and Census PEP directly (no key); the BLS host `download.bls.gov` must be reachable.
 
 ### Hardcoded paths that must change per user
 | Script | Variable | What it points to |
@@ -31,15 +31,14 @@ This project combines US health, crime, population, and agriculture data into on
 
 ```
 mentalhealth/
-├── script0a … script0g-*.py   # Stage 0 — raw ingestion
-├── script1a, script1b-*.py    # Stage 1 — QA & panel build
-├── script2a … script2f-*.py   # Stage 2 — QA, descriptive figures, maps
+├── script0a … script0f-*.py   # Stage 0 — data in: ingestion, cleaning, and the panel build (script0f)
+├── script1a, script2a … script2f-*.py   # QA, descriptive figures, maps (being consolidated into script1a–1d)
 ├── first-stage-testing/       # first-phase pilots and test versions, kept for provenance, NOT run (see its README)
 ├── script4*.py                # Stage 4 — design-based estimates, tables, slides
 ├── functions.py, packages.py  # shared helpers; db_base path lives in packages.py
 ├── did_cs.py, estimators.py   # shared estimator code (Callaway–Sant'Anna; legacy LP-DiD / Conley, not reported)
 ├── requirements.txt, environment.yml, r-requirements.txt   # pinned environment
-├── fsis-scripts/              # FSIS sub-scripts, called by script0f
+├── fsis-scripts/              # FSIS sub-scripts, called by script0e
 ├── qa-scripts/                # one-off diagnostics (not part of the run order)
 ├── code-audit/                # internal documentation: decision logs and model status
 │   └── plans/                 #   dated notes; see "Internal documentation" below
@@ -66,7 +65,7 @@ Data/
 ├── clean/            # Panel-ready inputs only (~8 files per run)
 │   └── diagnostic/   # Intermediates + QA CSVs from all script0* runs
 │
-├── merged/           # Panel outputs from script1b
+├── merged/           # Panel outputs from script0f
 │
 └── output/
     ├── figs/         # All PNGs from script2* (one subfolder per script)
@@ -77,28 +76,26 @@ Data/
 
 ## Script Execution Order
 
-### Stage 0 — Raw Ingestion & Source Cleaning
+### Stage 0 — Data in: ingestion, cleaning, panel build
 Each script reads from `Data/raw/` and writes panel-ready CSVs to `Data/clean/`. Intermediates and QA files go to `Data/clean/diagnostic/`.
 
 | Script | Purpose | Key output (in `Data/clean/`) |
 |--------|---------|-------------------------------|
-| `script0a-pop-fips-raw-merge.py` | US Census population (1990–2024) + FIPS crosswalk panel | `*_population_full.csv`, `*_fips_full.csv` |
+| `script0a-identifiers.py` | County identifiers and population: FIPS crosswalk, Census population (1990–2024; a measurement, kept here because it arrives with the county key) and the NCHS urban-rural class expanded to annual | `*_fips_full.csv`, `*_population_full.csv`, `*-rural-key.csv` |
 | `script0b-usda-raw.py` | USDA NASS CAFO operations by size — **census years only** (2002, 2007, 2012, 2017, 2022) via API | `*_cafo_ops_by_size_compact.csv` |
-| `script0c-health-raw.py` | County Health Rankings MH survey + CDC deaths-of-despair | `*_mentalhealthrank_full.csv`, `*_cdc_county_year_deathsofdespair.csv` |
+| `script0c-health-controls.py` | County Health Rankings MH survey, CDC deaths of despair (Part 1) and annual, correctly-dated county controls from SAIPE, BLS LAUS, SAHIE and Census PEP (Part 2), which replace 10 CHR controls whose release-year dating misaligned them with the data year (see `code-audit/plans/2026-09-21_CHR-YEAR-MISALIGNMENT.md`). Flags `--skip-download`, `--only health\|controls` | `*_mentalhealthrank_full.csv`, `*_cdc_county_year_deathsofdespair.csv`, `*_annual_controls_county_year.csv` |
 | `script0d-crime-raw.py` | FBI UCR violent crime, collapsed to FIPS-year | `*_crime_fips_level_final.csv` |
-| `script0e-nchs-urban.py` | NCHS urban-rural classification expanded to annual panel | `*-rural-key.csv` |
-| `script0f-fsis-clean-all.py` | FSIS slaughterhouse pipeline orchestrator (runs `fsis-scripts/` sub-scripts via `subprocess`; requires `HUD_API_TOKEN`) | `*_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip.csv` |
-| `script0g-annual-controls.py` | Annual, correctly-dated county controls from SAIPE, BLS LAUS, SAHIE and Census PEP. Replaces 10 CHR controls whose release-year dating misaligned them with the data year (see `code-audit/plans/2026-09-21_CHR-YEAR-MISALIGNMENT.md`) | `*_annual_controls_county_year.csv` |
+| `script0e-fsis-clean-all.py` | FSIS slaughterhouse pipeline orchestrator (runs `fsis-scripts/` sub-scripts via `subprocess`; requires `HUD_API_TOKEN`) | `*_fsis_county_year_fips_est_size_type_summary_hudbulk_manualzip.csv` |
+| `script0f-generate-panel.py` | **Master panel builder** (the only script that writes the panel) — builds the rural county-year panel from the newest clean file of each source, forward-fills CAFO census data to all years, applies `non_large_metro == 1` filter, derives crude rate columns, CHR count imputation, rate standardization, column cleanup | `Data/merged/*_panel*.csv` (in `Data/merged/`, not `clean/`) |
 
-**`fsis-scripts/` sub-scripts** (run in this order by `script0f`; each fills blanks only and never overwrites an existing `fips_code`):
-`script0e-fsis-slaughterhouses` (raw FOIA → establishment-year panel) → `0h` (size/type panel) → `0i` (HUD ZIP→county API fill) → `0j` (year-aware refill) → `0k` (HUD bulk ZIP-year fill) → `0l` (manual ZIP→FIPS) → `0m` (deterministic completion: ZIP, CT, city+state, establishment history) → `0n` (manual county-label→FIPS).
+**`fsis-scripts/` sub-scripts** (run in this order by `script0e`; each fills blanks only and never overwrites an existing `fips_code`):
+`script0e-fsis-slaughterhouses` (raw FOIA → establishment-year panel) → `0h` (size/type panel) → `0i` (HUD ZIP→county API fill) → `0j` (year-aware refill) → `0k` (HUD bulk ZIP-year fill) → `0l-fsis-manual-and-deterministic-fill` (one pass, in this order: manual ZIP→FIPS, deterministic completion [ZIP, CT, city+state, establishment history], manual county-label→FIPS; a missing manual template skips its step). It writes the interim and county files once; the earlier three-script chain overwrote one file name three times (D-48).
 
-### Stage 1 — QA & Panel Build
+### Stage 1 — QA (stages 1 and 2 are being consolidated into `script1a`–`script1d`: QA, tables, figures, maps; see D-49)
 
 | Script | Purpose | Output location |
 |--------|---------|-----------------|
 | `script1a-var-completeness.py` | Panel coverage QA: integrity checks, mental health variable inventory, outcome distributions, CDC suppression audit, CAFO per-capita transformation analysis, coverage heatmap | `Data/output/tables/panel-qa/` |
-| `script1b-generate-panel.py` | **Master panel builder** — builds rural county-year panel, forward-fills CAFO census data to all years, applies `non_large_metro == 1` filter, derives crude rate columns, CHR count imputation, rate standardization, column cleanup | `Data/merged/*_panel*.csv` |
 
 ### Stage 2 — QA, Visualization, Maps
 
@@ -178,9 +175,9 @@ No raw data is stored in this repository (`*.csv` and `*.xlsx` are git-ignored);
 | County Health Rankings | `script0c` | Public annual CSVs from County Health Rankings & Roadmaps, manual download to `raw/mental` |
 | CDC WONDER deaths of despair (county-year) | `script0c` | Public-use extracts by manual query (annual CSVs); WONDER's data-use restrictions apply, and counts below 10 are suppressed by CDC |
 | FBI UCR / NIBRS annual incident files (arrestee segment) | `script0d` | Public bulk files, manual download to `raw/crime/total-v1` |
-| NCHS urban-rural classification | `script0e` | Public NCHS file, manual download to `raw/nchs` |
-| USDA FSIS establishment data | `script0f`, `fsis-scripts/` | **FOIA response (April 2026), not redistributable**; ZIP-to-county fill uses the HUD USPS crosswalk API (`HUD_API_TOKEN`) |
-| SAIPE, BLS LAUS, SAHIE, Census PEP | `script0g` | Public; downloaded automatically |
+| NCHS urban-rural classification | `script0a` | Public NCHS file, manual download to `raw/nchs` |
+| USDA FSIS establishment data | `script0e`, `fsis-scripts/` | **FOIA response (April 2026), not redistributable**; ZIP-to-county fill uses the HUD USPS crosswalk API (`HUD_API_TOKEN`) |
+| SAIPE, BLS LAUS, SAHIE, Census PEP | `script0c` | Public; downloaded automatically |
 
 Replicating without the FSIS file is possible for everything except the slaughterhouse analyses (`script4r` and the FSIS interaction A4).
 
@@ -189,17 +186,17 @@ Replicating without the FSIS file is possible for everything except the slaughte
 ## Key Design Decisions & Assumptions
 
 ### Rural Filter (primary sample restriction)
-`script1b` retains only county-years where `non_large_metro == 1` per the NCHS 6-level classification (`script0e`). Large central and large fringe metro counties are dropped. All downstream analysis is on this restricted sample (~2,900 counties, ~65,800 county-years in the 2026-09-23 panel).
+`script0f` retains only county-years where `non_large_metro == 1` per the NCHS 6-level classification (`script0a`). Large central and large fringe metro counties are dropped. All downstream analysis is on this restricted sample (~2,900 counties, ~65,800 county-years in the 2026-09-23 panel).
 
 ### FIPS Normalization
 All sources are normalized to a 5-digit zero-padded string FIPS via `normalize_panel_key()` in `functions.py`. DC is normalized to `11001`. Non-US state codes and territories are dropped.
 
 ### CAFO Data Design
-The USDA Agricultural Census runs every five years (2002, 2007, 2012, 2017, 2022). `script0b` outputs **census years only** — no inter-census duplication in the compact file. `script1b` then forward-fills each census year's values to subsequent years (2002 → 2003–2006, 2007 → 2008–2011, etc.), treating the most recent census as the best available observation until the next one supersedes it.
+The USDA Agricultural Census runs every five years (2002, 2007, 2012, 2017, 2022). `script0b` outputs **census years only** — no inter-census duplication in the compact file. `script0f` then forward-fills each census year's values to subsequent years (2002 → 2003–2006, 2007 → 2008–2011, etc.), treating the most recent census as the best available observation until the next one supersedes it.
 
 **CAFO zero-fill**: Counties absent from the census in a census year are confirmed to have zero operations (the agricultural census is exhaustive). Those county-years are set to 0 before forward-filling, so the confirmed zero propagates correctly to inter-census years. Only census years `{2002, 2007, 2012, 2017, 2022}` are zero-filled — non-census-year absences are left as NaN.
 
-**Missing counts (D-34, 2026-10-16).** `script1b` zero-fills only a county with no CAFO row for *any* species, so a county with, say, a hog row but no dairy row keeps blank dairy columns. Because the census is exhaustive (checked against NASS for dairy in all five waves), `script4_treatment.load_panel` sets a missing `cafo_{species}_*` count to zero from 2002 on. 2000–01 stay missing: no census was taken in them, so a blank is an unmeasured year, not an absent operation.
+**Missing counts (D-34, 2026-10-16).** `script0f` zero-fills only a county with no CAFO row for *any* species, so a county with, say, a hog row but no dairy row keeps blank dairy columns. Because the census is exhaustive (checked against NASS for dairy in all five waves), `script4_treatment.load_panel` sets a missing `cafo_{species}_*` count to zero from 2002 on. 2000–01 stay missing: no census was taken in them, so a blank is an unmeasured year, not an absent operation.
 
 **5 commodity types**: cattle (incl calves), beef (cows beef), dairy (cows milk), hogs (all classes), chickens (layers). Beef and dairy are subsets of cattle — aggregate totals use only cattle + hogs + chickens to avoid double-counting. Beef and dairy get separate `_total` columns for disaggregated analysis.
 

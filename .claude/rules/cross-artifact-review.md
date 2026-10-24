@@ -14,10 +14,10 @@ manuscript.tex    --cites-->  Table 2 (booktabs fragment from script4n)
 Table 2           --from-->   Data/output/tables/<date>_twfe_results.csv
 results CSV       --by-->     script4a-design-estimates.py
 script4a          --uses-->   script4_treatment.py (definitions) + <date>_panel.csv
-panel             --by-->     script1b-generate-panel.py  <--  script0a..0g  <--  Data/raw/
+panel             --by-->     script0f-generate-panel.py  <--  script0a..0e  <--  Data/raw/
 ```
 
-A bug in `script1b` or in a definition in `script4_treatment.py` invalidates every table downstream. A manuscript review that never opens the code misses this class of error.
+A bug in `script0f` or in a definition in `script4_treatment.py` invalidates every table downstream. A manuscript review that never opens the code misses this class of error.
 
 ## When to apply
 

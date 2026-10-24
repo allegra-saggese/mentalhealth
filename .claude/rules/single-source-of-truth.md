@@ -11,7 +11,7 @@ paths:
 
 ```
 raw data (Dropbox, never edited)
-  -> script0* (clean)  -> script1b (panel)  -> script4_treatment.py (treatments, sample, outcomes, controls)
+  -> script0* (clean)  -> script0f (panel)  -> script4_treatment.py (treatments, sample, outcomes, controls)
   -> estimation scripts (script4a, 4r, 4u, 4x, ...)  -> result CSVs in Data/output/
   -> exhibit scripts (4n, 4p, 4q, 2b, 4v, ...)  -> tables and figures  -> manuscript
 ```

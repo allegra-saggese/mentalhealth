@@ -11,7 +11,7 @@ instead of repeating it; the original long headers are kept verbatim in `code-au
 
 ## 1. Data and treatment definitions
 
-**Panel.** Rural county-years, 2000–2023 (`Data/merged/*_panel.csv`, built by `script1b`).
+**Panel.** Rural county-years, 2000–2023 (`Data/merged/*_panel.csv`, built by `script0f`).
 
 **CAFO counts.** Operation counts from the USDA ag census (2002, 2007, 2012, 2017, 2022), carried forward to the years
 between waves. Sizes are small, medium and large (the top size bin; for dairy, 500+ milk cows). *All sizes* means the sum of the

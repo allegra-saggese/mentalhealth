@@ -10,7 +10,7 @@ pyfixest==0.60.0           # every script4* estimation script
 statsmodels==0.14.5        # multiple-testing corrections (Holm, Benjamini-Hochberg) in inference_tools.py
 wildboottest==0.3.2        # wild cluster bootstrap, called through pyfixest's Feols.wildboottest (inference_tools.py)
 requests==2.34.2           # NASS / HUD API pulls (script0b, fsis-scripts)
-openpyxl==3.1.5            # Excel read/write (script0g, script4k, fsis-scripts)
+openpyxl==3.1.5            # Excel read/write (script0c, script4k, fsis-scripts)
 pyarrow==19.0.0            # parquet in functions.py
 # optional, figures only (script2*, maps): scripts degrade gracefully without them
 plotly==6.7.0

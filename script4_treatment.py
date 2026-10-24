@@ -211,9 +211,9 @@ def load_panel(animal="dairy", verified_waves_only=False):
     df["state_fips"] = df["fips"].str[:2]
     df = df.sort_values(["fips", "year"]).reset_index(drop=True)
 
-    # The panel written by script1b is ALREADY rural-filtered (rural == 1 for all
+    # The panel written by script0f is ALREADY rural-filtered (rural == 1 for all
     # 65,828 rows), so the filter in the old script4 was a no-op. Asserted, not
-    # re-applied, so a future change to script1b surfaces here instead of silently
+    # re-applied, so a future change to script0f surfaces here instead of silently
     # changing the sample.
     assert (df["rural"] == 1).all(), "panel is expected to be pre-filtered to rural counties"
 
@@ -224,7 +224,7 @@ def load_panel(animal="dairy", verified_waves_only=False):
 
     # ---- MISSING CAFO COUNT = ZERO, FROM THE FIRST CENSUS YEAR (2026-10-16) ---
     # A blank cafo_{animal}_* count in the panel means the county has CAFO rows for
-    # some other species but no row for this one (script1b zero-fills only when a
+    # some other species but no row for this one (script0f zero-fills only when a
     # county has no CAFO row for ANY species). The ag census is exhaustive, so no
     # row means no operations. Checked against NASS for dairy in all five census
     # waves: every county with milk-cow operations has a bin row, a head-count row
@@ -245,7 +245,7 @@ def load_panel(animal="dairy", verified_waves_only=False):
     df["log_pop"] = np.log(df["population"].where(df["population"] > 0))
 
     # ---- OUTCOME CONSTRUCTION (moved here from script4-model-test.py) -------
-    # Despair: crude_rate_from_census_pop (built in script1b as deaths/census pop
+    # Despair: crude_rate_from_census_pop (built in script0f as deaths/census pop
     # x 100k) is used rather than CDC's own crude_rate_despair, which CDC
     # suppresses at low death counts. corr = 0.9999 where both exist, and it
     # recovers ~2x the usable sample. BOTH variants hit a hard cliff to 0%
@@ -617,7 +617,7 @@ HEADLINE_OUTCOME   = "poor_mental_health_days"
 # recorded at each step.
 #
 # NOTE ON THE COVERAGE CLIFF: positions 1-5 and 8-10 are full-coverage
-# (99.7-99.9%, re-sourced by script0g); the rest are still CHR-sourced at
+# (99.7-99.9%, re-sourced by script0c); the rest are still CHR-sourced at
 # 52.8-65.9%. Adding a partial-coverage variable collapses the estimating sample
 # through listwise deletion, so every step after the first one confounds "what
 # this covariate does" with "what losing half the sample does".
@@ -644,7 +644,7 @@ COVARIATE_ORDER = [
     # 7-8 REVISED 2026-10-12 (Sept 30 feedback): %_female dropped (little
     # within-county variation; adds variance, not adjustment). %_asian replaced
     # by one combined Asian + AIAN + NHPI share, and %_black added, all from
-    # annual Census PEP (script0g). Reference group = everyone else (mostly
+    # annual Census PEP (script0c). Reference group = everyone else (mostly
     # non-Hispanic white). %_hispanic relabelling to Latin(x) is on hold.
     "%_asian_aian_nhpi",                            #  7  Census PEP 99.9%
     "%_black",                                      #  8  Census PEP 99.9%

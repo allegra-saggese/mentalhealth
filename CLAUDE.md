@@ -51,9 +51,8 @@ mentalhealth/                      # code only; data lives on Dropbox (db_base i
 ├── CLAUDE.md, MEMORY.md           # this file; lessons learned (committed)
 ├── .claude/                       # rules, skills, agents, hooks, settings
 ├── .githooks/                     # pre-commit gate (install: ./scripts/install-hooks.sh)
-├── script0a ... script0g-*.py     # Stage 0: raw ingestion
-├── script1a, script1b-*.py        # Stage 1: QA and panel build
-├── script2a ... script2f-*.py     # Stage 2: QA, descriptive figures, maps
+├── script0a ... script0f-*.py     # Stage 0: data in (ingestion, cleaning, the panel build in script0f)
+├── script1a, script2a ... script2f-*.py   # QA, descriptive figures, maps (being consolidated into script1a-1d)
 ├── script4_treatment.py, script4*-*.py   # Stage 4: design-based estimates and exhibits
 ├── packages.py, functions.py, did_tools.py, designs.py, did_cs.py, estimators.py
 ├── METHODS.md, README.md          # estimator definitions; run order and data availability
@@ -127,7 +126,7 @@ Full definitions are in `.claude/skills/*/SKILL.md`.
 
 | Item | State |
 |------|-------|
-| Stage 0-1 (ingestion, panel) | Run and verified; panel rebuilt 2026-09-23 |
+| Stage 0-1 (ingestion, panel) | Run and verified; current panel `Data/merged/2026-10-12_panel.csv`; rebuilt from the merged stage-0 scripts 2026-10-24 in a scratch folder with 0 differing cells |
 | Stage 4 (design-based estimates) | Reported set fixed 2026-10-15; run state in `code-audit/plans/2026-10-17_MODEL-RUN-STATE.md` |
 | Refactor 2026-10-22 | Shared modules and `METHODS.md` added; output-equivalent (71 files identical under `PYTHONHASHSEED=0`) |
 | Phase 3 (ML selection) | Specified, not built (B-series, `2026-09-27_MODEL-NAMING.md`) |
