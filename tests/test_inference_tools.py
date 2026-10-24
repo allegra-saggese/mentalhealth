@@ -2,7 +2,7 @@
 
 Known-answer checks for Holm and Benjamini-Hochberg, size and power checks for Romano-Wolf and the wild
 cluster bootstrap on simulated data with a known truth, and invariants of the permutation helpers.
-Exit code 0 if everything passes. Takes about a minute.
+Exit code 0 if everything passes. Takes a few minutes.
 """
 import sys
 import warnings
@@ -99,6 +99,46 @@ check("permutation p-value has the +1 correction", it.permutation_pvalue(10.0, n
 check("permutation p-value is two-sided", it.permutation_pvalue(-3.0, np.array([-4.0, 1.0, 2.0, 3.5])) == 3 / 5)
 tbl = it.family_table(["a", "b"], [0.01, 0.04])
 check("family_table has both columns", list(tbl.columns) == ["test", "p_unadjusted", "p_holm"])
+
+# 5. within-state cohort permutation test (the scheme of script4ze): size under no effect, power under a planted effect
+N_STATE, PER_STATE, YEARS = 20, 8, 12
+
+
+def staggered_panel(effect, seed):
+    """Counties nested in states; half are ever treated, cohorts 5, 8 or 11 assigned at random; state-year shocks on top."""
+    r = np.random.default_rng(seed)
+    n = N_STATE * PER_STATE
+    c = r.choice([5, 8, 11, 0], size=n, p=[.2, .15, .15, .5]).astype(float)
+    c[c == 0] = np.nan
+    p = pd.DataFrame({"fips": np.repeat(np.arange(n), YEARS), "year": np.tile(np.arange(1, YEARS + 1), n)})
+    p["state_fips"] = p.fips // PER_STATE
+    p["cohort"] = c[p.fips]
+    shock = r.normal(scale=0.5, size=(N_STATE, YEARS))[p.state_fips, p.year - 1]
+    p["D"] = (p.year >= p.cohort).astype(float)
+    p["y"] = r.normal(size=n)[p.fips] + shock + effect * p.D + r.normal(size=len(p))
+    return p
+
+
+def permutation_p(p, draws, seed):
+    stat = lambda q: float(pf.feols("y ~ D | fips + year", data=q, vcov={"CRV1": "state_fips"}).coef()["D"])  # noqa: E731
+    county = p.drop_duplicates("fips").set_index("fips")[["cohort", "state_fips"]]
+    r = np.random.default_rng(seed)
+    null = []
+    for _ in range(draws):
+        perm = it.permute_cohorts(county.cohort, county.state_fips, r)
+        null.append(stat(p.assign(D=(p.year >= p.fips.map(perm)).astype(float))))
+    return it.permutation_pvalue(stat(p), null), np.array(null)
+
+
+size_p = [permutation_p(staggered_panel(0.0, 100 + s), 99, 200 + s)[0] for s in range(40)]
+size = float(np.mean(np.array(size_p) <= 0.05))
+check("permutation test size near 5% under no effect", size <= 0.15, f"rejection rate {size:.2f} over 40 panels, 99 draws")
+power_p = [permutation_p(staggered_panel(1.0, 300 + s), 99, 400 + s)[0] for s in range(15)]
+power = float(np.mean(np.array(power_p) <= 0.05))
+check("permutation test detects a planted effect", power >= 0.9, f"rejection rate {power:.2f} over 15 panels")
+a = permutation_p(staggered_panel(0.0, 7), 29, 11)
+b = permutation_p(staggered_panel(0.0, 7), 29, 11)
+check("permutation test is reproducible with a seed", a[0] == b[0] and np.array_equal(a[1], b[1]))
 
 print(f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

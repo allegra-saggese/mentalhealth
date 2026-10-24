@@ -19,7 +19,7 @@ import pandas as pd
 import pyfixest as pf
 
 import estimators as est
-from designs import load_designs
+from designs import load_designs, usable_sample
 from did_cs import run_cs
 from script4_treatment import OUTCOMES, COVARIATE_ORDER, tables_dir, os, date
 
@@ -38,18 +38,6 @@ PRESPECIFIED = ("first expansion", "Poor MH Days")      # the one cell D-45 appl
 OUT = os.path.join(tables_dir, "script4za" + ("_quick" if QUICK else ""))
 os.makedirs(OUT, exist_ok=True)
 TODAY = date.today().strftime("%Y-%m-%d")
-
-
-def usable_sample(data, ocol, treat, cohort):
-    """Complete cases; treated counties need a pre-period inside the outcome's years, otherwise they are dropped."""
-    d = data[["fips", "year", "state_fips", ocol, treat, cohort] + CONTROLS].dropna(subset=[ocol, treat] + CONTROLS).copy()
-    d = d.rename(columns={ocol: "y", treat: "D", cohort: "cohort", **dict(zip(CONTROLS, XCOLS))})
-    first = d.groupby("fips").year.min()
-    ok = d.cohort.isna() | (d.fips.map(first) < d.cohort)
-    d = d[ok & (d.cohort.isna() | (d.cohort <= d.year.max()))]
-    d.attrs = {}
-    d["fips"], d["state_fips"] = d.fips.astype(int), pd.factorize(d.state_fips)[0]
-    return d.reset_index(drop=True)
 
 
 def cs_benchmark(d):
@@ -75,7 +63,7 @@ print(f"script4za -- estimator triangulation   CS bootstrap draws {N_BOOT}   rul
 print("=" * 78)
 for dname, D in DESIGNS.items():
     for okey, ocol in outcomes.items():
-        d = usable_sample(D["data"], ocol, D["treat"], D["cohort"])
+        d = usable_sample(D["data"], ocol, D["treat"], D["cohort"], CONTROLS)
         treated = d[d.cohort.notna()]
         cohorts = sorted(int(c) for c in treated.cohort.unique())
         sample_rows.append({"design": dname, "outcome": okey, "years": f"{d.year.min()}-{d.year.max()}", "counties": d.fips.nunique(),

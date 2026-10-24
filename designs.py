@@ -97,3 +97,20 @@ def species_treatments(df, species, bins):
     D = np.where(out["add_year"].notna() & (df["year"] >= out["add_year"]), 1.0, 0.0)
     out["E2"] = pd.Series(D, index=df.index).where(C.notna())
     return out
+
+
+def usable_sample(data, ocol, treat, cohort, controls):
+    """Estimation sample for one outcome and one cohort design (shared by the triangulation and the permutation test).
+
+    Complete cases on outcome, treatment dummy and controls; a treated county needs a pre-period inside the outcome's years
+    (first observed year before its cohort) and a cohort no later than the last year, otherwise it is dropped. Columns are
+    renamed y, D, cohort, x1..xk (controls in the order given); fips is an int and state_fips a 0-based integer code.
+    """
+    d = data[["fips", "year", "state_fips", ocol, treat, cohort] + controls].dropna(subset=[ocol, treat] + controls).copy()
+    d = d.rename(columns={ocol: "y", treat: "D", cohort: "cohort", **{c: f"x{i + 1}" for i, c in enumerate(controls)}})
+    first = d.groupby("fips").year.min()
+    ok = d.cohort.isna() | (d.fips.map(first) < d.cohort)
+    d = d[ok & (d.cohort.isna() | (d.cohort <= d.year.max()))]
+    d.attrs = {}
+    d["fips"], d["state_fips"] = d.fips.astype(int), pd.factorize(d.state_fips)[0]
+    return d.reset_index(drop=True)
