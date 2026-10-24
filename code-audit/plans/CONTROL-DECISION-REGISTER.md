@@ -863,3 +863,22 @@ least **4 of the 5** other estimators agree (LP-DiD, Sun–Abraham, imputation, 
 agree (too fragile with 2–3 cohorts); a magnitude test (ratio 0.5 to 2), which a wide CS interval makes almost impossible to fail. All results are reported whatever the verdict.
 **Pre-committed or after seeing results:** before any of the five estimators has been run on the real panel; the CS result for Poor MH Days (0.0372, not significant) was
 already known when the rule was set. Plan: `2026-10-22_PLAN_estimator-triangulation.md`.
+
+### D-46 · DECIDED 2026-10-24 (scaling by the owner; T3/T4 details drafted for the owner's confirmation) · Presence and dose treatments under de Chaisemartin–D'Haultfœuille (dCDH)
+**Decision:** treatments T1 (presence 0/1), T3 (per 10,000 residents) and T4 (log(1 + count)) are run through dCDH (R `DIDmultiplegtDYN`, 9 effects, no placebos,
+state-clustered) **not normalized**: the estimate is the effect of the treatment change counties actually experienced, not per unit of treatment. The average first
+change (T1 +0.42, T3 +0.17, T4 +0.27) is stored beside each estimate (`note` column) and printed on the figure. **Alternative not taken:** `normalized`, which divides
+by cumulative treatment over the horizon (per unit of treatment-period) and so shrinks with the horizon; chosen against because it is not comparable to the TWFE coefficient except at event time 0 (pinned in `tests/test_triangulation.py`).
+**Drafted details (made after a Poor MH Days trial run, not pre-committed):** T3 uses the package's default matching on the period-one value (`continuous=1` rejected: standard error ten times larger, 0.420 vs 0.040);
+T4 runs **without** time-varying controls for every outcome because with them 6 of 7 outcomes fail inside the package ("all observations are fixed-effects singletons"), T1 and T3 keep the 8 controls; T2 (raw count) stays out (D-32).
+**Caveats:** T3 variation is partly population drift (D-27); T3 rests on about 665 switchers; the units of T1, T3, T4, E2, E3 differ, so line-to-line magnitudes are not comparable.
+**Evidence:** `script4zc-treatment-by-model.py` (140 rows, 0 failures; TWFE rows re-fitted and equal to the script4a A2 grid to 1e-6); figures `script4zd-treatment-by-model-figures.py`.
+**Code:** `estimators.dcdh_estimates(normalized=...)`, `script4za-dcdh.R`.
+
+### D-47 · DECIDED 2026-10-24 · Permutation inference for the cohort designs: within-state shuffle of first-treated years
+**Decision (plan approved by the owner):** for first expansion (E2, primary) and first entry (E3, secondary), all 7 outcomes, the TWFE coefficient (county + year FE, the 8 controls) is
+compared with its distribution when each state's first-treated years are shuffled among that state's ever-treated counties (never-treated counties fixed, dummy rebuilt as year >= cohort).
+2,000 draws, seed 20261023 (one stream per cell), p = (1 + #{|null| >= |observed|}) / (1 + 2,000); the clustered t-statistic gives a secondary p-value. Samples are `designs.usable_sample` (moved out of `script4za`; its outputs were re-run and are identical).
+**Scope limits fixed in advance:** T1, T3, T4 are not cohort-based and are not permuted; the test is of the sharp null, conditional on each state's number of treated counties and its set of cohorts; only states with two or more different cohorts can be shuffled (29 of 40 for E2 Poor MH Days);
+no new multiple-testing family: p-values are reported unadjusted beside the wild-bootstrap p-values of `script4z` (D-42, D-43). **Alternatives not taken:** shuffling across all counties (ignores state shocks); permuting event-study pre-trends (placebo question set aside by the owner).
+**Pre-committed or after seeing results:** design fixed before any permuted result was read; the wild-bootstrap results for E2 were already known. **Code and tests:** `script4ze-permutation-inference.py`, `script4zf-permutation-figure.py`, `tests/test_inference_tools.py` (size 0.10 over 40 null panels, power 1.00 over 15, reproducible).
