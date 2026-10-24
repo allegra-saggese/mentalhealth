@@ -855,3 +855,11 @@ Poor MH Days; 16.2 for Frequent Mental Distress); after it every cell agrees (la
 pre-period results. **Effect:** pre-treatment cells and their significance change in `script4a` (A6, both CS arms), `script4u` (CS arms) and
 `script4x` (CS rows); post-treatment cells and the overall ATT are unchanged by construction and were checked against the
 2026-10-22 outputs. **Code:** `did_cs.att_gt_table` and `base_period_covariates`; `METHODS.md` section 2 updated.
+
+### D-45 · DECIDED 2026-10-23 · Rule for calling the mental-health result estimator-robust (fixed before the triangulation is run)
+**Decision (the owner's):** in `script4za-estimator-triangulation.py` an estimator **agrees** with Callaway–Sant'Anna (covariate-adjusted, same sample) if its
+overall post-treatment ATT has the same sign and lies inside CS's 95% interval. The Poor MH Days result (first expansion) is called **estimator-robust** if at
+least **4 of the 5** other estimators agree (LP-DiD, Sun–Abraham, imputation, de Chaisemartin–D'Haultfœuille, stacked DiD). **Alternatives not taken:** all 5 must
+agree (too fragile with 2–3 cohorts); a magnitude test (ratio 0.5 to 2), which a wide CS interval makes almost impossible to fail. All results are reported whatever the verdict.
+**Pre-committed or after seeing results:** before any of the five estimators has been run on the real panel; the CS result for Poor MH Days (0.0372, not significant) was
+already known when the rule was set. Plan: `2026-10-22_PLAN_estimator-triangulation.md`.
