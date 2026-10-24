@@ -438,15 +438,12 @@ print("df_sub rows:", len(df_sub))
 # PART 4 : MERGE FIPS COUNTY NAMES
 # =============================================================================
 
-matches = (
-    glob.glob(os.path.join(outf, "*FIPS_key*.csv")) or
-    glob.glob(os.path.join(outf, "*fips_full*.csv"))
-)
+matches = glob.glob(os.path.join(outf, "*fips_full*.csv"))
 if matches:
     fips_sense = max(matches, key=os.path.getmtime)
     print("Using FIPS file:", fips_sense)
 else:
-    raise RuntimeError("No FIPS key CSV found in clean folder. Run script0a first.")
+    raise RuntimeError("No fips_full CSV found in clean folder. Run script0a first.")
 
 fips_df = pd.read_csv(fips_sense)
 fips_df = clean_cols(fips_df)
@@ -484,7 +481,7 @@ ag_raw_df["fips_generated"] = ag_raw_df["fips_generated"].astype("string").str.z
 ag_raw_df["year"] = pd.to_numeric(ag_raw_df["year"], errors="coerce").astype("Int64")
 
 # Census-year data only — forward-fill to inter-census years is handled in
-# script1b-generate-panel.py, keeping the compact as raw source data.
+# script0f-generate-panel.py, keeping the compact as raw source data.
 df_big = ag_raw_df.drop_duplicates(ignore_index=True).copy()
 print(f"Census-only compact rows: {len(df_big):,} (years: {sorted(df_big['year'].dropna().unique().tolist())})")
 

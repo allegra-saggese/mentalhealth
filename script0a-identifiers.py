@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Jul 30 10:03:00 2025
+script0a-identifiers.py -- county identifiers and population (stage 0).
 
-@author: allegrasaggese
+Three sections, each independent of the other two apart from the FIPS key:
+  1. FIPS key: county-year list of 5-digit FIPS codes with names, 1990-2024.
+  2. Population: Census county population estimates, 1990-2024, merged to the
+     FIPS key. Population is a measurement (an estimate with its own error and
+     revisions between vintages), not an identifier; it sits here because the
+     same Census county files supply both the key and the estimates.
+  3. NCHS urban-rural class: the 2023/2013/2006/1990 NCHS scheme expanded to an
+     annual county panel, 2000 onward.
+
+Inputs  (db_data/raw): population/, fips/, nchs/NCHSurb-rural-codes.csv
+Outputs (db_data/clean), the descriptors script0b, script0l (FSIS fill), script0f and
+script2a look for:
+  {date}_fips_full.csv, {date}_population_full.csv, {date}-rural-key.csv
+Run order: first script of stage 0. Run: PYTHONHASHSEED=0 python3 script0a-identifiers.py
+
+Created 2025-07-30 (FIPS, population); NCHS section merged from script0e-nchs-urban.py.
 """
 
 # ----------------------- SET UP : set repos / outputs  -------------------- -#
@@ -35,9 +50,12 @@ from packages import *
 
 # other folders
 inf = os.path.join(db_data, "raw") # input 
-outf = os.path.join(db_data, "clean") # outpit
+outf = os.path.join(db_data, "clean") # output
+today_str = date.today().strftime("%Y-%m-%d") # date stamp for all three outputs
 
 
+
+# ======================= SECTION 1 : FIPS KEY (parts 1-3) =========================== #
 
 # ----------------------- DATA PART 1 : LOAD FIPS DATA  -------------------- -#
 
@@ -293,10 +311,8 @@ fips_for_pop = fips_annual_full_v2[["fips", "county", "state_code", "county_code
 
 
 # export clean data
-clean_dir = os.path.join(db_data, "clean")
-today_str = date.today().strftime("%Y-%m-%d")
-clean_fips_df = f"{today_str}_FIPS_key.csv"
-out_path = os.path.join(clean_dir, clean_fips_df)
+clean_fips_df = f"{today_str}_fips_full.csv"
+out_path = os.path.join(outf, clean_fips_df)
 
 ## export to csv in clean folder
 fips_annual_full_v2.to_csv(out_path, index=False)
@@ -307,6 +323,8 @@ del fips_20_expanded, fips_90, fips_90_expanded, fips_annual_full
 del fips_annual_full_v2, missing_pct, mt_fips, new_row1, new_row2, rawfips
 del rows_with_missing, boston_fips
 
+
+# ======================= SECTION 2 : POPULATION (parts 4-5) ========================= #
 
 # ----------------------- DATA PART 4 : CENSUS POPULATION DATA  -------------------- -#
 # Now we add the population data into the fips data for the final key 
@@ -624,8 +642,126 @@ print("\nData types:", full_pop_df["state_code"].dtype)
 
 
 # Final step: EXPORT TO CSV IN THE CLEAN FOLDER 
-clean_pop_df = f"{today_str}_population.csv"
-poppath = os.path.join(clean_dir, clean_pop_df)
+clean_pop_df = f"{today_str}_population_full.csv"
+poppath = os.path.join(outf, clean_pop_df)
 full_pop_df.to_csv(poppath, index=False)
 
+# ======================= SECTION 3 : NCHS URBAN-RURAL CLASS ========================= #
+# Logic moved unchanged from script0e-nchs-urban.py; only the input folder variable is
+# renamed (nchs_in) because `inf` already means db_data/raw in this script.
 
+nchs_in = os.path.join(inf, "nchs")
+csv_path = os.path.join(nchs_in, "NCHSurb-rural-codes.csv")
+
+# read with encoding fallback
+df = read_csv_with_fallback(csv_path)
+
+# ----------------------- NCHS PART 1: CLEANING -------------------- -#
+
+# clean up columns w/ text string and rename cols for clarity 
+df.columns = df.columns.str.lower().str.strip()
+df = df.rename(columns={
+    "stfips": "state_fips_code",
+    "ctyfips": "county_code",
+    "st_abbrev": "state_abbrev",
+    "ctyname": "county_name",
+    "cbsatitle": "cbsa_title",
+    "cbsapop": "cbsa_pop",
+    "ctypop": "county_pop",
+    "code2023": "nchs_code_2023",
+    "code2013": "nchs_code_2013",
+    "code2006": "nchs_code_2006",
+    "code1990": "nchs_code_1990",
+})
+
+
+# generate 5-digit FIPS (functions.generate_fips creates column "FIPS_generated")
+df = generate_fips(df, state_col="state_fips_code", city_col="county_code")
+if "FIPS_generated" in df.columns and "fips_generated" not in df.columns:
+    df = df.rename(columns={"FIPS_generated": "fips_generated"})
+
+# numeric columns
+num_cols = ["cbsa_pop", "county_pop", "nchs_code_2023", "nchs_code_2013", "nchs_code_2006", "nchs_code_1990"]
+for c in num_cols:
+    if c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+
+# build long panel
+code_cols = ["nchs_code_2023", "nchs_code_2013", "nchs_code_2006", "nchs_code_1990"]
+year_map = {
+    "nchs_code_2023": 2023,
+    "nchs_code_2013": 2013,
+    "nchs_code_2006": 2006,
+    "nchs_code_1990": 1990,
+}
+
+panel = df.melt(
+    id_vars=[
+        "fips_generated",
+        "state_fips_code",
+        "county_code",
+        "state_abbrev",
+        "county_name",
+        "cbsa_title",
+        "cbsa_pop",
+        "county_pop",
+    ],
+    value_vars=code_cols,
+    var_name="nchs_version",
+    value_name="nchs_code",
+)
+
+panel["year"] = panel["nchs_version"].map(year_map).astype("Int64")
+panel["nchs_code"] = pd.to_numeric(panel["nchs_code"], errors="coerce").astype("Int64")
+
+
+# ----------------------- NCHS PART 2: FILTER BY URBAN / NON URBAN  -------------------- -#
+# NCHS labels (standard 6-level scheme)
+label_map = {
+    1: "Large central metro",
+    2: "Large fringe metro",
+    3: "Medium metro",
+    4: "Small metro",
+    5: "Micropolitan",
+    6: "Noncore",
+}
+panel["nchs_label"] = panel["nchs_code"].map(label_map).astype("string")
+
+# binary flag: 0 for large central/fringe metro, 1 otherwise
+panel["non_large_metro"] = 1
+panel.loc[panel["nchs_code"].isin([1, 2]), "non_large_metro"] = 0
+
+# drop rows without codes
+panel = panel.dropna(subset=["nchs_code"]).copy()
+panel = panel.sort_values(["fips_generated", "year"])
+
+# expand to discrete annual panel using most recent base year
+def expand_years(df, base_year, start_year, end_year):
+    base = df[df["year"] == base_year].copy()
+    frames = []
+    for y in range(start_year, end_year + 1):
+        frames.append(base.assign(year=y))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=df.columns)
+
+panel_expanded = pd.concat(
+    [
+        expand_years(panel, 1990, 1990, 2005),
+        expand_years(panel, 2006, 2006, 2012),
+        expand_years(panel, 2013, 2013, 2022),
+        expand_years(panel, 2023, 2023, 2023),
+    ],
+    ignore_index=True,
+)
+
+# drop years before 2000
+panel_expanded = panel_expanded[panel_expanded["year"] >= 2000].copy()
+panel_expanded = panel_expanded.sort_values(["fips_generated", "year"])
+
+
+# ----------------------- NCHS PART 3: EXPORT   -------------------- -#
+
+panel_path = os.path.join(outf, f"{today_str}-rural-key.csv")
+
+panel_expanded.to_csv(panel_path, index=False)
+
+print("Saved:", panel_path)
