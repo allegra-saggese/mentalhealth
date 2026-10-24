@@ -8,7 +8,8 @@ FSIS cleaning pipeline end-to-end w/in a single
 3) HUD fill for partially filled geo data (fips recovery): 
    - bulk mode (default): using HUD zip code to fips walk, fill in for establishments only with city  / state / zip 
    - targeted mode: isolate only missing establishments and use fips walk 
-4) Optional manual ZIP template step: using manually found matches, backfilling in fips 
+4) Last FIPS-recovery step (one script): manual ZIP template, deterministic fills (ZIP, Connecticut, city+state, establishment
+   history), manual county-label template; a missing template skips its step 
 5) merge all outputs together to create panel of fsis with highest coverage possible 
 
     """
@@ -21,13 +22,13 @@ import subprocess
 import sys
 from datetime import datetime
 
+from packages import db_data
+
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(THIS_DIR) if os.path.basename(THIS_DIR) == "fsis-scripts" else THIS_DIR
 FSIS_SCRIPT_DIR = os.path.join(REPO_ROOT, "fsis-scripts")
-DB_BASE = os.path.expanduser("~/Dropbox/Mental")
-DB_DATA = os.path.join(DB_BASE, "Data")
-QA_DIR = os.path.join(DB_DATA, "FOIA-USDA-request", "qa-fsis")
+QA_DIR = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
 
 # ----------------------- DATA PART 1: EXECUTE FOLDER OF SCRIPTS -------------------- -#
 
@@ -37,9 +38,7 @@ SCRIPT_ORDER = {
     "hud_zip_fill": "script0i-fsis-hud-zip-fips-fill.py",
     "hud_zipyear_refill": "script0j-fsis-hud-zipyear-refill.py",
     "hud_bulk_fill": "script0k-fsis-hud-bulk-zipyear-fill.py",
-    "manual_zip_fill": "script0l-fsis-apply-manual-zip-fips.py",
-    "deterministic_fill": "script0m-fsis-deterministic-completion.py",
-    "manual_county_fill": "script0n-fsis-apply-manual-county-fips.py",
+    "manual_and_deterministic_fill": "script0l-fsis-manual-and-deterministic-fill.py",   # manual ZIP, deterministic, manual county label
 }
 
 
@@ -58,7 +57,7 @@ def _latest_file_by_regex(dirpath: str, pattern: str):
     return candidates[-1][1]
 
 
-def _run_script(script_name: str, dry_run=False):
+def _run_script(script_name: str, dry_run=False, extra_args=()):
     candidate_paths = [
         os.path.join(FSIS_SCRIPT_DIR, script_name),
         os.path.join(REPO_ROOT, script_name),
@@ -69,9 +68,9 @@ def _run_script(script_name: str, dry_run=False):
             f"Missing script: {script_name}. Checked: {candidate_paths}"
         )
 
-    cmd = [sys.executable, path]
+    cmd = [sys.executable, path, *extra_args]
     stamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{stamp}] RUN {path}")
+    print(f"[{stamp}] RUN {path} {' '.join(extra_args)}".rstrip())
     if dry_run:
         return
     env = os.environ.copy()
@@ -80,7 +79,7 @@ def _run_script(script_name: str, dry_run=False):
     subprocess.run(cmd, check=True, cwd=REPO_ROOT, env=env)
 
 
-def _build_steps(hud_strategy: str, run_manual_zip: bool, run_manual_county: bool):
+def _build_steps(hud_strategy: str):
     steps = [
         SCRIPT_ORDER["extract_raw"],
         SCRIPT_ORDER["build_size_panel"],
@@ -95,14 +94,7 @@ def _build_steps(hud_strategy: str, run_manual_zip: bool, run_manual_county: boo
     else:
         raise ValueError(f"Unknown hud strategy: {hud_strategy}")
 
-    if run_manual_zip:
-        steps.append(SCRIPT_ORDER["manual_zip_fill"])
-
-    steps.append(SCRIPT_ORDER["deterministic_fill"])
-
-    if run_manual_county:
-        steps.append(SCRIPT_ORDER["manual_county_fill"])
-
+    steps.append(SCRIPT_ORDER["manual_and_deterministic_fill"])
     return steps
 
 
@@ -153,31 +145,28 @@ def main():
         r"^(\d{4}-\d{2}-\d{2})_fsis_missing_county_labels_manual_template\.csv$",
     )
 
-    run_manual_zip = (not args.skip_manual_zip) and (zip_template is not None)
-    run_manual_county = (not args.skip_manual_county) and (county_template is not None)
-
     if args.require_manual_zip and zip_template is None:
         raise FileNotFoundError("Manual ZIP template not found in qa-fsis folder.")
     if args.require_manual_county and county_template is None:
         raise FileNotFoundError("Manual county template not found in qa-fsis folder.")
 
     if zip_template is None and not args.skip_manual_zip:
-        print("Manual ZIP template not found: skipping script0l-fsis-apply-manual-zip-fips.py")
+        print("Manual ZIP template not found: the manual ZIP step will be skipped")
     if county_template is None and not args.skip_manual_county:
-        print("Manual county template not found: skipping script0n-fsis-apply-manual-county-fips.py")
+        print("Manual county template not found: the manual county-label step will be skipped")
 
-    steps = _build_steps(
-        hud_strategy=args.hud_strategy,
-        run_manual_zip=run_manual_zip,
-        run_manual_county=run_manual_county,
-    )
+    steps = _build_steps(hud_strategy=args.hud_strategy)
+    # the merged last step skips a manual step whose template is missing, and honours the same four flags
+    last_step_args = [f for f, on in (("--skip-manual-zip", args.skip_manual_zip), ("--skip-manual-county", args.skip_manual_county),
+                                      ("--require-manual-zip", args.require_manual_zip),
+                                      ("--require-manual-county", args.require_manual_county)) if on]
 
     print("FSIS pipeline steps:")
     for idx, step in enumerate(steps, start=1):
         print(f"{idx}. {step}")
 
     for step in steps:
-        _run_script(step, dry_run=args.dry_run)
+        _run_script(step, dry_run=args.dry_run, extra_args=last_step_args if step == steps[-1] else ())
 
     print("FSIS pipeline complete.")
 
