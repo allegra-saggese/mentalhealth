@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script1b-generate-panel.py -- builds the county-year panel from the newest clean file of each source.
+script0f-generate-panel.py -- builds the county-year panel from the newest clean file of each source.
 
 Frame:   rural counties (NCHS non_large_metro == 1); every other source is left-joined onto it.
-Reads:   Data/clean/*.csv (script0a-0g outputs)
+Reads:   Data/clean/*.csv (script0a-0e outputs)
 Writes:  Data/merged/<date>_{panel, panel_05_10, panel_10_20, panel_census_years, panel_fsis}.csv
-Run:     python3 script1b-generate-panel.py
+Run:     python3 script0f-generate-panel.py
 Notes:   CAFO census values are forward-filled between census years; a county with no CAFO row for any species is zero-filled in census years
          (species-by-species zeros are applied later, in script4_treatment.load_panel, D-34); FSIS columns live only in panel_fsis.csv.
          CDC missingness flags and CHR count imputation are explained in README.md, "Key Design Decisions".
@@ -33,7 +33,7 @@ MERGE_DESCRIPTORS = {
 }
 RURAL_DESCRIPTOR_HINT = "rural-key"
 
-# --- CHR columns replaced by correctly-dated annual sources (script0g) --------
+# --- CHR columns replaced by correctly-dated annual sources (script0c) --------
 # County Health Rankings dates every measure by its RELEASE year, not the year
 # the data describes: median household income, children in poverty and
 # unemployment are lagged 2 years, uninsured adults 3. A row labelled 2020 held
@@ -42,7 +42,7 @@ RURAL_DESCRIPTOR_HINT = "rural-key"
 # years.
 #
 # These four are dropped from the CHR block BEFORE it is merged, and the
-# script0g series take over the SAME column names with the SAME units
+# script0c series take over the SAME column names with the SAME units
 # (`*_per100k` = percent x 1000). Downstream code needs no changes.
 #
 # Replaced by: SAIPE (income, child poverty), BLS LAUS (unemployment),
@@ -150,14 +150,14 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
     # runtime reduction: filter to rural key immediately
     df = df.merge(allowed_keys, on=["fips", "year"], how="inner")
 
-    # Drop the CHR columns superseded by script0g's correctly-dated series so the
+    # Drop the CHR columns superseded by script0c's correctly-dated series so the
     # new values can take the same names without a suffix collision at merge time.
     if descriptor == CHR_DESCRIPTOR:
         _drop = [c for c in df.columns
                  if any(c == b or c.startswith(b + "_") for b in CHR_REPLACED_COLS)]
         if _drop:
             df = df.drop(columns=_drop)
-            print(f"  {descriptor}: dropped {len(_drop)} CHR columns superseded by script0g "
+            print(f"  {descriptor}: dropped {len(_drop)} CHR columns superseded by script0c "
                   f"({', '.join(sorted(CHR_REPLACED_COLS))})")
 
     if df.empty:
@@ -693,7 +693,7 @@ _ratio_flag_cols = [c for c in merged_all.columns if c.endswith("_ratio_flag")]
 if _ratio_flag_cols:
     _qa_df = merged_all[["fips", "year"] + _ratio_flag_cols].copy()
     _qa_path = os.path.join(tables_dir, f"{today_str}_ratio_flags_qa.csv")
-    os.makedirs(merged_dir, exist_ok=True)
+    os.makedirs(tables_dir, exist_ok=True)      # was merged_dir: the QA table is written to tables_dir
     _qa_df.to_csv(_qa_path, index=False)
     print(f"Ratio flags archived: {_qa_path} ({len(_ratio_flag_cols)} columns)")
 
@@ -800,7 +800,7 @@ def _strip_source_suffixes(name: str) -> str:
     n = name
     n = n.replace("_raw_value_mentalhealthrank_full", "")
     n = n.replace("_mentalhealthrank_full", "")
-    # script0g's correctly-dated series must land on the PANEL's own names. The
+    # script0c's correctly-dated series must land on the PANEL's own names. The
     # CHR versions of these ten are dropped above (CHR_REPLACED_COLS), so there
     # is no collision -- these simply take over the names downstream code uses.
     n = n.replace("_annual_controls_county_year", "")

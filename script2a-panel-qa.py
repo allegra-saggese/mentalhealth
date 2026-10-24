@@ -349,15 +349,8 @@ else:
     keep_cols = [c for c in keep_cols if c is not None and c in outliers.columns]
     outliers  = outliers[keep_cols].sort_values("abs_z", ascending=False).head(1000)
 
-    # Re-export panel + slices with CDC diagnostic columns appended
-    _panel_no_fsis = df[[c for c in df.columns if not c.endswith("_fsis")]]
-    _panel_no_fsis.to_csv(os.path.join(merged_dir, f"{today_str}_panel.csv"), index=False)
-    _panel_no_fsis[_panel_no_fsis["year"].between(2005, 2010, inclusive="both")].to_csv(
-        os.path.join(merged_dir, f"{today_str}_panel_05_10.csv"), index=False)
-    _panel_no_fsis[_panel_no_fsis["year"].between(2010, 2020, inclusive="both")].to_csv(
-        os.path.join(merged_dir, f"{today_str}_panel_10_20.csv"), index=False)
-    _panel_no_fsis[_panel_no_fsis["year"].isin([2002, 2007, 2012, 2017, 2022])].to_csv(
-        os.path.join(merged_dir, f"{today_str}_panel_census_years.csv"), index=False)
+    # D-49: this script no longer re-writes {date}_panel*.csv (script0f-generate-panel.py is the only panel writer);
+    # the CDC diagnostic columns above stay in the QA tables below.
 
     overall.to_csv(os.path.join(qa_dir, f"{today_str}_qa_cdc_cruderate_sensecheck_overall.csv"), index=False)
     by_year.to_csv(os.path.join(qa_dir, f"{today_str}_qa_cdc_cruderate_sensecheck_by_year.csv"), index=False)
