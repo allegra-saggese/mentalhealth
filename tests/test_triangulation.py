@@ -94,5 +94,38 @@ for name, tab in run_all(jump).items():
     b1, _ = at(tab, 1)
     check(f"{name}: event-time indexing (effect 0 at e=0, 5 at e=1)", abs(b0) < 0.5 and abs(b1 - 5) < 0.6, f"e=0 {b0:.2f}, e=1 {b1:.2f}")
 
+# ---- design 3: a dose treatment (0 before the switch, 1, 2 or 3 units after); normalized dCDH must give the per-unit effect
+g3 = np.random.default_rng(3)
+n3_, T3_ = 700, 14
+sw = g3.choice([5, 8, 11, 0], size=n3_, p=[.25, .25, .25, .25])
+dose = g3.choice([1, 2, 3], size=n3_)
+dd = pd.DataFrame({"fips": np.repeat(np.arange(n3_), T3_), "year": np.tile(np.arange(1, T3_ + 1), n3_)})
+dd["state_fips"] = (np.arange(n3_) % 20)[dd.fips]
+swy = sw[dd.fips]
+dd["dose"] = np.where((swy > 0) & (dd.year >= swy), dose[dd.fips], 0)
+since = np.where(swy > 0, dd.year - swy, -1)
+PER_UNIT, DYN = 1.5, 0.2
+dd["y"] = g3.normal(size=n3_)[dd.fips] + 0.2 * dd.year + PER_UNIT * dd.dose * (1 + DYN * np.maximum(since, 0)) * (since >= 0) \
+    + g3.normal(size=len(dd))
+# What the package's two scalings mean (pinned, not assumed). y responds to the CURRENT dose with a growing flow effect, so the outcome
+# change at event time e is PER_UNIT * dose * (1 + DYN * e). normalized=True divides by the cumulative treatment over l = e + 1 periods
+# (per unit of treatment-period): equal to the per-unit flow effect only at e = 0, then shrinking like 1 / l. normalized=False is the
+# effect of the actual treatment change: PER_UNIT * (average dose of the switchers = 2) * (1 + DYN * e).
+norm = est.dcdh_estimates(dd, y="y", treat="dose", unit="fips", time="year", cluster="state_fips", controls=[], effects=5,
+                          placebos=0, normalized=True)
+raw = est.dcdh_estimates(dd, y="y", treat="dose", unit="fips", time="year", cluster="state_fips", controls=[], effects=5,
+                         placebos=0, normalized=False)
+for e in (0, 2, 4):
+    b, se = at(norm, e)
+    want = PER_UNIT * (1 + DYN * e) / (e + 1)
+    check(f"dCDH normalized: effect per unit of cumulative treatment, event time {e}", abs(b - want) <= max(0.15, 3.5 * se),
+          f"{b:.2f} vs {want:.2f} (se {se:.2f})")
+    b, se = at(raw, e)
+    want = PER_UNIT * 2.0 * (1 + DYN * e)
+    check(f"dCDH not normalized: effect of the actual treatment change, event time {e}", abs(b - want) <= max(0.4, 3.5 * se),
+          f"{b:.2f} vs {want:.2f} (se {se:.2f})")
+b0, _ = at(norm, 0)
+check("dCDH normalized equals the per-unit flow effect at event time 0", abs(b0 - PER_UNIT) < 0.15, f"{b0:.2f} vs {PER_UNIT}")
+
 print(f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

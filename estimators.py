@@ -343,18 +343,21 @@ def lpdid_estimates(panel, y, cohort="cohort", unit="fips", time="year", cluster
                       _tri_rows("LP-DiD", "event", r["h"].astype(float).values, r["beta"].values, r["se"].values)], ignore_index=True)
 
 
-def dcdh_estimates(panel, y, treat, unit="fips", time="year", cluster="state_fips", controls=None, effects=9, placebos=7):
+def dcdh_estimates(panel, y, treat, unit="fips", time="year", cluster="state_fips", controls=None, effects=9, placebos=7,
+                   normalized=False):
     """de Chaisemartin-D'Haultfoeuille DID_l through the authors' R package DIDmultiplegtDYN (needs Rscript, polars, the package).
 
     Effect_l is event time l-1 (Effect_1 = the period treatment switches on); Placebo_l is event time -(l+1);
     overall = the package's average total effect over effects 1..`effects`. Controls via the package's `controls` option.
+    normalized=True gives effects per one unit of treatment (for a dose or log-count treatment); the default effects are
+    those of the whole treatment change, which equals one unit for a 0/1 treatment.
     """
     controls = list(controls or [])
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         panel[[unit, time, y, treat, cluster] + controls].to_csv(tmp / "in.csv", index=False)
         subprocess.run(["Rscript", str(DCDH_R_SCRIPT), str(tmp), unit, time, y, treat, cluster, str(effects), str(placebos),
-                        ",".join(controls)], check=True, capture_output=True, text=True)
+                        ",".join(controls), "1" if normalized else "0"], check=True, capture_output=True, text=True)
         eff, plc, ate = (pd.read_csv(tmp / f"{n}.csv") for n in ("effects", "placebos", "ate"))
     ev = [_tri_rows("de Chaisemartin-D'Haultfoeuille", "event", np.arange(len(eff)) * 1.0, eff["Estimate"].values, eff["SE"].values)]
     if len(plc):
