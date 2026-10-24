@@ -60,8 +60,8 @@ STATE_ABBR_TO_FIPS2 = {
 
 ##################### HELPER FUNCTIONS ####################
 
-# used in: script0a-pop-fips-raw-merge.py, script0c-health-raw.py, script0d-crime-raw.py,
-# used in: script0f-nchs-urban.py, script0o-cdc-county-deathsofdespair-panel.py, script3-ridge.py
+# used in: script0a-identifiers.py, script0c-health-controls.py, script0d-crime-raw.py,
+# used in: script0a-identifiers.py, script0o-cdc-county-deathsofdespair-panel.py, script3-ridge.py
 def read_csv_with_fallback(path, encodings=("utf-8", "latin1"), **kwargs):
     """
     Read CSV with sequential encoding fallbacks.
@@ -79,7 +79,7 @@ def read_csv_with_fallback(path, encodings=("utf-8", "latin1"), **kwargs):
     raise last_error if last_error else RuntimeError(f"Failed to read CSV: {path}")
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def pick_source_by_fragment(source_map, name_fragment):
     """
     Pick one DataFrame from a dict keyed by filename using a name fragment.
@@ -93,7 +93,7 @@ def pick_source_by_fragment(source_map, name_fragment):
     return source_map[matches[0]].copy()
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def sniff_delimiter(path):
     """
     Return one of: 'pipe', 'comma', 'ws' based on the first non-empty line.
@@ -115,7 +115,7 @@ def sniff_delimiter(path):
     return max(scores, key=scores.get)
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def expand_years_cross(df, years, year_col="year"):
     """
     Cross-join a DataFrame with a list/range of years.
@@ -125,7 +125,7 @@ def expand_years_cross(df, years, year_col="year"):
     return out.reset_index(drop=True)
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def drop_state_level_rows_except_dc(
     df,
     county_code_col="county_code",
@@ -142,7 +142,7 @@ def drop_state_level_rows_except_dc(
     return out.loc[keep_mask].copy()
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def standardize_county_identifiers(
     df,
     state_col="state_code",
@@ -177,7 +177,7 @@ def standardize_county_identifiers(
     return out
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def normalize_dc_fips(
     df,
     county_name_col="county",
@@ -201,7 +201,7 @@ def normalize_dc_fips(
     return out
 
 
-# used in: script0a-pop-fips-raw-merge.py
+# used in: script0a-identifiers.py
 def filter_to_us_state_codes(df, state_col="state_code", allowed_state_codes=None):
     """
     Keep only rows whose state code is in US_STATE_CODES (50 states + DC by default).
@@ -212,10 +212,10 @@ def filter_to_us_state_codes(df, state_col="state_code", allowed_state_codes=Non
     return out.loc[state_vals.isin(allowed)].copy()
 
 
-# used in: script0c-health-raw.py, script0e-fsis-slaughterhouses.py, script0h-fsis-establishment-size-panel.py,
+# used in: script0c-health-controls.py, script0e-fsis-slaughterhouses.py, script0h-fsis-establishment-size-panel.py,
 # used in: script0i-fsis-hud-zip-fips-fill.py, script0j-fsis-hud-zipyear-refill.py, script0k-fsis-hud-bulk-zipyear-fill.py,
-# used in: script0l-fsis-apply-manual-zip-fips.py, script0m-fsis-deterministic-completion.py, script0n-fsis-apply-manual-county-fips.py,
-# used in: script0o-cdc-county-deathsofdespair-panel.py
+# used in: script0l-fsis-manual-and-deterministic-fill.py
+# used in: script0c-health-controls.py (CDC deaths of despair)
 def first_non_null(series: pd.Series):
     """
     Return first non-null value from a Series, else pd.NA.
@@ -225,7 +225,7 @@ def first_non_null(series: pd.Series):
 
 
 # used in: script0i-fsis-hud-zip-fips-fill.py, script0j-fsis-hud-zipyear-refill.py, script0k-fsis-hud-bulk-zipyear-fill.py,
-# used in: script0l-fsis-apply-manual-zip-fips.py, script0m-fsis-deterministic-completion.py
+# used in: script0l-fsis-manual-and-deterministic-fill.py
 def normalize_zip5(series: pd.Series) -> pd.Series:
     """
     Extract 5-digit ZIP code from a string-like series.
@@ -234,8 +234,7 @@ def normalize_zip5(series: pd.Series) -> pd.Series:
     return s.str.extract(r"(\d{5})", expand=False)
 
 
-# used in: script0e-fsis-slaughterhouses.py, script0l-fsis-apply-manual-zip-fips.py,
-# used in: script0m-fsis-deterministic-completion.py, script0n-fsis-apply-manual-county-fips.py
+# used in: script0e-fsis-slaughterhouses.py, script0l-fsis-manual-and-deterministic-fill.py
 def normalize_fips5(series: pd.Series) -> pd.Series:
     """
     Normalize to 5-digit FIPS (string); invalid values become NA.
@@ -246,7 +245,7 @@ def normalize_fips5(series: pd.Series) -> pd.Series:
     return s
 
 
-# used in: script0m-fsis-deterministic-completion.py, script0n-fsis-apply-manual-county-fips.py
+# used in: script0l-fsis-manual-and-deterministic-fill.py
 def normalize_text_upper(series: pd.Series) -> pd.Series:
     """
     Upper-case trimmed text normalization.
@@ -285,8 +284,7 @@ def latest_file_glob(folder: str, pattern: str) -> str:
     return max(hits, key=os.path.getmtime)
 
 
-# used in: script0h-fsis-establishment-size-panel.py, script0i-fsis-hud-zip-fips-fill.py, script0l-fsis-apply-manual-zip-fips.py,
-# used in: script0m-fsis-deterministic-completion.py, script0n-fsis-apply-manual-county-fips.py
+# used in: script0h-fsis-establishment-size-panel.py, script0i-fsis-hud-zip-fips-fill.py, script0l-fsis-manual-and-deterministic-fill.py
 def latest_file_by_regex(dirpath: str, pattern: str) -> str:
     """
     Return latest file matching regex pattern with a leading date capture group
@@ -304,7 +302,7 @@ def latest_file_by_regex(dirpath: str, pattern: str) -> str:
     return candidates[-1][1]
 
 
-# used in: latest_files_by_descriptor() helper (indirectly script1b-merge-dataclean.py)
+# used in: latest_files_by_descriptor() helper (indirectly script0f-generate-panel.py)
 def split_dated_descriptor(path: str):
     """
     Returns (descriptor, date_key) where descriptor excludes date prefix.
@@ -316,7 +314,7 @@ def split_dated_descriptor(path: str):
     return stem, ""
 
 
-# used in: script1b-merge-dataclean.py
+# used in: script0f-generate-panel.py
 def latest_files_by_descriptor(folder: str):
     """
     Find latest file per descriptor in a folder with dated file naming.
@@ -336,7 +334,7 @@ def latest_files_by_descriptor(folder: str):
     return {k: v["path"] for k, v in latest.items()}
 
 
-# used in: script1b-merge-dataclean.py, script1c-replace-cdc-in-merged.py, script2-visualizations.py,
+# used in: script0f-generate-panel.py, script1c-replace-cdc-in-merged.py, script2-visualizations.py,
 # used in: script2a-panel-sumstats-by-farms.py, script2b-qa-memo-correlations.py, script2d-mental-coverage-audit.py
 def normalize_panel_key(df: pd.DataFrame, dropna=True):
     """
@@ -396,7 +394,7 @@ def nass_get_data(base_url: str, params: dict):
 
 # FIPS code generator from individual city - state cols 
 
-# used in: script0a-pop-fips-raw-merge.py, script0b-ag-raw.py, script0b-ag-raw-v2.py, script0f-nchs-urban.py
+# used in: script0a-identifiers.py, script0b-ag-raw.py, script0b-ag-raw-v2.py, script0a-identifiers.py
 def generate_fips(df, state_col="state", city_col="city"):
     # Pad state to 2 digits _ cities to 3 digits
     df["state_padded"] = df[state_col].astype(str).str.zfill(2)
@@ -434,7 +432,7 @@ def clean_cols(df):
 
 
 # read in files 
-# used in: script1b-merge-dataclean.py, script2a-panel-sumstats-by-farms.py
+# used in: script0f-generate-panel.py, script2a-panel-sumstats-by-farms.py
 def read_and_prepare(path):
     """Simple reader: csv/parquet/xlsx -> lower-case cols, strip strings, standardize fips/year."""
     ext = os.path.splitext(path)[1].lower()
@@ -524,7 +522,7 @@ def load_county_geojson(merged_dir=None):
     if merged_dir is None:
         raise RuntimeError("Could not load county GeoJSON from URL; pass merged_dir for fallback.")
 
-    db_data_local = os.path.expanduser("~/Dropbox/Mental/Data")
+    from packages import db_data as db_data_local      # same folder as before; the one place paths are defined
     html_candidates = (
         sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "core-visuals", "*_F2_poor_mental_health_map_2012.html")), reverse=True)
         + sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "core-visuals", "*_F1_cafo_intensity_map_2012.html")), reverse=True)
