@@ -32,7 +32,7 @@ This project combines US health, crime, population, and agriculture data into on
 ```
 mentalhealth/
 ├── script0a … script0f-*.py   # Stage 0 — data in: ingestion, cleaning, and the panel build (script0f)
-├── script1a, script2a … script2f-*.py   # QA, descriptive figures, maps (being consolidated into script1a–1d)
+├── script1a … script1d-*.py   # Stage 1 — QA, tables, figures, maps (descriptive, before analysis)
 ├── first-stage-testing/       # first-phase pilots and test versions, kept for provenance, NOT run (see its README)
 ├── script4*.py                # Stage 4 — design-based estimates, tables, slides
 ├── functions.py, packages.py  # shared helpers; db_base path lives in packages.py
@@ -68,8 +68,9 @@ Data/
 ├── merged/           # Panel outputs from script0f
 │
 └── output/
-    ├── figs/         # All PNGs from script2* (one subfolder per script)
-    └── tables/       # All CSV outputs from script2* + QA tables
+    ├── figs/         # Figures from script1* and script4* (one subfolder per script)
+    ├── maps/         # HTML + PNG maps from script1d
+    └── tables/       # CSV outputs from script1* and script4* (one subfolder per script)
 ```
 
 ---
@@ -91,22 +92,16 @@ Each script reads from `Data/raw/` and writes panel-ready CSVs to `Data/clean/`.
 **`fsis-scripts/` sub-scripts** (run in this order by `script0e`; each fills blanks only and never overwrites an existing `fips_code`):
 `script0e-fsis-slaughterhouses` (raw FOIA → establishment-year panel) → `0h` (size/type panel) → `0i` (HUD ZIP→county API fill) → `0j` (year-aware refill) → `0k` (HUD bulk ZIP-year fill) → `0l-fsis-manual-and-deterministic-fill` (one pass, in this order: manual ZIP→FIPS, deterministic completion [ZIP, CT, city+state, establishment history], manual county-label→FIPS; a missing manual template skips its step). It writes the interim and county files once; the earlier three-script chain overwrote one file name three times (D-48).
 
-### Stage 1 — QA (stages 1 and 2 are being consolidated into `script1a`–`script1d`: QA, tables, figures, maps; see D-49)
+### Stage 1 — QA and descriptive work (before analysis; none of these writes the panel)
 
 | Script | Purpose | Output location |
 |--------|---------|-----------------|
-| `script1a-var-completeness.py` | Panel coverage QA: integrity checks, mental health variable inventory, outcome distributions, CDC suppression audit, CAFO per-capita transformation analysis, coverage heatmap | `Data/output/tables/panel-qa/` |
+| `script1a-panel-qa.py` | Checks that can fail: key integrity and source duplication, variable inventory and coverage, CDC crude-rate sense check, correlation tables and FSIS column QA, missingness, county coverage check against the rural key, CAFO crosscheck, QA memo. `--only <section>` | `Data/output/tables/script1a/`, `Data/output/figs/script1a/` |
+| `script1b-tables.py` | Numeric tables: summary statistics, CAFO concentration (HHI, Gini, entry/exit), CAFO and FSIS size-bin summaries, species overlap, the master variable register (xlsx + csv codebook) | `Data/output/tables/script1b/`, `Data/output/codebooks/` |
+| `script1c-figures.py` | All non-map graphics: binned scatters, county series, correlations, distributions, CAFO composition and top counties, threshold and presence, ridgelines, trend sweeps, state trends and dots, species overlap, raw trends and event-time paths. Figures use `figstyle.py` (183 mm, 600 dpi PNG + vector PDF) | `Data/output/figs/script1c/`, `Data/output/tables/script1c/` |
+| `script1d-maps.py` | All maps (Plotly, HTML + PNG): FSIS density, outcome values, first differences, CAFO by animal and size, and one family per treatment (entry per wave, first-expansion cohort, large operations, species, treatment status, sample coverage, FSIS entry, change between census waves) | `Data/output/maps/script1d/` |
 
-### Stage 2 — QA, Visualization, Maps
-
-| Script | Purpose | Output location |
-|--------|---------|-----------------|
-| `script2a-panel-qa.py` | Panel QA, missingness, composition and summary statistics: CDC crude-rate sense check, correlation tables, FSIS column QA | `Data/merged/`, `Data/output/tables/` |
-| `script2b-final-visuals.py` | Core analytical figures: CAFO / FSIS exposure vs outcomes (binned scatter, time series, heatmap) | `Data/output/figs/core-visuals/` |
-| `script2c-cafo-composition.py` | CAFO geographic concentration and size-composition | `Data/output/figs/cafo-composition/` |
-| `script2d-threshold-presence.py` | CAFO threshold / presence vs outcomes (non-linear by design) | `Data/output/figs/threshold-presence/` |
-| `script2e-hispanic-chr-explorer.py` | Hispanic population as confounder and heterogeneity dimension | `Data/output/figs/hispanic-chr/` |
-| `script2f-maps.py` | Plotly choropleths: FSIS counts, mental-outcome coverage, ag first-differences | `Data/output/figs/{fsis-choropleth,mental-outcome-coverage-maps,ag-first-diff-maps}/` |
+The Hispanic-share and health explorer (`script2e-hispanic-chr-explorer.py`) is archived in `z-archive/`. Old stage-2 outputs stay in their original folders under `Data/output/`; D-49 records the consolidation.
 
 ### Stage 3 — Pilot (moved)
 The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test (`script4-model-test.py`) now live in `first-stage-testing/` as `firststage_*.py`. They were the first phase of development, are not part of the pipeline, and are not used for any reported result. ML variable selection remains specified-only (B-series in `code-audit/plans/2026-09-27_MODEL-NAMING.md`).
@@ -122,12 +117,9 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 | `script4b-…`, `script4c-…` | Earlier run of adding controls in a fixed order and its summary; **superseded by `script4y`**, kept unchanged as the record of the 09-23 run |
 | `script4d-balance-panel.py` | Balance and detectable-effect tables |
 | `script4j-control-diagnostics.py` | Coverage, causal role and pre-trends for each control |
-| `script4k-variable-register.py` | Master variable register, one row per panel column |
 | `script4r-fsis-treatment.py` | Slaughterhouses as the treatment (R0–R3; R4 LP-DiD computed, not reported) |
-| `script4s-species-overlap.py` | How many counties have large CAFOs of more than one species (dairy, beef, hogs, chickens) |
 | `script4t-pretrend-leads.py` | Outcome pre-trends (leads) for T1, T3, T4, E2 and first entry |
 | `script4u-did-by-treatment.py` | TWFE, event study and CS for first expansion and **first entry** (0 → 1+ large dairies, clean controls) with the pre-trend adjustments: county trends, state × year FE, baseline characteristics × time polynomial, past outcomes in CS |
-| `script4v-trend-plots.py` | Raw outcome trends by county group, event-time paths, pre-treatment slope tests (figures + tables) |
 | `script4w-honestdid-export.py`, `script4w-honestdid.R` | Rambachan–Roth sensitivity analysis on the TWFE event studies (Python writes inputs, R runs `HonestDiD`) |
 | `script4x-species-forest.py` | Per-species TWFE and CS estimates (large and all-sizes counts) and the forest plots |
 | `script4y-control-set-selection.py` | **How the control set was chosen:** cumulative add-one-in, each control added alone, take-one-out of the final 8, take-one-out of all 14, and one selection table. Documents the pre-committed set; does not choose it |
@@ -153,7 +145,6 @@ python3 script4r-fsis-treatment.py           # slaughterhouse treatment
 python3 script4d-balance-panel.py            # balance tables
 python3 script4t-pretrend-leads.py           # outcome leads, all treatments
 python3 script4u-did-by-treatment.py         # first entry + pre-trend adjustments          ~30 min
-python3 script4v-trend-plots.py              # raw trend figures
 python3 script4w-honestdid-export.py && Rscript script4w-honestdid.R   # sensitivity analysis
 python3 script4x-species-forest.py           # per-species results and forest plots         ~25 min
 python3 script4y-control-set-selection.py    # control-set selection exhibit

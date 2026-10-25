@@ -52,7 +52,7 @@ mentalhealth/                      # code only; data lives on Dropbox (db_base i
 ├── .claude/                       # rules, skills, agents, hooks, settings
 ├── .githooks/                     # pre-commit gate (install: ./scripts/install-hooks.sh)
 ├── script0a ... script0f-*.py     # Stage 0: data in (ingestion, cleaning, the panel build in script0f)
-├── script1a, script2a ... script2f-*.py   # QA, descriptive figures, maps (being consolidated into script1a-1d)
+├── script1a ... script1d-*.py     # Stage 1: QA, tables, figures, maps (descriptive, pre-analysis; none writes the panel)
 ├── script4_treatment.py, script4*-*.py   # Stage 4: design-based estimates and exhibits
 ├── packages.py, functions.py, did_tools.py, designs.py, did_cs.py, estimators.py
 ├── METHODS.md, README.md          # estimator definitions; run order and data availability

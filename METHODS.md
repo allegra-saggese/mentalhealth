@@ -89,7 +89,7 @@ observed wave. Event-time paths therefore mix real timing with measurement error
 
 `D_{i,t+k}` is the county's own treatment `k` years ahead; the joint test is `b_1 = … = b_4 = 0`. The last four panel years drop out.
 
-**Pre-treatment slope test** (`script4v`): for cohort `g`, over the five years before treatment, counties with ≥ 3 years of data:
+**Pre-treatment slope test** (`script1c-figures.py`, section `trends`): for cohort `g`, over the five years before treatment, counties with ≥ 3 years of data:
 
     Y_it = a_i + b · year_t + c · (treated_i × year_t) + ε_it
 
