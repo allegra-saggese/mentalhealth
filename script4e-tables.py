@@ -7,11 +7,12 @@ Sections (run in this order; select with --only, e.g. --only tables appendix):
   tables    regression tables in paper format      (was script4n-regression-tables.py)
   appendix  one document with every table          (was script4p-full-appendix.py)
   frames    drop-in beamer frames, no verdicts     (was script4q-beamer-frames.py)
+  slides    one .tex body per table frame of slides/deck.tex, newest result files (new 2026-10-26, D-56)
 Reads:    tables: newest CSVs of script4a and script4r
           appendix: LATEX_OUT/_BODY_balance.tex (script4d), _BODY_regressions.tex (section tables),
                     TABLE_covariates_EXCLUDED_{FOR_CAUSE, NO_PRETREND_TEST}.tex (no generating script, QA #21)
           frames: newest CSVs of script4a and script4b, LATEX_OUT/*_balance_panel.csv (script4d)
-Writes:   LATEX_OUT/tables/*.tex, _BODY_regressions.tex (reported), _BODY_robustness.tex (cut specifications),
+Writes:   LATEX_OUT/slides/<section>__<frame>.tex (section slides);  LATEX_OUT/tables/*.tex, _BODY_regressions.tex (reported), _BODY_robustness.tex (cut specifications),
           REGRESSION_TABLES.tex/.pdf; FULL_RESULTS_APPENDIX.tex/.pdf; BEAMER_FRAMES.tex, BEAMER_FRAMES_robustness.tex
 Run:      PYTHONHASHSEED=0 python3 script4e-tables.py [--only tables|appendix|frames ...]
 Method:   the reported set is REPORT_* in script4_treatment (D-32); the other specifications go to the robustness tables.
@@ -38,6 +39,11 @@ T4R = os.path.join(db_data, "output", "tables", "script4r")
 def latest(d, pat):
     f = sorted(glob.glob(os.path.join(d, pat)))
     return pd.read_csv(f[-1]) if f else None
+
+
+def panel_date():
+    """Date in the file name of the newest analysis panel (the panel every result file here was run on)."""
+    return os.path.basename(sorted(glob.glob(os.path.join(db_data, "merged", "*_panel.csv")))[-1])[:10]
 
 
 # =============================================================== section tables (was script4n)
@@ -569,7 +575,7 @@ def beamer_frames():
     FR = []   # frames for specifications outside the reported set
     F = ["% ==========================================================================\n"
          "% BEAMER FRAMES -- script4e-tables.py\n"
-         f"% Panel 2026-09-23 | step-8 controls | generated {date.today()}\n"
+         f"% Panel {panel_date()} | step-8 controls | generated {date.today()}\n"
          "% Descriptive/technical only: no summary or verdict slides by design.\n"
          "% ==========================================================================\n\n"]
 
@@ -979,7 +985,242 @@ NIBRS curated total & Arrests per 100{,}000 & NIBRS & 2000--21 & 309.94 & 271.38
     print(f"wrote {p}\n  {n} frames")
 
 
-SECTIONS = {"tables": regression_tables, "appendix": full_appendix, "frames": beamer_frames}
+# =============================================================== section slides (new 2026-10-26, D-56)
+# One fragment per table frame of slides/deck.tex: the frame BODY only (the deck keeps the owner's frame titles). Every number comes from the
+# newest result file; notes are neutral (source, sample, estimator, clustering, panel date). Wide tables shrink to the text width.
+SLIDE_OUT = os.path.join(OUT, "slides")
+OUT_NAME = {"Poor MH Days": "Poor MH Days", "Frequent Mental Distress": "Freq. mental distress", "Deaths of Despair": "Deaths of despair",
+            "Aggravated Assault": "Aggravated assault", "Assault, all severities": "Assault, all severities",
+            "Violence index (partial)": "Violence index (partial)", "NIBRS curated total": "NIBRS curated total"}
+OUT_UNIT = {"Poor MH Days": ("Mean days in the past 30", "CHR (BRFSS)"), "Frequent Mental Distress": ("Per 100,000 adults", "CHR (BRFSS)"),
+            "Deaths of Despair": ("Crude deaths per 100,000", "CDC WONDER"), "Aggravated Assault": ("Arrests per 100,000", "NIBRS"),
+            "Assault, all severities": ("Arrests per 100,000", "NIBRS"), "Violence index (partial)": ("Arrests per 100,000", "NIBRS"),
+            "NIBRS curated total": ("Arrests per 100,000", "NIBRS")}
+TREATMENT_ROWS = [("T1", "Presence", r"$1$ if the county has $\geq 1$ large dairy operation that year", "tr_e1_lg_bin"),
+                  ("T3", "Per capita", "Large dairy operations per 10,000 residents", "tr_i4_lg_p10k"),
+                  ("T4", "Log count", r"$\log(1+\text{count})$ of large dairy operations", "tr_c3_log_lg"),
+                  ("E2", "First expansion", r"First census wave at which the large-dairy count rises ($n \rightarrow n+k$, $k \geq 1$); absorbing", "tr_e2_add_absorb"),
+                  ("E3", "First entry", r"First census wave at which the count goes from $0$ to $\geq 1$; comparison: counties that never had one", "tr_e3_entry_absorb")]
+
+
+def _esc(s):
+    return str(s).replace("\\", r"\textbackslash{}").replace("_", r"\_").replace("%", r"\%").replace("&", r"\&").replace("#", r"\#")
+
+
+def _f(x, d=3):
+    return "" if pd.isna(x) else f"{x:,.{d}f}"
+
+
+def _cs(b, s, d=3):
+    return "" if pd.isna(b) else f"{b:,.{d}f} ({s:,.{d}f})"
+
+
+def _yn(v):
+    return r"\textbullet" if bool(v) else ""
+
+
+def _fragment(name, tabulars, note, size=r"\scriptsize"):
+    """Write one fragment: the tabular(s) side by side or stacked as given, shrunk to the text width when wider, then a neutral note."""
+    body = []
+    for tab in (tabulars if isinstance(tabulars, list) else [tabulars]):
+        body.append("\\setbox0=\\hbox{" + size + "\n" + tab + "}%\n\\ifdim\\wd0>\\textwidth\\resizebox{\\textwidth}{!}{\\box0}\\else\\box0\\fi\\par")
+    import re
+    note = re.sub(r"(?<!\\)([_%])", r"\\\1", note)                 # file stems contain underscores; a bare % would comment out the closing brace
+    text = "{\\centering\n" + "\n\\vspace{3pt}\n".join(body) + "\\par}\n\\vspace{-2pt}\n{\\tiny\\baselineskip=6.5pt " + note + "\\par}\n"
+    os.makedirs(SLIDE_OUT, exist_ok=True)
+    path = os.path.join(SLIDE_OUT, name + ".tex")
+    open(path, "w").write(text)
+    print("wrote", path)
+
+
+def _tab(colspec, header, rows):
+    return f"\\begin{{tabular}}{{{colspec}}}\n\\toprule\n{header}\\\\\n\\midrule\n" + "\\\\\n".join(rows) + "\\\\\n\\bottomrule\n\\end{tabular}"
+
+
+def slide_fragments():
+    from designs import load_designs, usable_sample, OUTCOME_WINDOWS
+    from script4_treatment import OUTCOMES, COVARIATE_ORDER, load_panel
+    pdate = panel_date()
+    stem = lambda d, pat: os.path.basename(sorted(glob.glob(os.path.join(d, pat)))[-1])[:10]
+    TZ, TZA = os.path.join(db_data, "output", "tables", "script4z"), os.path.join(db_data, "output", "tables", "script4za")
+    base_note = f"Panel {pdate}; county and year fixed effects, 8 pre-committed controls, standard errors clustered by state."
+
+    # ---- treatment definitions
+    rows = [f"\\textbf{{{k}}} & {n} & {d} & \\texttt{{{_esc(c)}}}" for k, n, d, c in TREATMENT_ROWS]
+    _fragment("treatment__definitions", _tab(r"@{}llp{6.2cm}l@{}", "ID & Name & Definition & Panel column", rows),
+              "Large = 500+ milk cows (USDA NASS top inventory bin). Treatment is measured at census waves (2002, 2007, 2012, 2017, 2022) and forward-filled "
+              "between them; a blank census-year count is 0 (D-34, D-53). T2, the raw count, is estimated but not reported (D-32). " + base_note, size=r"\footnotesize")
+
+    # ---- sampling frame table (estimation samples of the triangulation run)
+    s = pd.read_csv(sorted(glob.glob(os.path.join(TZA, "*_samples.csv")))[-1])
+    e2, e3 = s[s.design == "first expansion"].set_index("outcome"), s[s.design != "first expansion"].set_index("outcome")
+    rows = [f"{OUT_NAME[o]} & {e2.loc[o, 'years']} & {int(e2.loc[o, 'counties']):,} ({int(e2.loc[o, 'treated_counties'])}) & "
+            f"{int(e3.loc[o, 'counties']):,} ({int(e3.loc[o, 'treated_counties'])}) & {_esc(e2.loc[o, 'cohorts'])}" for o in OUTCOMES]
+    _fragment("treatment__sampling_frame_table", _tab(r"@{}lcccl@{}", r"Outcome & Years & E2: counties (treated) & E3: counties (treated) & E2 cohorts",
+              rows), f"Complete-case estimation samples; a treated county needs at least one observed year before its cohort wave. Source: script4za samples file "
+              f"({stem(TZA, '*_samples.csv')}). " + base_note)
+
+    # ---- treated counties by census wave, Poor MH Days sample
+    _, D, _, _ = load_designs()
+    ctrl = COVARIATE_ORDER[:8]
+    cnt = {}
+    for dn, tag in (("first expansion", "E2"), ("first entry (clean controls)", "E3")):
+        u = usable_sample(D[dn]["data"], OUTCOMES["Poor MH Days"], D[dn]["treat"], D[dn]["cohort"], ctrl).drop_duplicates("fips")
+        cnt[tag] = u.cohort.value_counts().sort_index()
+        cnt[tag + "_comp"] = int(u.cohort.isna().sum())
+    waves = sorted(set(cnt["E2"].index) | set(cnt["E3"].index))
+    rows = [f"{int(w)} & {int(cnt['E2'].get(w, 0))} & {int(cnt['E3'].get(w, 0))}" for w in waves]
+    rows.append(f"Comparison counties & {cnt['E2_comp']:,} & {cnt['E3_comp']:,}")
+    _fragment("treatment__temporal_counts", _tab(r"@{}lcc@{}", "Cohort wave & E2 first expansion & E3 first entry", rows),
+              "Counties in the Poor MH Days estimation sample by the census wave of their treatment. Source: designs.usable_sample on the panel. " + base_note, size=r"\footnotesize")
+
+    # ---- controls: the 24 candidates
+    cov = pd.read_csv(sorted(glob.glob(os.path.join(db_data, "output", "tables", "script1c", "*_control_coverage.csv")))[-1])
+    cov = cov.sort_values(["type", "fill_pct"], ascending=[True, False]).reset_index(drop=True)
+    half = (len(cov) + 1) // 2
+    blocks = []
+    for ch in (cov.iloc[:half], cov.iloc[half:]):
+        blocks.append(_tab(r"@{}llrc@{}", "Control & Type & \\% filled & Sel.",
+                           [f"{_esc(v.replace('_per100k', '').replace('_', ' ')[:30])} & {t.split(' ')[0]} & {p:.1f} & {_yn(sel)}"
+                            for v, t, p, sel in zip(ch.variable, ch.type, ch.fill_pct, ch.selected)]))
+    _fragment("controls__possible", [r"\begin{tabular}{@{}ll@{}}" + blocks[0] + "&" + blocks[1] + r"\end{tabular}"],
+              f"The 24 candidate controls; percent of observations filled over the rural panel county-years 2015-2020; Sel. = in the pre-committed set of eight. "
+              f"Source: script1c control coverage ({stem(os.path.join(db_data, 'output', 'tables', 'script1c'), '*_control_coverage.csv')}).", size=r"\tiny")
+
+    # ---- controls: the eight
+    pre = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_control_pretrends.csv")))[-1]).set_index("variable")
+    corr = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_control_correlations_selected8.csv")))[-1]).set_index("variable")
+    ctl = pd.concat([cov.set_index("variable").loc[ctrl, ["type", "fill_pct"]], pre.loc[ctrl, ["description", "n_pre_significant", "n_pre_coefs"]]], axis=1)
+    left = _tab(r"@{}rlcr@{}", "\\# & Control & Type & \\% filled",
+                [f"{i + 1} & {_esc(ctl.loc[c, 'description'])} & {ctl.loc[c, 'type'].split(' ')[0]} & {ctl.loc[c, 'fill_pct']:.1f}" for i, c in enumerate(ctrl)])
+    right = _tab("@{}r" + "r" * 8 + "@{}", "& " + " & ".join(str(i + 1) for i in range(8)),
+                 [f"{i + 1} & " + " & ".join(f"{corr.loc[c, d]:.2f}" for d in ctrl) for i, c in enumerate(ctrl)])
+    _fragment("controls__selected8", [r"\begin{tabular}{@{}ll@{}}" + left + "&\\hspace{6pt}" + right + r"\end{tabular}"],
+              "The eight pre-committed controls (D-16, D-31) and their within-county correlation matrix (numbers refer to the list). Source: script4b controls "
+              f"({stem(T4A, '*_control_correlations_selected8.csv')}), script1c coverage.", size=r"\tiny")
+
+    # ---- outcomes and units
+    df = load_panel()
+    rows = []
+    for o, col in OUTCOMES.items():
+        lo, hi = OUTCOME_WINDOWS[o]
+        x = df[df.year.between(lo, hi)][col].dropna()
+        rows.append(f"{OUT_NAME[o]} & {OUT_UNIT[o][0]} & {OUT_UNIT[o][1]} & {lo}--{hi} & {x.mean():,.2f} & {x.std():,.2f}")
+    _fragment("outcomes__units", _tab(r"@{}lllrrr@{}", "Outcome & Unit & Source & Years & Mean & SD", rows),
+              "Mean and standard deviation over county-years of each outcome's descriptive window (designs.OUTCOME_WINDOWS; the estimation samples are data-defined). "
+              "The NIBRS measures are arrests, not offences. Panel " + pdate + ".", size=r"\footnotesize")
+
+    # ---- A2 TWFE results
+    g = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_A1_A2_treatment_grid.csv")))[-1])
+    g = g[(g.registry == "A2") & g.treatment_id.isin(["T1", "T3", "T4", "E2"])]
+    rows = []
+    for o in OUTCOMES:
+        cells = []
+        for t in ("T1", "T3", "T4", "E2"):
+            r = g[(g.outcome == o) & (g.treatment_id == t)].iloc[0]
+            cells.append(f"{_cs(r.beta, r.se_state)} [{r.p_state:.3f}]")
+        rows.append(f"{OUT_NAME[o]} & {int(g[g.outcome == o].N.iloc[0]):,} & " + " & ".join(cells))
+    _fragment("results__a2_twfe", _tab(r"@{}lrllll@{}", "Outcome & N & T1 presence & T3 per 10k & T4 log count & E2 first expansion", rows),
+              "Two-way fixed effects, coefficient (standard error) [p, state-clustered]; outcome units; T1, T3, T4 and E2 enter one regression each. Source: script4a A2 grid "
+              f"({stem(T4A, '*_A1_A2_treatment_grid.csv')}). " + base_note)
+
+    # ---- Callaway-Sant'Anna vs TWFE
+    h = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_HEADLINE_twfe_vs_cs.csv")))[-1])
+    rows = [f"{OUT_NAME[r.outcome]} & {_cs(r.TWFE_beta, r.TWFE_se)} & {_cs(r.CS_ATT, r.CS_se)} & {_f(r.ratio_CS_over_TWFE, 2)} & {int(r.n_switchers_TWFE)} & {int(r.n_treated_CS):,}"
+            for r in h.itertuples()]
+    _fragment("results__cs", _tab(r"@{}lllrrr@{}", r"Outcome & TWFE, E2 & Callaway-Sant'Anna & CS/TWFE & Treated (TWFE) & Treated (CS)", rows),
+              "First expansion (E2). Callaway-Sant'Anna: covariate-adjusted overall ATT, not-yet-treated comparison, state bootstrap standard errors. Source: script4a headline file "
+              f"({stem(T4A, '*_HEADLINE_twfe_vs_cs.csv')}). Panel {pdate}.", size=r"\footnotesize")
+
+    # ---- inference
+    c = pd.read_csv(sorted(glob.glob(os.path.join(TZ, "*_confirmatory_family.csv")))[-1])
+    rows = [f"{OUT_NAME[r.outcome]} & {r.treatment_id} & {_f(r.beta, 3)} & {_f(r.p_state, 3)} & {_f(r.p_wild, 3)} & {_f(r.p_romano_wolf_within_outcome, 3)} & {_f(r.p_holm_over_8, 3)}"
+            for r in c.itertuples()]
+    _fragment("results__inference", _tab(r"@{}llrrrrr@{}", "Outcome & Treatment & Coefficient & p (state-clustered) & p (wild bootstrap) & p (Romano-Wolf, within outcome) & p (Holm, all 8)", rows),
+              f"Confirmatory family (D-42): Poor MH Days and Frequent Mental Distress by T1, T3, T4, E2. Wild cluster bootstrap-t, Webb weights, {int(c.reps.iloc[0]):,} draws, "
+              f"seed {int(c.seed.iloc[0])}. Source: script4c ({stem(TZ, '*_confirmatory_family.csv')}). " + base_note, size=r"\footnotesize")
+
+    # ---- estimator agreement (D-45)
+    a = pd.read_csv(sorted(glob.glob(os.path.join(TZA, "*_agreement.csv")))[-1])
+    rows = []
+    for o in OUTCOMES:
+        cells = []
+        for dn in ("first expansion", "first entry (clean controls)"):
+            x = a[(a.design == dn) & (a.outcome == o)]
+            no = ", ".join(x[~x.agrees].estimator.str.replace(r" \(did2s\)", "", regex=True))
+            cells.append(f"{int(x.agrees.sum())} of {len(x)}" + (f" (not: {_esc(no)})" if no else ""))
+        rows.append(f"{OUT_NAME[o]} & " + " & ".join(cells))
+    _fragment("compare__agreement", _tab(r"@{}lll@{}", "Outcome & E2 first expansion & E3 first entry", rows),
+              "Estimators that agree with covariate-adjusted Callaway-Sant'Anna: same sign and overall ATT inside its 95% interval (rule D-45); five estimators compared "
+              f"(LP-DiD, Sun-Abraham, imputation, dCDH, stacked DiD). Source: script4d agreement file ({stem(TZA, '*_agreement.csv')}).", size=r"\footnotesize")
+
+    # ---- HonestDiD
+    hb = pd.read_csv(sorted(glob.glob(os.path.join(db_data, "output", "tables", "script4w", "*_honestdid_breakdown.csv")))[-1])
+    rows = []
+    for dn in ("first expansion", "first entry"):
+        for o in OUTCOMES:
+            cells = []
+            for rs in ("relative magnitudes (Mbar)", "smoothness (M)"):
+                for tg in ("first_post", "avg_first5"):
+                    x = hb[(hb.design == dn) & (hb.outcome == o) & (hb.restriction == rs) & (hb.target == tg)]
+                    cells.append("" if x.empty else (f"{x.breakdown_M.iloc[0]:.2f}" if pd.notna(x.breakdown_M.iloc[0]) else f">{x.grid_max.iloc[0]:.1f}"))
+            rows.append(f"{'E2' if dn == 'first expansion' else 'E3'} & {OUT_NAME[o]} & " + " & ".join(cells))
+    _fragment("robust__honestdid", _tab(r"@{}llrrrr@{}", r"Design & Outcome & \multicolumn{2}{c}{Relative magnitudes, $\bar M$} & \multicolumn{2}{c}{Smoothness, $M$}\\ & & first post & avg. of five & first post & avg. of five", rows),
+              f"Smallest value of the sensitivity parameter at which the 95% confidence set includes zero (0 = zero is already in the set under exact parallel trends). Rambachan-Roth, "
+              f"R package HonestDiD; output of {stem(os.path.join(db_data, 'output', 'tables', 'script4w'), '*_honestdid_breakdown.csv')}; the R run was not repeated for the D-53 panel because the inputs are unchanged.",
+              size=r"\tiny")
+
+    # ---- control-set sensitivity
+    cs_ = pd.read_csv(sorted(glob.glob(os.path.join(db_data, "output", "tables", "script4y", "*_selection_table.csv")))[-1])
+    rows = [f"{_esc(v.covariate.replace('_per100k', '').replace('_', ' '))} & {_yn(v.in_final_8)} & {v.coverage_pct:.1f} & {v.pretrend_verdict} & "
+            f"{_f(v.added_alone_median_abs_pct_change, 1)} & {_f(v.dropped_from_8_median_abs_pct_change, 1)}" for v in cs_.itertuples()]
+    _fragment("robust__control_sets", _tab(r"@{}lcrlrr@{}", r"Covariate & In 8 & \% filled & Pre-trend & Added alone & Dropped from 8", rows),
+              "Median absolute percent change of the treatment coefficient across outcomes and treatments when the covariate is added alone, or dropped from the final eight. Source: script4b control sets "
+              f"({stem(os.path.join(db_data, 'output', 'tables', 'script4y'), '*_selection_table.csv')}). Panel {pdate}.", size=r"\scriptsize")
+
+    # ---- dairy x FSIS
+    f4 = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_A4_fsis_interaction.csv")))[-1])
+    f4 = f4[f4.treatment_id.isin(["T1", "T3", "T4", "E2"])]
+    rows = []
+    for o in OUTCOMES:
+        cells = []
+        for t in ("T1", "T3", "T4", "E2"):
+            x = f4[(f4.outcome == o) & (f4.treatment_id == t)]
+            cells.append("" if x.empty or not bool(x.identified.iloc[0]) else _cs(x.beta.iloc[0], x.se_state.iloc[0]))
+        rows.append(f"{OUT_NAME[o]} & " + " & ".join(cells))
+    _fragment("robust__a4_fsis", _tab(r"@{}lllll@{}", "Outcome & T1 presence & T3 per 10k & T4 log count & E2 first expansion", rows),
+              "Interaction of the large-dairy treatment with the presence of an FSIS slaughterhouse (2017-2023 only); coefficient (state-clustered standard error); blank = not identified. Source: script4a A4 "
+              f"({stem(T4A, '*_A4_fsis_interaction.csv')}). Panel {pdate}.", size=r"\scriptsize")
+
+
+def link_slide_assets():
+    """Undated symlinks to the newest slide figures and the three cohort maps, so the deck refers to stable file names (LATEX_OUT/slides/assets)."""
+    import re
+    assets = os.path.join(SLIDE_OUT, "assets")
+    os.makedirs(assets, exist_ok=True)
+    sources = [(os.path.join(db_data, "output", "figs", "slides"), (".pdf",)),
+               (os.path.join(db_data, "output", "maps", "script1d"), (".png",))]
+    wanted_maps = {"estimation_sample_by_design", "expansion_cohort_year", "entry_cohort_year"}
+    newest = {}
+    for folder, exts in sources:
+        for f in sorted(glob.glob(os.path.join(folder, "*"))):
+            m = re.match(r"^\d{4}-\d{2}-\d{2}_(.+)(\.[a-z]+)$", os.path.basename(f))
+            if m and m.group(2) in exts and (folder.endswith("slides") or m.group(1) in wanted_maps):
+                newest[m.group(1) + m.group(2)] = f                 # sorted ascending: the newest date wins
+    for name, target in newest.items():
+        link = os.path.join(assets, name)
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(target, link)
+    print(f"linked {len(newest)} slide assets in {assets}")
+
+
+def slides_section():
+    slide_fragments()
+    link_slide_assets()
+
+
+SECTIONS = {"tables": regression_tables, "appendix": full_appendix, "frames": beamer_frames, "slides": slides_section}
 
 
 def main():

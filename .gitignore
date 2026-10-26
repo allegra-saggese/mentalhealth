@@ -78,3 +78,21 @@ Data/
 *.rds
 *.zip
 quality_reports/
+
+# Slide deck: figures and table fragments live on Dropbox (symlink); LaTeX build files
+slides/generated
+slides/*.aux
+slides/*.log
+slides/*.out
+slides/*.nav
+slides/*.snm
+slides/*.toc
+slides/*.xdv
+slides/*.fdb_latexmk
+slides/*.fls
+slides/*.bbl
+slides/*.blg
+slides/*.bcf
+slides/*.run.xml
+slides/*.vrb
+slides/*.pdf

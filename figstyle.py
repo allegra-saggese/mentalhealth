@@ -18,7 +18,9 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 MM_PER_INCH = 25.4
-WIDTH_MM = {"single": 89.0, "one-and-half": 120.0, "double": 183.0}
+WIDTH_MM = {"single": 89.0, "one-and-half": 120.0, "double": 183.0,
+            "slide": 145.0}            # usable width of a 16:9 Beamer frame (cm 14.5); a slide figure is placed at 1:1 scale
+SLIDE_HEIGHT_MM = 70.0                 # usable height under the frame title
 MAX_HEIGHT_MM = 247.0
 PNG_DPI = 600                      # line art; use 300 for photographic images and maps
 
@@ -32,8 +34,10 @@ SEQUENTIAL_CMAP = "viridis"        # continuous, perceptually uniform, greyscale
 DIVERGING_CMAP = "RdBu_r"          # signed quantities; centre on zero with a TwoSlopeNorm
 
 
-def apply_style():
-    """Set matplotlib rcParams once, at the top of an exhibit script."""
+def apply_style(profile="print"):
+    """Set matplotlib rcParams once, at the top of an exhibit script. profile="slide": 8 pt text for 1:1 placement on a slide."""
+    if profile not in ("print", "slide"):
+        raise ValueError("profile must be 'print' or 'slide'")
     mpl.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
@@ -47,6 +51,18 @@ def apply_style():
         "figure.dpi": 150, "savefig.dpi": PNG_DPI, "savefig.bbox": "standard",
         "pdf.fonttype": 42, "ps.fonttype": 42,          # embed TrueType fonts in vector output
     })
+    if profile == "slide":                              # larger text and marks; the canvas is already slide size
+        mpl.rcParams.update({
+            "font.size": 8, "axes.labelsize": 8.5, "axes.titlesize": 9,
+            "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 8,
+            "axes.linewidth": 0.6, "lines.linewidth": 1.1, "lines.markersize": 4.2,
+            "xtick.major.width": 0.6, "ytick.major.width": 0.6,
+        })
+
+
+def new_slide(nrows=1, ncols=1, height_mm=SLIDE_HEIGHT_MM, **subplot_kw):
+    """Slide-size multi-panel figure (145 mm wide); returns (fig, axes) with axes a 2-D array."""
+    return new_grid(nrows, ncols, width="slide", height_mm=height_mm, **subplot_kw)
 
 
 def new_figure(width="single", height_mm=60.0, **subplot_kw):

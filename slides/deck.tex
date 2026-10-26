@@ -1,0 +1,541 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{gotham}
+\usepackage{standalone}
+\gothamset{colorset=anthracite}
+\gothamset{background=transparent}
+\gothamset{
+  progressbar position=foot,
+  progressbar style=rounded box,
+  progressbar advancement=brlt,
+  numbering=totalframenumber
+}
+\usepackage{tikz}
+\tikzstyle{step} = [circle, minimum size=1.2cm, draw=black, fill=blue!20, text centered]
+\tikzstyle{arrow} = [thick,->,>=stealth]
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{tabularray}
+\UseTblrLibrary{booktabs}
+\usepackage{changepage}
+\usepackage{fancyvrb}
+\usepackage{listings}
+\usepackage{xcolor}
+\definecolor{codeback}{rgb}{0.90,0.91,0.92}
+\definecolor{codebackdark}{rgb}{0.10,0.11,0.12}
+\newcommand{\famName}[1]{\textsc{#1}}
+\newcommand{\themename}{\textbf{\textsc{Gotham}}}
+\usepackage[style=authoryear,backend=biber]{biblatex}
+%\addbibresource{../ref.bib}
+
+\usepackage{hyperref} % for next buttons
+
+% Code listing style
+\lstset{
+  backgroundcolor=\color{codeback},
+  basicstyle=\ttfamily\tiny,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  tabsize=2,
+  showstringspaces=false,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{orange!80!black},
+  language=Python
+}
+
+\defbeamertemplate{title page}{}{
+    \centering
+    {\huge \inserttitle} \\[1em]
+    {\large \insertauthor} \\[1em]
+    {\insertdate}
+}
+
+\title{Mental health: model selection}
+\author{Allegra Saggese for Professors Galina Hale, Hanna Kim}
+\date{\today} % last updated 25 oct
+
+% added for layout: with seven sections the theme's repeated agenda page after each section divider runs under the footer
+% (section 7 is hidden); delete this line to restore those pages.
+\makeatletter\boolfalse{sectionContent}\makeatother
+
+%%%%%%%%%% BEGIN DOC %%%%%%%%%%%
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+
+\begin{frame}{Agenda}
+  \tableofcontents
+\end{frame}
+
+
+% ==========================  TREATMENT   ================================================
+%
+\section{Treatment variables}
+
+\begin{frame}{$D_i$: treatment definitions}
+\input{generated/treatment__definitions.tex}
+\end{frame}
+
+
+\begin{frame}{Sampling frame}
+    Each outcome exists for a different set of years. Because the coverage affects the number of events we have (every five year counts in the census), each outcome will require a different sampling frame. 
+\input{generated/treatment__sampling_frame_table.tex}
+\end{frame}
+
+\begin{frame}{Treatment (spatial)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.64\textheight,keepaspectratio,trim=0 270bp 0 0,clip]{generated/assets/estimation_sample_by_design.png}
+\end{center}
+\end{frame}
+
+
+\begin{frame}{Treatment (temporal)}
+\input{generated/treatment__temporal_counts.tex}
+\end{frame}
+
+
+% ==========================  CONTROLS  ================================================
+%
+\section{Control Variables ($X_i$)}
+
+\begin{frame}{Possible controls}
+\input{generated/controls__possible.tex}
+\end{frame}
+
+
+\begin{frame}{Selection of eight controls}
+\input{generated/controls__selected8.tex}
+\end{frame}
+
+
+\begin{frame}{Coverage}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/control_coverage.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Percent of observations filled, 2015-2020, over the rural panel county-years, for the 24 candidate controls; dotted line: 80\% fill cutoff of the data-cleaning script; selected controls outlined. Panel 2026-10-25.\par}
+\end{frame}
+
+
+\begin{frame}{Pre-trends}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_controls.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Each selected control as the dependent variable of the first-expansion event study: pre-period coefficients in SD of the control, 95\% interval, county and year fixed effects, state-clustered; open marker: reference year; dotted line: least-squares fit (descriptive). Titles: coefficients significant at 5\% of those estimated. Panel 2026-10-25.\par}
+\end{frame}
+
+
+
+% ==========================  OUTCOME   ================================================
+%
+\section{Outcomes ($Y_i$)}
+
+\begin{frame}{Outcomes and units}
+\input{generated/outcomes__units.tex}
+\end{frame}
+
+\begin{frame}{Outcomes: raw change before treatment (E2)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_raw_E2_outcomes__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Mean change in the outcome since the year before treatment, treated against never-treated counties, event times -8 to -1; dotted lines: least-squares fits through event times -8 to -2 (descriptive, no test). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Outcome leads (E2, E3)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_leads__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Event-study lead coefficients on first expansion (E2) and first entry (E3), outcome units, 95\% interval, county and year fixed effects, 8 controls; dotted lines: least-squares fits (descriptive). Panel 2026-10-25.\par}
+\end{frame}
+
+
+% ==========================  MODEL RESULTS ================================================
+% improve on previous slide deck - the presentation of results,should be rgiven with tables that are robust, provide visualization
+%
+\section{Model(s) results}
+
+\begin{frame}{Core models}
+\input{generated/results__a2_twfe.tex}
+\end{frame}
+
+\begin{frame}{TWFE coefficients, all treatments}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_a2_treatment_grid__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval, outcome units (each panel has its own scale). Filled marker: the interval excludes zero. Panel 2026-10-25; county and year fixed effects, 8 controls, standard errors clustered by state.\par}
+\end{frame}
+
+\begin{frame}{Callaway--Sant'Anna against TWFE}
+\input{generated/results__cs.tex}
+\end{frame}
+
+\begin{frame}{Event study (TWFE)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/event_study_twfe__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Coefficient by event time (years relative to the first treated census wave), 95\% interval, outcome units; dotted line: start of treatment. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Event time: Callaway--Sant'Anna}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/event_study_cs__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Coefficient by event time (years relative to the first treated census wave), 95\% interval, outcome units; dotted line: start of treatment. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Inference: wild bootstrap, Holm, Romano--Wolf}
+\input{generated/results__inference.tex}
+\end{frame}
+
+
+% ==========================  MODEL COMPARISON ================================================
+%
+\section{Comparing model runs}
+
+\begin{frame}{Estimator agreement}
+\input{generated/compare__agreement.tex}
+\end{frame}
+
+\begin{frame}{Triangulation: E2 first expansion}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_triangulation_first_expansion__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment ATT, 95\% interval, within-county SD of the outcome. Filled marker: agrees with Callaway-Sant'Anna (same sign, inside its 95\% interval; D-45). Shaded band: Callaway-Sant'Anna interval; diamond: benchmark; square: TWFE for reference. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Triangulation: E3 first entry}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_triangulation_first_entry__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment ATT, 95\% interval, within-county SD of the outcome. Filled marker: agrees with Callaway-Sant'Anna (same sign, inside its 95\% interval; D-45). Shaded band: Callaway-Sant'Anna interval; diamond: benchmark; square: TWFE for reference. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{All models, every treatment}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_all_models__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt One colour per treatment (E2 first expansion, E3 first entry, T1, T3, T4); rows are models; within-county SD of the outcome. Filled marker: interval excludes zero. T1, T3, T4 exist for TWFE and dCDH only; dCDH: effect of the change experienced. Treatment units differ between colours. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: TWFE}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_twfe__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: Callaway--Sant'Anna}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_callaway_sant_anna__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: LP-DiD}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_lp_did__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: Sun--Abraham}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_sun_abraham__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: Imputation}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_imputation__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: de Chaisemartin--D'Haultfoeuille}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_dcdh__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Treatment by model: Stacked DiD}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_stacked_did__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Permutation test}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/permutation_inference.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Within-state shuffle of first-treated years, 2,000 permutations; filled marker: permutation p-value at most 0.05. The null mean is not zero, so the observed coefficient is compared with the permutation distribution. Panel 2026-10-25.\par}
+\end{frame}
+
+
+% ==========================  DISAGGREGATED BY DEMO ================================================
+%
+\section{Demographic-specific panel}
+
+\begin{frame}{tbd.}
+    
+\end{frame}
+
+% ==========================  ROBUSTNESS ================================================
+%
+\section{Model extensions - robustness}
+
+\begin{frame}{HonestDiD: breakdown values}
+\input{generated/robust__honestdid.tex}
+\end{frame}
+
+\begin{frame}{Control-set sensitivity}
+\input{generated/robust__control_sets.tex}
+\end{frame}
+
+\begin{frame}{Species: Dairy}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_dairy__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Species: Beef}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_beef__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Species: Hogs}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_hogs__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Species: Chickens}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_chickens__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Dairy $\times$ slaughterhouse}
+\input{generated/robust__a4_fsis.tex}
+\end{frame}
+
+
+% ==========================  BACKUP: crime outcomes of every forest plot, E3 raw paths, cohort maps ================
+%
+% (no \appendix: the Gotham theme turns it into four 'Part' divider pages)
+\section*{Backup}
+
+\begin{frame}{Backup: TWFE coefficients, all treatments (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_a2_treatment_grid__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval, outcome units (each panel has its own scale). Filled marker: the interval excludes zero. Panel 2026-10-25; county and year fixed effects, 8 controls, standard errors clustered by state.\par}
+\end{frame}
+
+\begin{frame}{Backup: Event study (TWFE) (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/event_study_twfe__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Coefficient by event time (years relative to the first treated census wave), 95\% interval, outcome units; dotted line: start of treatment. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Event time: Callaway--Sant'Anna (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/event_study_cs__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Coefficient by event time (years relative to the first treated census wave), 95\% interval, outcome units; dotted line: start of treatment. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Triangulation: E2 first expansion (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_triangulation_first_expansion__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment ATT, 95\% interval, within-county SD of the outcome. Filled marker: agrees with Callaway-Sant'Anna (same sign, inside its 95\% interval; D-45). Shaded band: Callaway-Sant'Anna interval; diamond: benchmark; square: TWFE for reference. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Triangulation: E3 first entry (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_triangulation_first_entry__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment ATT, 95\% interval, within-county SD of the outcome. Filled marker: agrees with Callaway-Sant'Anna (same sign, inside its 95\% interval; D-45). Shaded band: Callaway-Sant'Anna interval; diamond: benchmark; square: TWFE for reference. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: All models, every treatment (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_all_models__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt One colour per treatment (E2 first expansion, E3 first entry, T1, T3, T4); rows are models; within-county SD of the outcome. Filled marker: interval excludes zero. T1, T3, T4 exist for TWFE and dCDH only; dCDH: effect of the change experienced. Treatment units differ between colours. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: TWFE (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_twfe__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: Callaway--Sant'Anna (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_callaway_sant_anna__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: LP-DiD (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_lp_did__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: Sun--Abraham (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_sun_abraham__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: Imputation (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_imputation__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: de Chaisemartin--D'Haultfoeuille (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_dcdh__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Treatment by model: Stacked DiD (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_treatment_by_model_stacked_did__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Species: Dairy (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_dairy__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Species: Beef (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_beef__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Species: Hogs (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_hogs__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Species: Chickens (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_species_chickens__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Effect in within-county SD of the outcome, 95\% interval; blue: large operations, grey: all size classes; filled marker: interval excludes zero (TWFE: state-clustered; Callaway-Sant'Anna: state bootstrap). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Outcomes: raw change before treatment (E2) (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_raw_E2_outcomes__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Mean change in the outcome since the year before treatment, treated against never-treated counties, event times -8 to -1; dotted lines: least-squares fits through event times -8 to -2 (descriptive, no test). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Outcomes: raw change before treatment (E3)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_raw_E3_outcomes__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Mean change in the outcome since the year before treatment, treated against never-large-dairy counties, event times -8 to -1; dotted lines: least-squares fits through event times -8 to -2 (descriptive, no test). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Outcomes: raw change before treatment (E3) (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_raw_E3_outcomes__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Mean change in the outcome since the year before treatment, treated against never-large-dairy counties, event times -8 to -1; dotted lines: least-squares fits through event times -8 to -2 (descriptive, no test). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Outcome leads (E2, E3) (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/pretrends_leads__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Event-study lead coefficients on first expansion (E2) and first entry (E3), outcome units, 95\% interval, county and year fixed effects, 8 controls; dotted lines: least-squares fits (descriptive). Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: Map: first-expansion cohort year (E2)}
+\begin{center}
+\includegraphics[trim=180bp 238bp 150bp 220bp,clip,width=\textwidth,height=0.78\textheight,keepaspectratio]{generated/assets/expansion_cohort_year.png}
+\end{center}
+\end{frame}
+
+\begin{frame}{Backup: Map: first-entry cohort year (E3)}
+\begin{center}
+\includegraphics[trim=180bp 238bp 150bp 220bp,clip,width=\textwidth,height=0.78\textheight,keepaspectratio]{generated/assets/entry_cohort_year.png}
+\end{center}
+\end{frame}
+
+
+\end{document}

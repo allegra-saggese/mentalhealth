@@ -1,0 +1,59 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{gotham}
+\usepackage{standalone}
+\gothamset{colorset=anthracite}
+\gothamset{background=transparent}
+\gothamset{
+  progressbar position=foot,
+  progressbar style=rounded box,
+  progressbar advancement=brlt,
+  numbering=totalframenumber
+}
+\usepackage{tikz}
+\tikzstyle{step} = [circle, minimum size=1.2cm, draw=black, fill=blue!20, text centered]
+\tikzstyle{arrow} = [thick,->,>=stealth]
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{tabularray}
+\UseTblrLibrary{booktabs}
+\usepackage{changepage}
+\usepackage{fancyvrb}
+\usepackage{listings}
+\usepackage{xcolor}
+\definecolor{codeback}{rgb}{0.90,0.91,0.92}
+\definecolor{codebackdark}{rgb}{0.10,0.11,0.12}
+\newcommand{\famName}[1]{\textsc{#1}}
+\newcommand{\themename}{\textbf{\textsc{Gotham}}}
+\usepackage[style=authoryear,backend=biber]{biblatex}
+%\addbibresource{../ref.bib}
+
+\usepackage{hyperref} % for next buttons
+
+% Code listing style
+\lstset{
+  backgroundcolor=\color{codeback},
+  basicstyle=\ttfamily\tiny,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  tabsize=2,
+  showstringspaces=false,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{orange!80!black},
+  language=Python
+}
+
+\defbeamertemplate{title page}{}{
+    \centering
+    {\huge \inserttitle} \\[1em]
+    {\large \insertauthor} \\[1em]
+    {\insertdate}
+}
+
+\title{Mental health: model selection}
+\author{Allegra Saggese for Professors Galina Hale, Hanna Kim}
+\date{\today} % last updated 25 oct
+
+%%%%%%%%%% BEGIN DOC %%%%%%%%%%%
+\begin{document}
