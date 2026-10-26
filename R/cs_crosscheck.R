@@ -1,5 +1,5 @@
-# qa_cs_crosscheck.R -- R `did` (Callaway & Sant'Anna) on the balanced extract written by qa_cs_crosscheck.py.
-# Usage: Rscript qa_cs_crosscheck.R <extract.csv> <out_cells.csv> <out_overall.csv>
+# R/cs_crosscheck.R -- R `did` (Callaway & Sant'Anna) on the balanced extract written by qa_cs_crosscheck.py.
+# Usage: Rscript R/cs_crosscheck.R <extract.csv> <out_cells.csv> <out_overall.csv>
 # Settings mirror did_cs.py: outcome regression, not-yet-treated comparison, base year g-1 (universal), no bootstrap.
 suppressMessages(library(did))
 args <- commandArgs(trailingOnly = TRUE)

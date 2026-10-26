@@ -10,7 +10,7 @@ This project combines US health, crime, population, and agriculture data into on
 - **Python 3.13** (results produced on 3.13.5; macOS). Install the pinned packages with either
   `pip install -r requirements.txt` or `conda env create -f environment.yml` (the conda file installs Python and then the same pinned `requirements.txt`).
   Key packages: `pandas`, `numpy`, `scipy`, `matplotlib`, `seaborn`, `scikit-learn`, **`pyfixest`** (all estimation), `statsmodels` and `wildboottest` (multiple-testing corrections and wild cluster bootstrap), `requests`, `openpyxl`, `pyarrow`; optional `plotly` + `kaleido` for maps.
-- **R 4.x** only for `script4w-honestdid.R` (Rambachan–Roth sensitivity analysis): `install.packages("HonestDiD")` (see `r-requirements.txt`).
+- **R 4.x** only for `R/honestdid.R` (Rambachan–Roth sensitivity analysis): `install.packages("HonestDiD")` (see `r-requirements.txt`).
 - **LaTeX (`pdflatex`)** only for compiling the table and slide fragments written by `script4n`, `script4p` and `script4q`; without it the `.tex` files are still written.
 - Shared helpers: `packages.py` (imports and directory definitions) and `functions.py` (FIPS normalization, CSV fallback readers, USDA NASS API wrappers, `latest_file_glob()`, `normalize_panel_key()`, `log_per10k()`, `load_county_geojson()`).
 - **Credentials are read from the environment only, never from code:** `USDA_NASS_API_KEY` (`script0b`, `qa-scripts/pull_2022_cattle_totals.py`) and `HUD_API_TOKEN` (`script0e` / `fsis-scripts/`). Both are free to request from the agencies.
@@ -114,13 +114,13 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 |--------|------|
 | `script4_treatment.py` | **Shared module** — treatment, sample, outcome and control definitions; the missing-count-is-zero rule (from 2002) is applied in `load_panel` (importable; not run) |
 | `script4a-design-estimates.py` | A2 TWFE (headline), A4 dairy × FSIS, A5 event study, A6 Callaway–Sant'Anna; also A1 pooled state-FE and A7 LP-DiD (computed, not reported) |
-| `script4b-…`, `script4c-…` | Earlier run of adding controls in a fixed order and its summary; **superseded by `script4y`**, kept unchanged as the record of the 09-23 run |
+| `z-archive/script4b-…`, `z-archive/script4c-…` | Earlier run of adding controls in a fixed order and its summary; **superseded by `script4y`**, kept unchanged as the record of the 09-23 run |
 | `script4d-balance-panel.py` | Balance and detectable-effect tables |
 | `script4j-control-diagnostics.py` | Coverage, causal role and pre-trends for each control |
 | `script4r-fsis-treatment.py` | Slaughterhouses as the treatment (R0–R3; R4 LP-DiD computed, not reported) |
 | `script4t-pretrend-leads.py` | Outcome pre-trends (leads) for T1, T3, T4, E2 and first entry |
 | `script4u-did-by-treatment.py` | TWFE, event study and CS for first expansion and **first entry** (0 → 1+ large dairies, clean controls) with the pre-trend adjustments: county trends, state × year FE, baseline characteristics × time polynomial, past outcomes in CS |
-| `script4w-honestdid-export.py`, `script4w-honestdid.R` | Rambachan–Roth sensitivity analysis on the TWFE event studies (Python writes inputs, R runs `HonestDiD`) |
+| `script4w-honestdid-export.py`, `R/honestdid.R` | Rambachan–Roth sensitivity analysis on the TWFE event studies (Python writes inputs, R runs `HonestDiD`) |
 | `script4x-species-forest.py` | Per-species TWFE and CS estimates (large and all-sizes counts) and the forest plots |
 | `script4y-control-set-selection.py` | **How the control set was chosen:** cumulative add-one-in, each control added alone, take-one-out of the final 8, take-one-out of all 14, and one selection table. Documents the pre-committed set; does not choose it |
 | `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and combined appendix (no estimation): reported exhibits plus a separate robustness set |
@@ -145,7 +145,7 @@ python3 script4r-fsis-treatment.py           # slaughterhouse treatment
 python3 script4d-balance-panel.py            # balance tables
 python3 script4t-pretrend-leads.py           # outcome leads, all treatments
 python3 script4u-did-by-treatment.py         # first entry + pre-trend adjustments          ~30 min
-python3 script4w-honestdid-export.py && Rscript script4w-honestdid.R   # sensitivity analysis
+python3 script4w-honestdid-export.py && Rscript R/honestdid.R   # sensitivity analysis
 python3 script4x-species-forest.py           # per-species results and forest plots         ~25 min
 python3 script4y-control-set-selection.py    # control-set selection exhibit
 python3 script4n-regression-tables.py && python3 script4p-full-appendix.py && python3 script4q-beamer-frames.py

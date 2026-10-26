@@ -181,7 +181,7 @@ from pathlib import Path
 from scipy.stats import norm
 
 TRI_COLUMNS = ["estimator", "kind", "event_time", "est", "se", "p", "ci_lo", "ci_hi"]
-DCDH_R_SCRIPT = Path(__file__).resolve().parent / "script4za-dcdh.R"
+DCDH_R_SCRIPT = Path(__file__).resolve().parent / "R" / "dcdh.R"
 
 
 def _tri_rows(estimator, kind, event_time, est, se):

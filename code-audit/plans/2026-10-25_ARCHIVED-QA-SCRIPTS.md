@@ -1,0 +1,8 @@
+# Archived one-off QA scripts (2026-10-25)
+Moved to `z-archive/` (kept, never run) during the script consolidation (Stage B, D-54). Their results were not written into `code-audit/` at the time, so no findings are claimed here.
+| Script | Purpose (its own header) | Replaced by |
+|---|---|---|
+| `z-archive/diagnostic_post_clean.py` | Scans each `*_panel*.csv` in `Data/merged` and summarises population-related columns (fill, zeros, range), comparing alternate population sources. Written 2025-06-30. | `script1a-panel-qa.py` (key integrity, coverage, missingness, CDC crude-rate sense check) |
+| `z-archive/qa_2017_dta_vs_api.py` | Compares the 2017 `.dta` NASS data with a 2017 NASS API pull, county by commodity, class and domain category, for matching values. Held a hard-coded API key (October QA item 2, fixed in the working file; the key stays in git history until revoked by its owner). | none; the API pull path is `script0b-usda-raw.py` |
+Kept in `qa-scripts/` because the run-state note marks it CURRENT (D-35): `pull_2022_cattle_totals.py` (NASS 2022 cattle totals), and the Callaway-Sant'Anna cross-check (`qa_cs_crosscheck.py`, `qa_cs_crosscheck_py.py`; its R half is now `R/cs_crosscheck.R`).
+Also moved in Stage B: `script4b-covariate-sequence.py` and `script4c-covariate-stability.py` to `z-archive/` (superseded by `script4y`; their result files stay in `Data/output/tables/script4b/` and `script4c/`, and `script4q` still reads `script4b`); R helpers to `R/` (`honestdid.R`, `dcdh.R`, `cs_crosscheck.R`). `functions.py`: only the "used in" comments changed; `nass_request` stays because two functions in `functions.py` call it (the plan to delete it was wrong).

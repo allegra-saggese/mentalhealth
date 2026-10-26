@@ -63,7 +63,7 @@ def own_estimates(d):
 def run_external(extract, tag):
     """R `did` and the venv packages (csdid, moderndid) on the same file; returns (cells, overall) frames."""
     paths = {k: OUT / f"{TODAY}_{tag}_{k}.csv" for k in ("r_cells", "r_overall", "py_cells", "py_overall")}
-    subprocess.run(["Rscript", str(ROOT / "qa-scripts" / "qa_cs_crosscheck.R"), str(extract),
+    subprocess.run(["Rscript", str(ROOT / "R" / "cs_crosscheck.R"), str(extract),
                     str(paths["r_cells"]), str(paths["r_overall"])], check=True, capture_output=True)
     subprocess.run([str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "qa-scripts" / "qa_cs_crosscheck_py.py"),
                     str(extract), str(paths["py_cells"]), str(paths["py_overall"])], check=True, capture_output=True)

@@ -1,5 +1,5 @@
-# script4za-dcdh.R -- de Chaisemartin & D'Haultfoeuille DID_l (R package DIDmultiplegtDYN), called by estimators.dcdh_estimates().
-# Usage: Rscript script4za-dcdh.R <dir with in.csv> <unit> <time> <outcome> <treatment> <cluster> <effects> <placebos> <controls, comma separated or empty> [normalized: 1 or 0]
+# R/dcdh.R -- de Chaisemartin & D'Haultfoeuille DID_l (R package DIDmultiplegtDYN), called by estimators.dcdh_estimates().
+# Usage: Rscript R/dcdh.R <dir with in.csv> <unit> <time> <outcome> <treatment> <cluster> <effects> <placebos> <controls, comma separated or empty> [normalized: 1 or 0]
 # Writes effects.csv, placebos.csv and ate.csv into <dir>. polars must be loaded before the package (its own instruction).
 suppressMessages({library(polars); library(DIDmultiplegtDYN)})
 a <- commandArgs(trailingOnly = TRUE)

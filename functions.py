@@ -60,8 +60,7 @@ STATE_ABBR_TO_FIPS2 = {
 
 ##################### HELPER FUNCTIONS ####################
 
-# used in: script0a-identifiers.py, script0c-health-controls.py, script0d-crime-raw.py,
-# used in: script0a-identifiers.py, script0o-cdc-county-deathsofdespair-panel.py, script3-ridge.py
+# used in: script0a-identifiers.py, script0c-health-controls.py, script0d-crime-raw.py
 def read_csv_with_fallback(path, encodings=("utf-8", "latin1"), **kwargs):
     """
     Read CSV with sequential encoding fallbacks.
@@ -212,10 +211,10 @@ def filter_to_us_state_codes(df, state_col="state_code", allowed_state_codes=Non
     return out.loc[state_vals.isin(allowed)].copy()
 
 
-# used in: script0c-health-controls.py, script0e-fsis-slaughterhouses.py, script0h-fsis-establishment-size-panel.py,
-# used in: script0i-fsis-hud-zip-fips-fill.py, script0j-fsis-hud-zipyear-refill.py, script0k-fsis-hud-bulk-zipyear-fill.py,
-# used in: script0l-fsis-manual-and-deterministic-fill.py
-# used in: script0c-health-controls.py (CDC deaths of despair)
+# used in: fsis-scripts/script0e-fsis-slaughterhouses.py, fsis-scripts/script0h-fsis-establishment-size-panel.py,
+# used in: fsis-scripts/script0i-fsis-hud-zip-fips-fill.py, fsis-scripts/script0j-fsis-hud-zipyear-refill.py,
+# used in: fsis-scripts/script0k-fsis-hud-bulk-zipyear-fill.py,
+# used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py, script0c-health-controls.py
 def first_non_null(series: pd.Series):
     """
     Return first non-null value from a Series, else pd.NA.
@@ -224,8 +223,9 @@ def first_non_null(series: pd.Series):
     return s.iloc[0] if len(s) else pd.NA
 
 
-# used in: script0i-fsis-hud-zip-fips-fill.py, script0j-fsis-hud-zipyear-refill.py, script0k-fsis-hud-bulk-zipyear-fill.py,
-# used in: script0l-fsis-manual-and-deterministic-fill.py
+# used in: fsis-scripts/script0i-fsis-hud-zip-fips-fill.py, fsis-scripts/script0j-fsis-hud-zipyear-refill.py,
+# used in: fsis-scripts/script0k-fsis-hud-bulk-zipyear-fill.py,
+# used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
 def normalize_zip5(series: pd.Series) -> pd.Series:
     """
     Extract 5-digit ZIP code from a string-like series.
@@ -234,7 +234,7 @@ def normalize_zip5(series: pd.Series) -> pd.Series:
     return s.str.extract(r"(\d{5})", expand=False)
 
 
-# used in: script0e-fsis-slaughterhouses.py, script0l-fsis-manual-and-deterministic-fill.py
+# used in: fsis-scripts/script0e-fsis-slaughterhouses.py, fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
 def normalize_fips5(series: pd.Series) -> pd.Series:
     """
     Normalize to 5-digit FIPS (string); invalid values become NA.
@@ -245,7 +245,7 @@ def normalize_fips5(series: pd.Series) -> pd.Series:
     return s
 
 
-# used in: script0l-fsis-manual-and-deterministic-fill.py
+# used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
 def normalize_text_upper(series: pd.Series) -> pd.Series:
     """
     Upper-case trimmed text normalization.
@@ -253,9 +253,8 @@ def normalize_text_upper(series: pd.Series) -> pd.Series:
     return series.astype("string").str.upper().str.strip()
 
 
-# used in: script0o-cdc-county-deathsofdespair-panel.py, script1a-QA-dataclean.py, script2-visualizations.py,
-# used in: script2a-panel-sumstats-by-farms.py, script2b-qa-memo-correlations.py, script2c-fsis-sizebins-vs-mental-2017.py,
-# used in: script2d-mental-coverage-audit.py
+# used in: script0c-health-controls.py, script1a-panel-qa.py, script1b-tables.py, script1c-figures.py,
+# used in: script1d-maps.py
 def to_numeric_series(series: pd.Series) -> pd.Series:
     """
     Robust numeric coercion for mixed strings/numeric columns.
@@ -272,8 +271,10 @@ def to_numeric_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
-# used in: script1c-replace-cdc-in-merged.py, script2-visualizations.py, script2a-panel-sumstats-by-farms.py,
-# used in: script2b-qa-memo-correlations.py, script2c-fsis-sizebins-vs-mental-2017.py, script2d-mental-coverage-audit.py
+# used in: script1a-panel-qa.py, script1b-tables.py, script1c-figures.py, script1d-maps.py, script4_treatment.py,
+# used in: script4a-design-estimates.py, script4r-fsis-treatment.py, script4z-inference.py,
+# used in: script4zb-triangulation-figure.py, script4zc-treatment-by-model.py, script4zd-treatment-by-model-figures.py,
+# used in: script4ze-permutation-inference.py
 def latest_file_glob(folder: str, pattern: str) -> str:
     """
     Return latest path matching a glob pattern by modified time.
@@ -284,7 +285,8 @@ def latest_file_glob(folder: str, pattern: str) -> str:
     return max(hits, key=os.path.getmtime)
 
 
-# used in: script0h-fsis-establishment-size-panel.py, script0i-fsis-hud-zip-fips-fill.py, script0l-fsis-manual-and-deterministic-fill.py
+# used in: fsis-scripts/script0h-fsis-establishment-size-panel.py, fsis-scripts/script0i-fsis-hud-zip-fips-fill.py,
+# used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
 def latest_file_by_regex(dirpath: str, pattern: str) -> str:
     """
     Return latest file matching regex pattern with a leading date capture group
@@ -302,7 +304,7 @@ def latest_file_by_regex(dirpath: str, pattern: str) -> str:
     return candidates[-1][1]
 
 
-# used in: latest_files_by_descriptor() helper (indirectly script0f-generate-panel.py)
+# used in: functions.py only (no other script)
 def split_dated_descriptor(path: str):
     """
     Returns (descriptor, date_key) where descriptor excludes date prefix.
@@ -334,8 +336,7 @@ def latest_files_by_descriptor(folder: str):
     return {k: v["path"] for k, v in latest.items()}
 
 
-# used in: script0f-generate-panel.py, script1c-replace-cdc-in-merged.py, script2-visualizations.py,
-# used in: script2a-panel-sumstats-by-farms.py, script2b-qa-memo-correlations.py, script2d-mental-coverage-audit.py
+# used in: script0f-generate-panel.py, script1a-panel-qa.py, script1b-tables.py, script1c-figures.py, script1d-maps.py
 def normalize_panel_key(df: pd.DataFrame, dropna=True):
     """
     Normalize key columns for panel data to `fips` and `year`.
@@ -363,7 +364,7 @@ def normalize_panel_key(df: pd.DataFrame, dropna=True):
     return out.dropna(subset=["fips", "year"]).copy() if dropna else out
 
 
-# used in: nass_get_counts()/nass_get_data() below (indirectly script0b-ag-raw.py, script0b-ag-raw-v2.py)
+# used in: functions.py only (no other script)
 def nass_request(base_url: str, endpoint: str, params: dict, user_agent="mentalhealth-ag-script/1.0"):
     """
     Generic USDA NASS API request.
@@ -379,13 +380,13 @@ def nass_request(base_url: str, endpoint: str, params: dict, user_agent="mentalh
         raise RuntimeError(f"NASS API HTTP {e.code} for {url} :: {body}") from e
 
 
-# used in: script0b-ag-raw.py, script0b-ag-raw-v2.py
+# used in: script0b-usda-raw.py
 def nass_get_counts(base_url: str, params: dict):
     payload = nass_request(base_url, "get_counts", params)
     return int(payload.get("count", 0))
 
 
-# used in: script0b-ag-raw.py, script0b-ag-raw-v2.py
+# used in: script0b-usda-raw.py
 def nass_get_data(base_url: str, params: dict):
     payload = nass_request(base_url, "api_GET", params)
     data = payload.get("data", [])
@@ -394,7 +395,7 @@ def nass_get_data(base_url: str, params: dict):
 
 # FIPS code generator from individual city - state cols 
 
-# used in: script0a-identifiers.py, script0b-ag-raw.py, script0b-ag-raw-v2.py, script0a-identifiers.py
+# used in: script0a-identifiers.py, script0b-usda-raw.py
 def generate_fips(df, state_col="state", city_col="city"):
     # Pad state to 2 digits _ cities to 3 digits
     df["state_padded"] = df[state_col].astype(str).str.zfill(2)
@@ -418,8 +419,7 @@ def generate_fips(df, state_col="state", city_col="city"):
 
 # simple / standard colname cleaning
 
-# used in: script0b-ag-raw.py, script0o-cdc-county-deathsofdespair-panel.py,
-# used in: normalize_panel_key() helper used across script1/script2 files
+# used in: script0b-usda-raw.py, script0c-health-controls.py
 def clean_cols(df):
     df.columns = (
         df.columns
@@ -432,7 +432,7 @@ def clean_cols(df):
 
 
 # read in files 
-# used in: script0f-generate-panel.py, script2a-panel-sumstats-by-farms.py
+# used in: script0f-generate-panel.py, script1a-panel-qa.py
 def read_and_prepare(path):
     """Simple reader: csv/parquet/xlsx -> lower-case cols, strip strings, standardize fips/year."""
     ext = os.path.splitext(path)[1].lower()
@@ -470,13 +470,13 @@ def read_and_prepare(path):
 ##### CAFO MAPPING FUNCTIONS ##### 
 
 # make a wrapper to map the inventory the same way in all of them 
-# used in: script0b-ag-raw.py
+# used in: script0b-usda-raw.py
 def map_size(df, mapping, unit_match, out_col):
     mask = df['unit_desc'] == unit_match
     df[out_col] = df['domaincat_desc'].map(mapping).where(mask, other=pd.NA).astype("Int64")
 
 
-# used in: script0b-ag-raw.py, script0b-ag-raw-v2.py
+# used in: script0b-usda-raw.py
 def map_size_class(df, mapping, unit_match, class_match, out_col):
     """
     Map size bins with optional class-level restriction.
@@ -495,9 +495,7 @@ COUNTY_GEOJSON_URL = (
 )
 
 
-# used in: script2d-aggregate-visuals.py, script2f-final-visuals.py,
-# used in: script2e-cafo-composition.py, script2f-threshold-presence.py,
-# used in: script2g-hispanic-chr-explorer.py, script2h-choropleth-maps.py, script3-ridge.py
+# used in: script1a-panel-qa.py, script1c-figures.py, script1d-maps.py
 def log_per10k(series, pop):
     """log(count per 10,000 population + 1); removes mechanical county-size correlation."""
     x   = pd.to_numeric(series, errors="coerce")
@@ -505,7 +503,7 @@ def log_per10k(series, pop):
     return np.log1p((x / pop) * 10_000)
 
 
-# used in: script2h-choropleth-maps.py
+# used in: script1d-maps.py
 def load_county_geojson(merged_dir=None):
     """
     Load Plotly county GeoJSON for choropleth maps.

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4w-honestdid-export.py -- inputs for the Rambachan-Roth sensitivity analysis (the R half is script4w-honestdid.R).
+script4w-honestdid-export.py -- inputs for the Rambachan-Roth sensitivity analysis (the R half is R/honestdid.R).
 
 Refits the baseline TWFE event study for each design and outcome and writes the coefficients and the state-clustered covariance matrix.
 Reads:   panel via designs.load_designs()
 Writes:  Data/output/tables/script4w/honestdid_inputs/<design>__<outcome>__{beta, sigma}.csv and manifest.csv
-Run:     python3 script4w-honestdid-export.py && Rscript script4w-honestdid.R
+Run:     python3 script4w-honestdid-export.py && Rscript R/honestdid.R
 Method:  METHODS.md section 3. Only a contiguous run of event times is exported (HonestDiD indexes periods by position).
 """
 import warnings; warnings.filterwarnings("ignore")
