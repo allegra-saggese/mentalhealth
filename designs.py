@@ -38,6 +38,24 @@ OUTCOME_WINDOWS = {
 }
 assert set(OUTCOME_WINDOWS) == set(OUTCOMES), "OUTCOME_WINDOWS keys must be the script4_treatment.OUTCOMES labels"
 
+# Candidate controls and the type each belongs to (the colour clusters of the control-coverage figure; D-55). The 24 are the register's
+# "CONTROL (in use)" and "CONTROL (comprehensive only)" variables; COVARIATE_ORDER[:8] (script4_treatment) is the selected set.
+# To move a variable to another cluster, change it here; every figure and text table reads this dict.
+CONTROL_TYPE = {
+    "adult_obesity_per100k": "Health", "adult_smoking_per100k": "Health", "diabetes_prevalence_per100k": "Health",
+    "low_birthweight_per100k": "Health", "physical_inactivity_per100k": "Health", "poor_or_fair_health_per100k": "Health",
+    "poor_physical_health_days": "Health", "premature_death": "Health", "preventable_hospital_stays": "Health",
+    "teen_births_per100k": "Health", "uninsured_adults_per100k": "Health", "access_to_healthy_foods_per100k": "Health",
+    "%_65_and_older": "Demographic", "%_below_18_years_of_age": "Demographic", "%_hispanic": "Demographic",
+    "%_black": "Demographic", "%_asian_aian_nhpi": "Demographic",
+    "median_household_income": "Economic", "unemployment_per100k": "Economic", "children_in_poverty_per100k": "Economic",
+    "driving_alone_to_work_per100k": "Economic",
+    "children_in_single-parent_households_per100k": "Social and education", "some_college_per100k": "Social and education",
+    "%_not_proficient_in_english_per100k": "Social and education",
+}
+CONTROL_TYPE_COLOUR = {"Health": "green", "Demographic": "purple", "Economic": "orange", "Social and education": "blue"}   # figstyle.PALETTE keys
+FILL_THRESHOLD_PCT = 80   # the HIGH FILL cutoff of script0c-health-controls.py (avg_threshold): a variable is kept when its average fill is at least this percent
+
 BL_VARS = ["log_pop", "median_household_income", "%_hispanic", "%_65_and_older", "unemployment_per100k",
            "cafo_dairy_total", "cafo_dairy_large"]
 

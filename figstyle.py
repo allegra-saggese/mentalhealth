@@ -89,3 +89,14 @@ def save_figure(fig, directory, stem, png_dpi=PNG_DPI):
     fig.savefig(pdf)
     fig.savefig(png, dpi=png_dpi)
     return pdf, png
+
+
+def save_text_table(df, directory, stem, title, note="", float_format="{:.3f}"):
+    """Write a table as an aligned plain-text file, YYYY-MM-DD_stem.txt, with a title above and a note below; returns the path."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    body = df.to_string(index=False, float_format=lambda v: float_format.format(v), na_rep="")
+    text = f"{title}\n{'=' * len(title)}\n\n{body}\n" + (f"\n{note.strip()}\n" if note.strip() else "")
+    path = directory / f"{dated(stem)}.txt"
+    path.write_text(text, encoding="utf-8")
+    return path
