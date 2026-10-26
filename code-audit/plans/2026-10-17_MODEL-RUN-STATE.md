@@ -117,3 +117,5 @@ Stage 1 (`script1a` to `script1d`) was run on the new panel on 2026-10-25; its o
 | `script1b`, `1c`, `1d` | yes | stage-1 outputs rebuilt on the new panel |
 | `script4u`, `4w`, `4za`, `4zb`, `4ze`, `4zf`, `4r` | **no** | read none of the changed columns (first-expansion/first-entry dairy cohorts, outcomes and controls identical); their earlier outputs stand |
 Before/after numbers: `2026-10-25_D53-BEFORE-AFTER.md`. Not changed and still open: 68 county-years (dairy) stay blank because the county was not rural in the census year (D-53).
+
+**Addendum 2026-10-26 (`script4a --only fsis`, i.e. the old `script4r`):** re-run on the 2026-10-25 panel, `PYTHONHASHSEED=0`, about 20 seconds. The R1/R2 TWFE results (14 rows) equal the 2026-10-22 values to 1e-12 (coefficient, state-clustered standard error, p) with identical N, counties and switchers; the earlier outputs stood, as the table above says, and the new dated files (`2026-10-26_4a-fsis_*`) are the ones the slaughterhouse forest now reads. The R3 event study and R4 LP-DiD files were rewritten by the same run and were not compared.
