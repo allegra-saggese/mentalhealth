@@ -20,8 +20,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from did_cs import run_cs
-from did_tools import clean
+from estimators import run_cs, clean
 from designs import species_treatments
 from script4_treatment import load_panel, OUTCOMES, COVARIATE_ORDER, figs_dir, tables_dir, os, date
 

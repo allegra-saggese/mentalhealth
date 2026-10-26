@@ -44,7 +44,7 @@ Code clarity and auditability beat cleverness. A reviewer who has never met us m
 
 ## 5. Estimation
 
-- Treatments, sample, outcomes, controls come from `script4_treatment.py`. Estimators come from `did_tools.py` / `did_cs.py`. Do not re-implement them in an exhibit script.
+- Treatments, sample, outcomes, controls come from `script4_treatment.py`. Estimators come from `estimators.py`. Do not re-implement them in an exhibit script.
 - State the formula, fixed effects, clustering and weights in the result file's columns or metadata, not only in the code.
 - Test syntax that might silently do nothing: confirm each new term changes the fit.
 - A refactor must keep outputs identical: run `tests/compare_outputs.py` against a baseline.

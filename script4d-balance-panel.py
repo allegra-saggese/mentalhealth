@@ -12,7 +12,7 @@ import warnings; warnings.filterwarnings("ignore")
 import subprocess
 import numpy as np, pandas as pd, pyfixest as pf
 
-from did_tools import clean as _clean
+from estimators import clean as _clean
 from script4_treatment import (
     load_panel, OUTCOMES, CORE_TREATMENTS, CORE_TREATMENT_LABELS,
     SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, db_data, os, date, LATEX_OUT,

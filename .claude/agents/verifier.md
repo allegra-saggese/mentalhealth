@@ -32,7 +32,7 @@ python3 FILE.py 2>&1 | tail -30
 - Table `.tex` fragments: `booktabs` rules present, no vertical bars, note present; compile with `pdflatex` only if available and say so.
 
 ### Shared modules
-For a change to `script4_treatment.py`, `did_tools.py`, `designs.py`, `did_cs.py`, `functions.py` or `packages.py`: list every importing script (`grep -l`), `py_compile` each, and report the list. Importers not re-run are named as unverified.
+For a change to `script4_treatment.py`, `estimators.py`, `designs.py`, `functions.py` or `packages.py`: list every importing script (`grep -l`), `py_compile` each, and report the list. Importers not re-run are named as unverified.
 
 ### Environment
 If `requirements.txt` or `environment.yml` changed, confirm `PYTHONHASHSEED` is still set in `environment.yml`.

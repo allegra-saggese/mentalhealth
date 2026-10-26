@@ -35,7 +35,7 @@ County-year panel (rural US counties, about 2000-2023; analysis window 2010-2015
 
 ## Core Principles
 
-- **Single source of truth.** Treatments, sample, outcomes and controls are defined once, in `script4_treatment.py`; estimator math in `METHODS.md`; shared code in `did_tools.py`, `designs.py`, `did_cs.py`, `functions.py`, `packages.py`; figure style in `figstyle.py`. Exhibit scripts read result files; they do not re-estimate.
+- **Single source of truth.** Treatments, sample, outcomes and controls are defined once, in `script4_treatment.py`; estimator math in `METHODS.md`; shared code in `estimators.py`, `designs.py`, `functions.py`, `packages.py`; figure style in `figstyle.py`. Exhibit scripts read result files; they do not re-estimate.
 - **Pre-commit before looking.** Specification choices are written down (decision register, D-numbered) before results are read. A choice made after seeing results is labelled as such.
 - **Quality gates.** Nothing is committed below 80/100, nothing is cited below 90. See [`quality-gates.md`](.claude/rules/quality-gates.md).
 - **Two documentation tracks.** Internal: data provenance, cleaning decisions, methodological choices (`code-audit/`). External: clean, commented, reviewer-ready scripts that pass replication checks.
@@ -54,7 +54,7 @@ mentalhealth/                      # code only; data lives on Dropbox (db_base i
 ├── script0a ... script0f-*.py     # Stage 0: data in (ingestion, cleaning, the panel build in script0f)
 ├── script1a ... script1d-*.py     # Stage 1: QA, tables, figures, maps (descriptive, pre-analysis; none writes the panel)
 ├── script4_treatment.py, script4*-*.py   # Stage 4: design-based estimates and exhibits
-├── packages.py, functions.py, did_tools.py, designs.py, did_cs.py, estimators.py
+├── packages.py, functions.py, designs.py, estimators.py
 ├── METHODS.md, README.md          # estimator definitions; run order and data availability
 ├── tests/                         # compare_outputs.py, test_precommit.sh
 ├── code-audit/plans/              # decision register, run-state notes, QA notes (internal)

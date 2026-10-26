@@ -8,7 +8,7 @@ Adjustments: county trends, state x year FE, baseline characteristics x time pol
 Reads:   panel via designs.load_designs()
 Writes:  Data/output/tables/script4u/<date>_{static_twfe, event_study, event_study_leads_joint, cs_att_gt, cs_aggregated, validation_vs_script4a}.csv
 Run:     python3 script4u-did-by-treatment.py   (about 30 minutes; --no-cs skips CS; --quick is a test run)
-Method:  METHODS.md sections 2-3. The first-expansion baseline is checked against script4a; the CS code is in did_cs.py.
+Method:  METHODS.md sections 2-3. The first-expansion baseline is checked against script4a; the CS code is in estimators.py.
 """
 import warnings; warnings.filterwarnings("ignore")
 import glob
@@ -19,8 +19,7 @@ import pandas as pd
 import pyfixest as pf
 from scipy.stats import chi2
 
-from did_cs import run_cs
-from did_tools import clean, joint_wald, fe_ols, event_study_frame, stars as st
+from estimators import run_cs, clean, joint_wald, fe_ols, event_study_frame, stars as st
 from designs import load_designs
 from script4_treatment import OUTCOMES, COVARIATE_ORDER, tables_dir, os, date
 

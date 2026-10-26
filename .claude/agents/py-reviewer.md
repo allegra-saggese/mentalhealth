@@ -14,7 +14,7 @@ Produce a specific, actionable review report. You do NOT edit files. Prioritise 
 
 ## Protocol
 
-1. Read the target script end to end, then the shared modules it imports (`script4_treatment.py`, `did_tools.py`, `designs.py`, `did_cs.py`, `functions.py`, `packages.py`).
+1. Read the target script end to end, then the shared modules it imports (`script4_treatment.py`, `estimators.py`, `designs.py`, `functions.py`, `packages.py`).
 2. Read `.claude/rules/python-code-conventions.md`, `figure-and-table-standards.md`, `inference-robustness.md`, and `METHODS.md`.
 3. Check every category below, then write the report.
 

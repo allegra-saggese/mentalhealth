@@ -74,7 +74,7 @@ The *unconditional* arm skips the adjustment (kept for robustness).
 
 *Aggregation:* event-time `ATT(e)` = mean of `ATT(g, g+e)` weighted by the number of treated counties; the overall ATT is the same weighting over all
 post-treatment cells (`t ≥ g`). *Inference:* bootstrap resampling whole states with replacement, 300 draws, fixed seed (20260928).
-Implemented in `did_cs.py`. CS does not remove pre-trends; it changes the comparison group and weighting (it never uses already-treated counties as controls).
+Implemented in `estimators.py` (Callaway-Sant'Anna section). CS does not remove pre-trends; it changes the comparison group and weighting (it never uses already-treated counties as controls).
 
 **Treatment timing.** Treatment can only change at census waves five years apart, so the true change happened somewhere in the five years before the
 observed wave. Event-time paths therefore mix real timing with measurement error.

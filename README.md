@@ -36,7 +36,7 @@ mentalhealth/
 ├── first-stage-testing/       # first-phase pilots and test versions, kept for provenance, NOT run (see its README)
 ├── script4*.py                # Stage 4 — design-based estimates, tables, slides
 ├── functions.py, packages.py  # shared helpers; db_base path lives in packages.py
-├── did_cs.py, estimators.py   # shared estimator code (Callaway–Sant'Anna; legacy LP-DiD / Conley, not reported)
+├── estimators.py              # shared estimator code: DiD helpers, Callaway–Sant'Anna, LP-DiD, triangulation estimators, Conley
 ├── requirements.txt, environment.yml, r-requirements.txt   # pinned environment
 ├── fsis-scripts/              # FSIS sub-scripts, called by script0e
 ├── qa-scripts/                # one-off diagnostics (not part of the run order)
@@ -125,7 +125,7 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 | `script4y-control-set-selection.py` | **How the control set was chosen:** cumulative add-one-in, each control added alone, take-one-out of the final 8, take-one-out of all 14, and one selection table. Documents the pre-committed set; does not choose it |
 | `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and combined appendix (no estimation): reported exhibits plus a separate robustness set |
 | `script4q-beamer-frames.py` | Beamer drop-in frames from the result CSVs (reported set; robustness frames in a second file) |
-| `did_cs.py` | Shared Callaway–Sant'Anna code used by `4u` and `4x`; `4a` still holds its own copy (merge pending) |
+| `estimators.py` | Shared estimator code (DiD helpers, Callaway–Sant'Anna, LP-DiD, stacked, imputation, saturated, dCDH); formerly `did_tools.py` and `did_cs.py` |
 
 **Run state.** The panel was rebuilt on 2026-09-23 to fix the CHR release-year misalignment. Outputs dated before that predate the fix and should not be cited; `code-audit/plans/2026-09-27_MODEL-RUN-STATE.md` records which script was last run on which panel — check it before citing any output. `qa-scripts/` holds one-off diagnostics (population-column comparison, 2017 .dta vs API check).
 

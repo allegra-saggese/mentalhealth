@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pyfixest as pf
 
-from did_tools import clean, event_study_frame
+from estimators import clean, event_study_frame
 from designs import load_designs
 from script4_treatment import OUTCOMES, COVARIATE_ORDER, tables_dir, os
 

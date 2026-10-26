@@ -1,4 +1,4 @@
-# Optional cross-check estimators (independent implementations used to audit did_cs.py and to run the
+# Optional cross-check estimators (independent implementations used to audit estimators.py (Callaway-Sant'Anna section) and to run the
 # triangulation plan). Install into a SEPARATE environment so the pinned results environment does not change:
 #   python3 -m venv .venv && ./.venv/bin/pip install -r requirements-crosscheck.txt      (.venv/ is git-ignored)
 # Tested 2026-10-22 on Python 3.13.5: all four recover a known effect of 2.0 on a simulated staggered panel.

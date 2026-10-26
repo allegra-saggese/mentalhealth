@@ -20,7 +20,7 @@ import pandas as pd
 import pyfixest as pf
 
 import inference_tools as it
-from did_tools import clean as _clean
+from estimators import clean as _clean
 from functions import latest_file_glob
 from script4_treatment import (
     load_panel, OUTCOMES, CORE_TREATMENTS, SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, tables_dir, os, date,

@@ -20,7 +20,7 @@ import pyfixest as pf
 
 import estimators as est
 from designs import load_designs, usable_sample
-from did_cs import run_cs
+from estimators import run_cs
 from script4_treatment import OUTCOMES, COVARIATE_ORDER, tables_dir, os, date
 
 warnings.filterwarnings("ignore")
@@ -41,7 +41,7 @@ TODAY = date.today().strftime("%Y-%m-%d")
 
 
 def cs_benchmark(d):
-    """did_cs.run_cs on the sample; overall ATT and event-time ATTs with the state-bootstrap SE."""
+    """estimators.run_cs on the sample; overall ATT and event-time ATTs with the state-bootstrap SE."""
     _, agg = run_cs(d, "y", "cohort", XCOLS, n_boot=N_BOOT, seed=CS_SEED)
     ov = agg[agg.agg_level == "overall_ATT"].iloc[0]
     ev = agg[agg.agg_level == "event_time"]

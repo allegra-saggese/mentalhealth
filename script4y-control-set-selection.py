@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import pyfixest as pf
 
-from did_tools import clean
+from estimators import clean
 from script4_treatment import (load_panel, OUTCOMES, COVARIATE_ORDER, COVARIATE_EXCLUDED, CORE_TREATMENTS,
                                tables_dir, os, date)
 

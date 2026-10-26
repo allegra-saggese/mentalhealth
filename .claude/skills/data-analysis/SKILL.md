@@ -12,7 +12,7 @@ allowed-tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "Agent", "Monit
 ## Constraints
 
 - Follow `.claude/rules/python-code-conventions.md`, `inference-robustness.md`, `figure-and-table-standards.md`, `results-reporting.md`.
-- Treatments, sample, outcomes and controls come from `script4_treatment.py`; estimators from `did_tools.py` / `did_cs.py` / `designs.py`. Do not re-define them. If something is missing from the shared module, propose the change to the user (shared-module change).
+- Treatments, sample, outcomes and controls come from `script4_treatment.py`; estimators from `estimators.py` / `designs.py`. Do not re-define them. If something is missing from the shared module, propose the change to the user (shared-module change).
 - New scripts follow the stage-letter convention and the short header; outputs go to `Data/output/{tables,figs}/` via `packages.py`, dated.
 - Run with `PYTHONHASHSEED=0`. Seeds via `default_rng` once at the top.
 - Run the `py-reviewer` agent on the generated script before presenting results.
@@ -44,7 +44,7 @@ Summary statistics and missingness, distributions of key variables, pre-treatmen
 - Panel estimation with `pyfixest` (`feols` with county and year fixed effects); clustered by state unless the user chose otherwise (document why).
 - Start from the pre-committed specification; progressive controls follow `script4y`'s pattern, not ad hoc.
 - Confirm each new term changes the fit.
-- Report standardized and raw effects; leads/lags for event studies; Callaway-Sant'Anna via `did_cs.py`.
+- Report standardized and raw effects; leads/lags for event studies; Callaway-Sant'Anna via `estimators.py`.
 - Each specification run is appended to the ledger (below), kept or not.
 
 ### Specification ledger

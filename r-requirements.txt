@@ -1,7 +1,7 @@
 # R packages. Tested with R 4.6.0. Only R/honestdid.R, R/dcdh.R and R/cs_crosscheck.R are called by the pipeline; the others are for the
 # estimator cross-checks and the triangulation plan (code-audit/plans/2026-10-22_PLAN_estimator-triangulation.md).
 # install.packages("HonestDiD")          # 0.2.8, Rambachan & Roth sensitivity analysis (script4w)
-# install.packages("did")                # 2.5.1, Callaway & Sant'Anna (cross-check of did_cs.py)
+# install.packages("did")                # 2.5.1, Callaway & Sant'Anna (cross-check of the Callaway-Sant'Anna section of estimators.py)
 # install.packages("DIDmultiplegtDYN")   # 2.4.0, de Chaisemartin & D'Haultfoeuille DID_l
 # install.packages("polars", repos = c("https://rpolars.r-universe.dev", "https://cloud.r-project.org"))
 #                                        # 2.0.0.9000, required by DIDmultiplegtDYN, not on CRAN; load library(polars) first

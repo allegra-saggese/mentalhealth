@@ -16,7 +16,7 @@ Your instruction
 
 - Design fork: "Option A (fast) vs B (robust)?"
 - A choice touches an estimand, sample, control set, inference or interpretive wording
-- A shared module (`script4_treatment.py`, `did_tools.py`, `designs.py`, `did_cs.py`, `functions.py`, `packages.py`) must change
+- A shared module (`script4_treatment.py`, `estimators.py`, `designs.py`, `functions.py`, `packages.py`) must change
 - Anything destructive or outward-facing (delete, push, PR, email)
 - A replication check just misses tolerance
 

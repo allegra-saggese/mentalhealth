@@ -48,7 +48,7 @@ from pathlib import Path
 WATCH = re.compile(
     r"(^|/)scripts/.*\.(R|r|do|py|jl)$|(^|/)output/|(^|/)scripts/.*/_outputs/"
     r"|(^|/)script[0-9][^/]*\.(py|R)$"                                   # mentalhealth stage scripts at the repo root
-    r"|(^|/)(did_tools|designs|did_cs|estimators|functions|packages)\.py$"  # shared modules
+    r"|(^|/)(designs|estimators|functions|packages)\.py$"  # shared modules
     r"|(^|/)Data/output/"                                                # result files on the data root
 )
 DISPLAY = re.compile(r"\.(tex|qmd|md|rmd|typ|ipynb)$", re.IGNORECASE)

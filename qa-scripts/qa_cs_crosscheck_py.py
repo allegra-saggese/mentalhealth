@@ -2,7 +2,7 @@
 
 Run with the isolated cross-check environment, not the pipeline environment (see requirements-crosscheck.txt):
     ./.venv/bin/python qa-scripts/qa_cs_crosscheck_py.py <extract.csv> <out_cells.csv> <out_overall.csv>
-Settings mirror did_cs.py: outcome regression, not-yet-treated comparison, base year g-1 (universal), no bootstrap.
+Settings mirror estimators.py (Callaway-Sant'Anna section): outcome regression, not-yet-treated comparison, base year g-1 (universal), no bootstrap.
 """
 import sys
 

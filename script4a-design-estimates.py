@@ -7,7 +7,7 @@ Reads:   panel via script4_treatment.load_panel(); Data/merged/*_panel_fsis.csv 
 Writes:  Data/output/tables/script4a/<date>_{A1_A2_treatment_grid, A4_fsis_interaction, A5_event_study, A6_cs_att_gt,
          A6_cs_aggregated, HEADLINE_twfe_vs_cs, VIF_audit}.csv and figs/script4a/*.png
 Run:     python3 script4a-design-estimates.py     (about 7 minutes; 300 bootstrap draws)
-Method:  METHODS.md sections 1-2; state-clustered SEs; CS functions come from did_cs.py.
+Method:  METHODS.md sections 1-2; state-clustered SEs; CS functions come from estimators.py.
 Notes:   A1 (pooled state FE) and A7 (LP-DiD) are computed but not reported (D-32).
 """
 import warnings; warnings.filterwarnings("ignore")
@@ -24,9 +24,7 @@ from script4_treatment import (
     db_data, figs_dir, tables_dir, os, date,
 )
 from functions import latest_file_glob
-from estimators import lpdid, conley_se, load_centroids
-from did_cs import att_gt_table, base_period_covariates
-from did_tools import clean as _clean
+from estimators import lpdid, conley_se, load_centroids, att_gt_table, base_period_covariates, clean as _clean
 
 OUT_FIGS   = os.path.join(figs_dir,   "script4a")
 OUT_TABLES = os.path.join(tables_dir, "script4a")

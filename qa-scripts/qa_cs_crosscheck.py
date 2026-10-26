@@ -1,10 +1,10 @@
-"""qa_cs_crosscheck.py -- does did_cs.py agree with independent Callaway-Sant'Anna implementations?
+"""qa_cs_crosscheck.py -- does estimators.py (Callaway-Sant'Anna section) agree with independent Callaway-Sant'Anna implementations?
 
 Builds one balanced extract per mental-health outcome (identical data for every implementation), then compares
-ATT(g,t) cell by cell and the overall ATT: did_cs.att_gt_table vs R `did` 2.5.1, `csdid` 0.4.2, `moderndid` 0.3.1.
+ATT(g,t) cell by cell and the overall ATT: estimators.att_gt_table vs R `did` 2.5.1, `csdid` 0.4.2, `moderndid` 0.3.1.
 Settings on every side: outcome regression, not-yet-treated comparison, base year g-1 (universal), covariates =
 the pre-committed 8 controls at the base year, cohort = first expansion (E2). Point estimates only; the
-standard errors differ by design (did_cs bootstraps over states).
+standard errors differ by design (estimators.run_cs bootstraps over states).
 Needs:   R with `did`; the isolated ./.venv from requirements-crosscheck.txt (qa_cs_crosscheck_py.py runs there).
 Writes:  Data/output/tables/qa_cs_crosscheck/YYYY-MM-DD_{cells,summary}.csv
 Run:     PYTHONHASHSEED=0 python3 qa-scripts/qa_cs_crosscheck.py        (about a minute)
@@ -18,7 +18,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from did_cs import att_gt_table, base_period_covariates  # noqa: E402
+from estimators import att_gt_table, base_period_covariates  # noqa: E402
 from script4_treatment import load_panel, OUTCOMES, COVARIATE_ORDER, tables_dir, date  # noqa: E402
 
 CHECKED = ["Poor MH Days", "Frequent Mental Distress"]
@@ -48,7 +48,7 @@ def balanced_extract(df, ocol):
 
 
 def own_estimates(d):
-    """did_cs.att_gt_table on the extract: ATT(g,t) cells and the overall post-treatment ATT."""
+    """estimators.att_gt_table on the extract: ATT(g,t) cells and the overall post-treatment ATT."""
     wide = d.pivot_table(index="fips", columns="year", values="y", aggfunc="first")
     cohort_of = d.groupby("fips").cohort.first()
     cohorts = sorted(d.cohort.dropna().unique())
@@ -88,7 +88,7 @@ for okey in CHECKED:
     for package, cells in ext_cells.groupby("package"):
         m = ours.merge(cells, on=["cohort", "year"], how="outer", suffixes=("_own", "_pkg"), indicator=True)
         both = m[m._merge == "both"]
-        # packages also list the base-year cell g-1 (ATT = 0 by construction); did_cs skips it
+        # packages also list the base-year cell g-1 (ATT = 0 by construction); estimators.att_gt_table skips it
         pkg_only = m[(m._merge == "right_only") & (m.year != m.cohort - 1)]
         diff = (both.att_own - both.att_pkg).abs()
         pkg_overall = float(ext_overall.loc[ext_overall.package == package, "overall_att"].iloc[0])
