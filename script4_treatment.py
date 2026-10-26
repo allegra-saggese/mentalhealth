@@ -18,9 +18,9 @@ import pandas as pd
 
 CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 
-# Where the LaTeX tables for the current run are written (script4d, 4n, 4p, 4q).
-# Run 2 (2026-10-12) moved this from latex-outputs-2809.
-LATEX_OUT = os.path.join(db_data, "output", "latex-outputs-run2")
+# Where the LaTeX fragments are written (script4b balance, script4e). Run 2 (2026-10-12) moved this from
+# latex-outputs-2809; 2026-10-26 renamed latex-outputs-run2 to output/latex (packages.latex_dir).
+LATEX_OUT = latex_dir
 MERGED_DIR   = os.path.join(db_data, "merged")
 
 # Waves where NASS's own total-operations count is available to validate the size

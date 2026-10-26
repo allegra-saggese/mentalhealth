@@ -100,7 +100,7 @@ check("permutation p-value is two-sided", it.permutation_pvalue(-3.0, np.array([
 tbl = it.family_table(["a", "b"], [0.01, 0.04])
 check("family_table has both columns", list(tbl.columns) == ["test", "p_unadjusted", "p_holm"])
 
-# 5. within-state cohort permutation test (the scheme of script4ze): size under no effect, power under a planted effect
+# 5. within-state cohort permutation test (the scheme of script4c-inference.py, section permutation): size under no effect, power under a planted effect
 N_STATE, PER_STATE, YEARS = 20, 8, 12
 
 

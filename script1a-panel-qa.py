@@ -19,7 +19,7 @@ Sections (run one with --only <name>, several with --only a b; default is all, i
   memo            coverage memo (lists the outputs above)
 Reads:   Data/merged/*_panel.csv and *_panel_fsis.csv (newest); Data/clean/*rural-key*.csv and *_cafo_ops_by_size_compact.csv;
          the cdc_sensecheck columns stay in the QA tables only.
-Writes:  Data/output/tables/script1a/YYYY-MM-DD_*.csv|md   and   Data/output/figs/script1a/YYYY-MM-DD_*.{pdf,png}
+Writes:  Data/output/tables/YYYY-MM-DD_1a_*.csv|md   and   Data/output/figures/YYYY-MM-DD_1a_*.{pdf,png}   (naming: packages.py)
          Never writes to Data/merged (the panel has one writer, script0f-generate-panel.py).
 Run:     PYTHONHASHSEED=0 python3 script1a-panel-qa.py [--only <section> ...]      Not stochastic, so no seed. Runtime: about 1 min.
 """
@@ -37,15 +37,15 @@ from matplotlib.ticker import StrMethodFormatter
 
 import figstyle
 from functions import latest_file_glob, normalize_panel_key, read_and_prepare, to_numeric_series
-from packages import db_data, figs_dir, tables_dir
+from packages import db_data, figs_dir, tables_dir, tagged
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Paths and constants (shared set-up, defined once)
 # ---------------------------------------------------------------------------------------------------------------------
-SCRIPT = "script1a"
+TAG = "1a"                      # output-name tag (packages.py): <date>_1a_<stem>
 MERGED_DIR = Path(db_data) / "merged"
-TABLE_DIR = Path(tables_dir) / SCRIPT
-FIG_DIR = Path(figs_dir) / SCRIPT
+TABLE_DIR = Path(tables_dir)
+FIG_DIR = Path(figs_dir)
 CLEAN_DIR = Path(db_data) / "clean"
 TODAY = date.today().isoformat()
 
@@ -108,7 +108,7 @@ TOP_MISSING_VARS = 60
 def write_table(frame, stem, index=False):
     """Write a dated CSV to TABLE_DIR and return its path."""
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
-    path = TABLE_DIR / f"{TODAY}_{stem}.csv"
+    path = TABLE_DIR / tagged(TAG, f"{TODAY}_{stem}.csv")
     frame.to_csv(path, index=index)
     print("Saved:", path)
     return path
@@ -165,7 +165,7 @@ def save_qa_figure(fig, stem, note):
     """Add the source note, reserve room for it, and save PDF + PNG through figstyle."""
     fig.get_layout_engine().set(rect=(0, 0.045, 1, 0.955))
     fig.text(0.005, 0.004, note, fontsize=5, ha="left", va="bottom", color="0.3", wrap=True)
-    pdf, png = figstyle.save_figure(fig, FIG_DIR, stem)
+    pdf, png = figstyle.save_figure(fig, FIG_DIR, f"{TAG}_{stem}")
     plt.close(fig)
     print("Saved:", png)
     return png
@@ -747,7 +747,7 @@ def write_qa_memo(panel, fsis_qa):
     (run those sections first, as the default order does); "n/a" means they have not been written yet.
     """
     def newest_own_table(stem):
-        hits = sorted(TABLE_DIR.glob(f"*_{stem}.csv"))
+        hits = sorted(TABLE_DIR.glob(f"*_{TAG}_{stem}.csv"))
         return pd.read_csv(hits[-1]) if hits else pd.DataFrame()
 
     coverage_check = newest_own_table("county_coverage_check")
@@ -779,7 +779,7 @@ def write_qa_memo(panel, fsis_qa):
         "- FSIS correlations not included (FSIS only in panel_fsis.csv, 2017+).", "",
     ]
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
-    path = TABLE_DIR / f"{TODAY}_qa_memo_panel_qa.md"
+    path = TABLE_DIR / tagged(TAG, f"{TODAY}_qa_memo_panel_qa.md")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("Saved:", path)
 
@@ -879,17 +879,17 @@ def run_memo():
         "- Unit: county-year (`fips`, `year`)",
         f"- Rows: `{len(df):,}` | Counties: `{df['fips'].nunique():,}` | Years: `{int(df['year'].min())}-{int(df['year'].max())}`", "",
         "## Outputs",
-        *[f"- `{d}_{stem}.csv`" for stem in (
+        *[f"- `{d}_{TAG}_{stem}.csv`" for stem in (
             "qa_panel_integrity_mental_focus", "qa_panel_source_duplication_counts", "qa_mental_focus_variable_inventory",
             "qa_mental_outcome_core_overall", "qa_mental_outcome_core_by_year", "qa_mental_outcome_counties_any",
             "qa_mental_crosssource_duplicate_check")], "",
         "## Notes",
         "- Overall fill rates are over the full panel window (2000-2023), so variables that start in later years will look "
         "lower in the overall metric.",
-        f"- Use `{d}_qa_mental_outcome_core_by_year.csv` for year-appropriate coverage interpretation.",
+        f"- Use `{d}_{TAG}_qa_mental_outcome_core_by_year.csv` for year-appropriate coverage interpretation.",
         "", "---", f"## QA Extension ({d})", "",
         "### Coverage heatmap",
-        f"- Files: `{d}_qa_coverage_heatmap.png|pdf` + `{d}_qa_coverage_matrix.csv`",
+        f"- Files: `{d}_{TAG}_qa_coverage_heatmap.png|pdf` + `{d}_{TAG}_qa_coverage_matrix.csv`",
         "- Findings noted by hand on an earlier panel; re-read the matrix before quoting them:",
         "  - `poor_mental_health_days` (CHR): usable from 2010 (~90%) onward.",
         "  - `frequent_mental_distress` (CHR): only available 2016+; not suitable for 2005-2015 panel.",
@@ -899,23 +899,23 @@ def run_memo():
         "  - FSIS establishments: only 2017, cross-section only.",
         "  - Recommended panel window for outcome analysis: **2010-2015**.", "",
         "### Panel balance",
-        f"- Files: `{d}_qa_panel_balance_by_year.csv`, `{d}_qa_panel_balance_summary.csv`", "",
+        f"- Files: `{d}_{TAG}_qa_panel_balance_by_year.csv`, `{d}_{TAG}_qa_panel_balance_summary.csv`", "",
         "### CDC suppression audit",
-        f"- File: `{d}_qa_cdc_suppression_audit.csv`",
+        f"- File: `{d}_{TAG}_qa_cdc_suppression_audit.csv`",
         "- Low coverage is expected, not a bug: CDC suppresses crude rates for counties with fewer than 10 deaths in a cell,",
         "  so the crude rate is missing for most small rural counties. The raw death count is retained.",
         "- There is no dedicated suicide-cause column in the current pipeline. The CDC deaths-of-despair files are a",
         "  composite (drug overdose + suicide + alcohol-related). Suicide-specific analysis needs a separate CDC WONDER pull",
         "  by ICD-10 cause code (X60-X84, intentional self-harm).", "",
         "### Outcome distributions",
-        f"- File: `{d}_qa_outcome_distributions_{REFERENCE_YEAR}.png|pdf` ({REFERENCE_YEAR} reference cross-section)",
+        f"- File: `{d}_{TAG}_qa_outcome_distributions_{REFERENCE_YEAR}.png|pdf` ({REFERENCE_YEAR} reference cross-section)",
         "- Check right skew in assault and homicide variables before regression modeling.", "",
         "### CAFO per-capita distribution",
-        f"- Files: `{d}_qa_cafo_percapita_distribution.png|pdf`, `{d}_qa_cafo_percapita_outliers_p99.csv`",
+        f"- Files: `{d}_{TAG}_qa_cafo_percapita_distribution.png|pdf`, `{d}_{TAG}_qa_cafo_percapita_outliers_p99.csv`",
         "- Raw CAFO operation counts are heavily right-skewed. Scatter-plot x-axis: log(CAFO operations per 10,000 residents + 1).",
     ]
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
-    path = TABLE_DIR / f"{d}_qa_mental_coverage_memo.md"
+    path = TABLE_DIR / tagged(TAG, f"{d}_qa_mental_coverage_memo.md")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("Saved:", path)
 

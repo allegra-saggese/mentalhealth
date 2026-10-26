@@ -758,8 +758,7 @@ today_str = date.today().strftime("%Y-%m-%d")
 _ratio_flag_cols = [c for c in merged_all.columns if c.endswith("_ratio_flag")]
 if _ratio_flag_cols:
     _qa_df = merged_all[["fips", "year"] + _ratio_flag_cols].copy()
-    _qa_path = os.path.join(tables_dir, f"{today_str}_ratio_flags_qa.csv")
-    os.makedirs(tables_dir, exist_ok=True)      # was merged_dir: the QA table is written to tables_dir
+    _qa_path = out_file(tables_dir, "0f", f"{today_str}_ratio_flags_qa.csv")   # was merged_dir, then loose in tables/
     _qa_df.to_csv(_qa_path, index=False)
     print(f"Ratio flags archived: {_qa_path} ({len(_ratio_flag_cols)} columns)")
 

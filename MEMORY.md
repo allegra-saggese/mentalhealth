@@ -38,3 +38,4 @@ When a mistake is corrected, append a `[LEARN:category]` entry below (most recen
 [LEARN:data] Loading FSIS columns from the main panel -> FSIS columns exist only in `*_panel_fsis.csv` (2017+).
 
 [LEARN:format] Regression tables on slides with "coefficient (SE) [p]" in one cell per outcome row -> journal layout: outcomes as numbered columns, coefficient with stars (* p<0.10, ** p<0.05, *** p<0.01) and the standard error in parentheses below, then a rule and rows for N, counties, clusters, fixed effects, controls. The owner asked for stars on the slide tables, which overrides the "no stars" default of the Nature/Science table standard for those tables only.
+[LEARN:output-layout] per-script output folders (tables/script4x/, figs/script4zb/) -> one flat folder per kind of file (tables/, figures/, maps/, latex/) with the script+section tag in the file name, through packages.out_file()/out_latest() (owner, 2026-10-26)

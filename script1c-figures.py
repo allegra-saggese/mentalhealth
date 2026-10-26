@@ -26,8 +26,8 @@ Reads:   newest Data/merged/*_panel.csv and *_panel_fsis.csv; Data/clean/*_cafo_
          the treatment definitions in script4_treatment.py and designs.py (no new definitions here)
 Window:  each outcome is drawn over its own designs.OUTCOME_WINDOWS entry (outcomes without one: all panel years); exposures use
          all panel years. Descriptive only, not the estimation samples (A21 open)
-Writes:  Data/output/figs/script1c/<date>_<stem>.{pdf,png} (183 mm / 89 mm, 600 dpi PNG + vector PDF) and the numbers behind
-         each figure in Data/output/tables/script1c/<date>_<stem>.csv (`control-coverage` also writes the same numbers as .txt)
+Writes:  Data/output/figures/<date>_1c_<stem>.{pdf,png} (183 mm / 89 mm, 600 dpi PNG + vector PDF) and the numbers behind
+         each figure in Data/output/tables/<date>_1c_<stem>.csv (`control-coverage` also writes the same numbers as .txt)
 Run:     PYTHONHASHSEED=0 python3 script1c-figures.py            about 4 min (trend-sweep is most of it; --max-trend-vars N shortens it)
 Style:   figstyle.py (Nature/Science standards, .claude/rules/figure-and-table-standards.md). Stochastic code: the box-plot
          jitter only, seeded inside the section. Tables of the descriptive stage are written by script1b-tables.py.
@@ -54,14 +54,15 @@ from scipy import stats
 import figstyle
 from designs import CONTROL_TYPE, CONTROL_TYPE_COLOUR, FILL_THRESHOLD_PCT, OUTCOME_WINDOWS
 from functions import latest_file_glob, log_per10k, normalize_panel_key, to_numeric_series
-from packages import db_data, figs_dir, tables_dir
+from packages import db_data, figs_dir, tables_dir, tagged
 from script4_treatment import COVARIATE_ORDER
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 SCRIPT = "script1c-figures.py"
-OUT_FIGS = Path(figs_dir) / "script1c"
-OUT_TABLES = Path(tables_dir) / "script1c"
+TAG = "1c"                      # output-name tag (packages.py): <date>_1c_<stem>
+OUT_FIGS = Path(figs_dir)
+OUT_TABLES = Path(tables_dir)
 SEED = 20261024                     # box-plot jitter only
 FSIS_YEARS = (2017, 2023)           # FSIS county linkage exists only for these years
 CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
@@ -208,9 +209,9 @@ def safe_stem(text):
 
 
 def write_table(df, stem, index=False):
-    """Numbers behind a figure, dated, in tables/script1c."""
+    """Numbers behind a figure, dated and tagged 1c, in tables/."""
     OUT_TABLES.mkdir(parents=True, exist_ok=True)
-    path = OUT_TABLES / f"{figstyle.dated(stem)}.csv"
+    path = OUT_TABLES / tagged(TAG, f"{figstyle.dated(stem)}.csv")
     df.to_csv(path, index=index)
     print("  table", path.name, f"({len(df):,} rows)")
     return path
@@ -223,7 +224,7 @@ def save(fig, stem, note):
     frac = ((text.count("\n") + 1) * 2.5 + 2.0) / h_mm
     fig.get_layout_engine().set(rect=(0, frac, 1, 1 - frac))
     fig.text(0.005, 0.004, text, fontsize=5, va="bottom", ha="left", color=NOTE_COLOUR)
-    pdf, png = figstyle.save_figure(fig, OUT_FIGS, stem)
+    pdf, png = figstyle.save_figure(fig, OUT_FIGS, f"{TAG}_{stem}")
     plt.close(fig)
     print("  figure", png.name)
 
@@ -1291,7 +1292,7 @@ def section_control_coverage():
     note_txt = (f"Percent of non-missing values per variable over rural county-years {lo}-{hi} ({len(sub):,} county-years, {sub['fips'].nunique():,} counties). "
                 f"Rows follow the figure: type clusters, then fill rate descending. Cutoff line: {FILL_THRESHOLD_PCT}% (the HIGH FILL cutoff of "
                 f"script0c-health-controls.py). Selected = the {N_SELECTED} controls of the pre-committed set (D-16).")
-    path = figstyle.save_text_table(txt, OUT_TABLES, "control_coverage", f"Fill rate of the {len(cov)} candidate controls, {lo}-{hi}", note_txt)
+    path = figstyle.save_text_table(txt, OUT_TABLES, f"{TAG}_control_coverage", f"Fill rate of the {len(cov)} candidate controls, {lo}-{hi}", note_txt)
     print("  table", path.name)
     print(f"  selected {N_SELECTED}: min {sel['fill_pct'].min():.3f}% max {sel['fill_pct'].max():.3f}%; other {len(others)}: "
           f"max {others['fill_pct'].max():.3f}%, lowest {others.loc[others['fill_pct'].idxmin(), 'variable']} {others['fill_pct'].min():.3f}%")

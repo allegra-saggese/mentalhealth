@@ -459,7 +459,7 @@ def event_study_frame(data, ocol, controls, extra=(), clip=8):
 # did_cs.py -- Callaway and Sant'Anna staggered DiD, covariate-adjusted, with a bootstrap over states.
 #
 # run_cs() estimates ATT(g,t) cells and the event-time and overall ATT; att_gt_table() and base_period_covariates() are the building blocks.
-# script4a imports the building blocks; script4u and script4x call run_cs().
+# script4a designs imports the building blocks; script4a cohorts and species call run_cs().
 # Method:  METHODS.md section 2. Optional outcome_lags adds the outcome's own past levels to the covariates.
 # =============================================================================
 

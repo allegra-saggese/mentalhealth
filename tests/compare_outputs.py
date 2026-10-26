@@ -7,7 +7,8 @@ Compares the NEWEST file of each name in two output trees (a saved baseline and 
     *.csv   same columns and rows; numeric cells equal within rtol=1e-6, atol=1e-8
     *.tex   identical text (dates normalised)
     *.png   identical pixels
-Files are matched by name without the leading YYYY-MM-DD_ date stamp.
+Files are matched by name without the leading YYYY-MM-DD_ date stamp. Both trees must use the same layout
+(since 2026-10-26: tables/, figures/, latex/, with the script/section tag in the file name; packages.py).
 
 Usage:  python3 tests/compare_outputs.py <baseline_root> <live_root>
 Exit code 0 if everything matches, 1 otherwise.
@@ -69,7 +70,7 @@ def cmp_png(a, b):
 
 if __name__ == "__main__":
     base, live = sys.argv[1], sys.argv[2]
-    subs = ["tables", "figs", "latex-outputs-run2"]
+    subs = ["tables", "figures", "latex"]
     A, B = newest_by_stem(base, subs), newest_by_stem(live, subs)
     ok = bad = missing = 0
     for key in sorted(A):

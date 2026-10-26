@@ -514,11 +514,15 @@ def load_county_geojson(merged_dir=None):
     if merged_dir is None:
         raise RuntimeError("Could not load county GeoJSON from URL; pass merged_dir for fallback.")
 
-    from packages import db_data as db_data_local      # same folder as before; the one place paths are defined
+    from packages import maps_dir, output_dir      # the one place paths are defined
+    # Any saved Plotly choropleth embeds the county GeoJSON: script1d maps first, then the retired stage-2
+    # map folders kept in output/_legacy/figs/ (core-visuals, fsis-choropleth).
+    legacy = os.path.join(output_dir, "_legacy", "figs")
     html_candidates = (
-        sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "core-visuals", "*_F2_poor_mental_health_map_2012.html")), reverse=True)
-        + sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "core-visuals", "*_F1_cafo_intensity_map_2012.html")), reverse=True)
-        + sorted(glob.glob(os.path.join(db_data_local, "output", "figs", "fsis-choropleth", "*.html")), reverse=True)
+        sorted(glob.glob(os.path.join(maps_dir, "*_1d_*.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(legacy, "core-visuals", "*_F2_poor_mental_health_map_2012.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(legacy, "core-visuals", "*_F1_cafo_intensity_map_2012.html")), reverse=True)
+        + sorted(glob.glob(os.path.join(legacy, "fsis-choropleth", "*.html")), reverse=True)
     )
 
     decoder = json.JSONDecoder()

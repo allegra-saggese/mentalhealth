@@ -9,7 +9,7 @@ Typical use in an exhibit script:
     fig, ax = figstyle.new_figure("single", height_mm=60)
     ax.plot(...)
     figstyle.panel_label(ax, "a")
-    figstyle.save_figure(fig, figs_dir / "event-study", "twfe_first_expansion")
+    figstyle.save_figure(fig, figs_dir, tagged("4a-designs", "twfe_first_expansion"))   # tagged() from packages.py
 """
 from datetime import date
 from pathlib import Path

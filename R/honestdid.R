@@ -19,9 +19,12 @@
 suppressMessages(library(HonestDiD))
 
 home <- Sys.getenv("HOME")
-inp  <- file.path(home, "Dropbox/Mental/Data/output/tables/script4w/honestdid_inputs")
-out  <- file.path(home, "Dropbox/Mental/Data/output/tables/script4w")
-man  <- read.csv(file.path(inp, "manifest.csv"), stringsAsFactors = FALSE)
+# Output layout (packages.py): flat tables/ folder, script/section in the file name.
+#   inputs  tables/4b-honestdid-inputs_{manifest, <stem>__beta, <stem>__sigma}.csv
+#   outputs tables/<date>_4b-honestdid_{results, breakdown}.csv
+tab  <- file.path(home, "Dropbox/Mental/Data/output/tables")
+inp  <- function(name) file.path(tab, paste0("4b-honestdid-inputs_", name))
+man  <- read.csv(inp("manifest.csv"), stringsAsFactors = FALSE)
 today <- format(Sys.Date(), "%Y-%m-%d")
 
 basis <- function(n, idx) { v <- rep(0, n); v[idx] <- 1 / length(idx); v }
@@ -30,8 +33,8 @@ add <- function(...) rows[[length(rows) + 1]] <<- data.frame(..., stringsAsFacto
 
 for (i in seq_len(nrow(man))) {
   d <- man[i, ]
-  b <- read.csv(file.path(inp, paste0(d$stem, "__beta.csv")))$beta
-  S <- as.matrix(read.csv(file.path(inp, paste0(d$stem, "__sigma.csv")), header = FALSE))
+  b <- read.csv(inp(paste0(d$stem, "__beta.csv")))$beta
+  S <- as.matrix(read.csv(inp(paste0(d$stem, "__sigma.csv")), header = FALSE))
   nPre <- d$num_pre; nPost <- d$num_post
   targets <- list(first_post = basis(nPost, 1), avg_first5 = basis(nPost, seq_len(min(5, nPost))))
   for (tn in names(targets)) {
@@ -56,7 +59,7 @@ for (i in seq_len(nrow(man))) {
   cat(sprintf("done %s | %s\n", d$design, d$outcome))
 }
 res <- do.call(rbind, rows)
-write.csv(res, file.path(out, paste0(today, "_honestdid_results.csv")), row.names = FALSE)
+write.csv(res, file.path(tab, paste0(today, "_4b-honestdid_results.csv")), row.names = FALSE)
 
 # breakdown values: smallest M at which the interval contains zero
 bk <- do.call(rbind, lapply(split(res, list(res$design, res$outcome, res$target, res$restriction), drop = TRUE), function(x) {
@@ -67,5 +70,5 @@ bk <- do.call(rbind, lapply(split(res, list(res$design, res$outcome, res$target,
              breakdown_M = if (any(inc)) x$M[which(inc)[1]] else NA_real_,
              grid_max = max(x$M), zero_in_set_at_M0 = inc[1])
 }))
-write.csv(bk, file.path(out, paste0(today, "_honestdid_breakdown.csv")), row.names = FALSE)
-cat("\nwrote results and breakdown to", out, "\n")
+write.csv(bk, file.path(tab, paste0(today, "_4b-honestdid_breakdown.csv")), row.names = FALSE)
+cat("\nwrote results and breakdown to", tab, "\n")

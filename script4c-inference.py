@@ -10,15 +10,15 @@ Sections (select with --only; default runs both, `wild` first):
                                   within each outcome. Exploratory family F2 = all 28 reported A2 cells: Benjamini-Hochberg
                                   on the analytic p-values.
                                   Reads script4a's A2 grid (checked: this section reproduces it exactly).
-                                  Writes Data/output/tables/script4z/YYYY-MM-DD_{confirmatory_family,exploratory_family,
-                                  bootstrap_correlation}.csv       (--quick: script4z_quick, 499 draws)
+                                  Writes Data/output/tables/YYYY-MM-DD_4c-wild_{confirmatory_family,exploratory_family,
+                                  bootstrap_correlation}.csv       (--quick: tag 4c-wild-quick, 499 draws)
   permutation  run_permutation()  TWFE coefficient of the cohort designs (first expansion E2, first entry E3), all 7
                                   outcomes: first-treated years shuffled WITHIN each state, never-treated counties fixed;
                                   p = (1 + #{|null| >= |observed|}) / (1 + draws). Tests the sharp null of no effect.
-                                  Reads the `wild` section's confirmatory family (script4z folder, shown for reference) and
-                                  script4za's overall estimates (the observed coefficient is checked to 1e-6).
-                                  Writes Data/output/tables/script4ze/YYYY-MM-DD_{permutation_pvalues,null_draws}[_<design>].csv
-                                  (--quick: script4ze_quick, 49 draws, first outcome only)
+                                  Reads the `wild` section's confirmatory family (tag 4c-wild, shown for reference) and
+                                  script4d estimators' overall estimates (tag 4d-estimators) (the observed coefficient is checked to 1e-6).
+                                  Writes Data/output/tables/YYYY-MM-DD_4c-permutation_{permutation_pvalues,null_draws}[_<design>].csv
+                                  (--quick: tag 4c-permutation-quick, 49 draws, first outcome only)
 
 Run:     PYTHONHASHSEED=0 python3 script4c-inference.py [--only wild|permutation] [--quick] [--design expansion|entry]
          --design applies to `permutation` only (run the two designs as two processes in a full run).
@@ -39,6 +39,7 @@ import inference_tools as it
 from designs import load_designs, usable_sample
 from estimators import clean as _clean
 from functions import latest_file_glob
+from packages import out_file, out_glob, out_latest
 from script4_treatment import (
     load_panel, OUTCOMES, CORE_TREATMENTS, SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, tables_dir,
 )
@@ -76,8 +77,7 @@ def prepare(df, columns):
 def run_wild(quick):
     SEED, WEIGHTS = WILD_SEED, WILD_WEIGHTS
     REPS = 499 if quick else 9999
-    OUT = os.path.join(tables_dir, "script4z_quick" if quick else "script4z")
-    os.makedirs(OUT, exist_ok=True)
+    OUT, TAG = tables_dir, "4c-wild" + ("-quick" if quick else "")    # output-name tag (packages.py); was folder script4z
 
     print("=" * 78)
     print(f"script4z -- inference for the confirmatory family   reps={REPS}  weights={WEIGHTS}  seed={SEED}")
@@ -85,7 +85,7 @@ def run_wild(quick):
     df = load_panel()
     print(f"panel: {os.path.basename(df.attrs['panel_path'])}  {len(df):,} rows, {df.fips.nunique():,} counties")
 
-    grid = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_A1_A2_treatment_grid.csv"))
+    grid = pd.read_csv(out_latest(tables_dir, "4a-designs", "*_A1_A2_treatment_grid.csv"))
     a2 = grid[grid.registry == "A2"].set_index(["treatment_id", "outcome"])
 
     rows, boot_corr = [], []
@@ -130,14 +130,14 @@ def run_wild(quick):
     conf = pd.DataFrame(rows)
     conf["p_holm_over_8"] = it.holm(conf.p_wild.to_numpy())
     conf["family"] = "F1 confirmatory (D-42)"
-    conf.to_csv(os.path.join(OUT, f"{TODAY}_confirmatory_family.csv"), index=False)
-    pd.DataFrame(boot_corr).to_csv(os.path.join(OUT, f"{TODAY}_bootstrap_correlation.csv"), index=False)
+    conf.to_csv(out_file(tables_dir, TAG, f"{TODAY}_confirmatory_family.csv"), index=False)
+    pd.DataFrame(boot_corr).to_csv(out_file(tables_dir, TAG, f"{TODAY}_bootstrap_correlation.csv"), index=False)
 
     expl = grid[(grid.registry == "A2") & grid.treatment_id.isin(FAMILY_TREATMENTS)][
         ["treatment_id", "outcome", "beta", "se_state", "p_state", "N", "n_switchers"]].reset_index(drop=True)
     expl["p_bh_over_28"] = it.benjamini_hochberg(expl.p_state.to_numpy())
     expl["family"] = "F2 exploratory (all reported A2 cells)"
-    expl.to_csv(os.path.join(OUT, f"{TODAY}_exploratory_family.csv"), index=False)
+    expl.to_csv(out_file(tables_dir, TAG, f"{TODAY}_exploratory_family.csv"), index=False)
 
     pd.set_option("display.width", 200)
     show = ["outcome", "treatment_id", "beta", "p_state", "p_wild", "p_holm_over_8", "p_romano_wolf_within_outcome"]
@@ -145,7 +145,7 @@ def run_wild(quick):
     print(conf[show].round(4).to_string(index=False))
     print(f"\nF2 exploratory family ({len(expl)} cells): significant at 5%  unadjusted {int((expl.p_state < .05).sum())},"
           f"  Benjamini-Hochberg {int((expl.p_bh_over_28 < .05).sum())}")
-    print(f"\nwrote {OUT}/{TODAY}_*.csv")
+    print(f"\nwrote {OUT}/{TODAY}_{TAG}_*.csv")
 
 
 # =====================================================================================================================
@@ -162,8 +162,7 @@ def run_permutation(quick, only_design):
     ONLY_DESIGN = only_design
     DRAWS = 49 if quick else 2000
     SEED = PERM_SEED
-    OUT = os.path.join(tables_dir, "script4ze" + ("_quick" if quick else ""))
-    os.makedirs(OUT, exist_ok=True)
+    OUT, TAG = tables_dir, "4c-permutation" + ("-quick" if quick else "")    # was folder script4ze
 
     print("=" * 78)
     print(f"script4ze -- permutation inference   draws={DRAWS}  seed={SEED}  scheme: first-treated years shuffled within state")
@@ -172,9 +171,9 @@ def run_permutation(quick, only_design):
     if ONLY_DESIGN:
         DESIGNS = {k: v for k, v in DESIGNS.items() if k.startswith("first " + ONLY_DESIGN)}
     outcomes = dict(list(OUTCOMES.items())[:1]) if quick else OUTCOMES
-    tri = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4za"), "*_overall_estimates.csv"))
+    tri = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_overall_estimates.csv"))
     tri = tri[tri.estimator == "TWFE (static, reference)"].set_index(["design", "outcome"])
-    wild = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4z"), "*_confirmatory_family.csv"))
+    wild = pd.read_csv(out_latest(tables_dir, "4c-wild", "*_confirmatory_family.csv"))
     wild = wild[wild.treatment_id == "E2"].set_index("outcome")
 
     rows, draws_out = [], []
@@ -203,15 +202,15 @@ def run_permutation(quick, only_design):
                   f"{len(treated)} treated, {shuffleable} shufflable states", flush=True)
 
     tag = f"_{ONLY_DESIGN}" if ONLY_DESIGN else ""
-    pd.DataFrame(rows).to_csv(os.path.join(OUT, f"{TODAY}_permutation_pvalues{tag}.csv"), index=False)
-    pd.concat(draws_out).to_csv(os.path.join(OUT, f"{TODAY}_null_draws{tag}.csv"), index=False)
+    pd.DataFrame(rows).to_csv(out_file(tables_dir, TAG, f"{TODAY}_permutation_pvalues{tag}.csv"), index=False)
+    pd.concat(draws_out).to_csv(out_file(tables_dir, TAG, f"{TODAY}_null_draws{tag}.csv"), index=False)
     print(f"\n{len(rows)} cells written to {OUT}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--only", choices=SECTIONS, help="run one section (default: both, wild first)")
-    parser.add_argument("--quick", action="store_true", help="wild: 499 draws; permutation: 49 draws, first outcome; *_quick folders")
+    parser.add_argument("--quick", action="store_true", help="wild: 499 draws; permutation: 49 draws, first outcome; outputs tagged *-quick")
     parser.add_argument("--design", choices=("expansion", "entry"), help="permutation only: one design")
     args = parser.parse_args()
     if args.only in (None, "wild"):

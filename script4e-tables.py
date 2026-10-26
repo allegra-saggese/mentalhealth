@@ -8,10 +8,11 @@ Sections (run in this order; select with --only, e.g. --only tables appendix):
   appendix  one document with every table          (was script4p-full-appendix.py)
   frames    drop-in beamer frames, no verdicts     (was script4q-beamer-frames.py)
   slides    one .tex body per table frame of slides/deck.tex, newest result files (new 2026-10-26, D-56)
-Reads:    tables: newest CSVs of script4a and script4r
+Reads:    (result CSVs from Data/output/tables/ by section tag, packages.py: 4a-designs, 4a-fsis, 4b-controls, 4b-balance, ...)
+          tables: newest CSVs of script4a (4a-designs, 4a-fsis)
           appendix: LATEX_OUT/_BODY_balance.tex (script4d), _BODY_regressions.tex (section tables),
                     TABLE_covariates_EXCLUDED_{FOR_CAUSE, NO_PRETREND_TEST}.tex (no generating script, QA #21)
-          frames: newest CSVs of script4a and script4b, LATEX_OUT/*_balance_panel.csv (script4d)
+          frames: newest CSVs of script4a and script4b, tables/*_4b-balance_balance_panel.csv (script4b balance)
 Writes:   LATEX_OUT/slides/<section>__<frame>.tex (section slides);  LATEX_OUT/tables/*.tex, _BODY_regressions.tex (reported), _BODY_robustness.tex (cut specifications),
           REGRESSION_TABLES.tex/.pdf; FULL_RESULTS_APPENDIX.tex/.pdf; BEAMER_FRAMES.tex, BEAMER_FRAMES_robustness.tex
 Run:      PYTHONHASHSEED=0 python3 script4e-tables.py [--only tables|appendix|frames ...]
@@ -28,16 +29,20 @@ import numpy as np
 import pandas as pd
 
 from script4_treatment import db_data, os, date, LATEX_OUT, REPORT_TREATMENTS, REPORT_CS_ARM
+from packages import tables_dir, figs_dir, maps_dir, out_glob
 
-OUT = LATEX_OUT   # run 2 (2026-10-12)
+OUT = LATEX_OUT   # output/latex (packages.latex_dir); .tex names are fixed because LaTeX \input's them
 TAB = os.path.join(LATEX_OUT, "tables")
-T4A = os.path.join(db_data, "output", "tables", "script4a")
-T4B = os.path.join(db_data, "output", "tables", "script4b")
-T4R = os.path.join(db_data, "output", "tables", "script4r")
+# Inputs are found by the output-name tag of the section that wrote them (packages.py), in the flat tables/ folder.
+T4A = "4a-designs"                  # was folder tables/script4a (designs part)
+T4C = "4b-controls"                 # was folder tables/script4a (control diagnostics part)
+T4B = "4b-covariate-sequence"       # z-archive/script4b-covariate-sequence.py (09-23 run); was folder tables/script4b
+T4R = "4a-fsis"                     # was folder tables/script4r
 
 # =============================================================== shared helper
-def latest(d, pat):
-    f = sorted(glob.glob(os.path.join(d, pat)))
+def latest(tag, pat):
+    """Newest result file written under `tag` (packages.py naming) matching `pat`, or None."""
+    f = out_glob(tables_dir, tag, pat)
     return pd.read_csv(f[-1]) if f else None
 
 
@@ -960,7 +965,7 @@ NIBRS curated total & Arrests per 100{,}000 & NIBRS & 2000--21 & 309.94 & 271.38
             r"\textbf{553 specifications, maximum VIF 3.96, none above 10.}")))
 
     # =========================================================== BALANCE
-    bal = latest(OUT, "*_balance_panel.csv")
+    bal = latest("4b-balance", "*_balance_panel.csv")
     if bal is not None:
         for tid in [t for t in ["T1", "T2", "T3", "T4", "E2"] if t in REPORT_TREATMENTS]:
             v = bal[bal.treatment_id == tid]
@@ -1062,8 +1067,8 @@ def slide_fragments():
     from designs import load_designs, usable_sample, OUTCOME_WINDOWS
     from script4_treatment import OUTCOMES, COVARIATE_ORDER, load_panel
     pdate = panel_date()
-    stem = lambda d, pat: os.path.basename(sorted(glob.glob(os.path.join(d, pat)))[-1])[:10]
-    TZ, TZA = os.path.join(db_data, "output", "tables", "script4z"), os.path.join(db_data, "output", "tables", "script4za")
+    stem = lambda tag, pat: os.path.basename(out_glob(tables_dir, tag, pat)[-1])[:10]   # date of the newest input
+    TZ, TZA = "4c-wild", "4d-estimators"     # were folders tables/script4z, tables/script4za
     base_note = f"Panel {pdate}; county and year fixed effects, 8 pre-committed controls, standard errors clustered by state."
 
     # ---- treatment definitions
@@ -1073,7 +1078,7 @@ def slide_fragments():
               "between them; a blank census-year count is 0 (D-34, D-53). T2, the raw count, is estimated but not reported (D-32). " + base_note, size=r"\footnotesize")
 
     # ---- sampling frame table (estimation samples of the triangulation run)
-    s = pd.read_csv(sorted(glob.glob(os.path.join(TZA, "*_samples.csv")))[-1])
+    s = pd.read_csv(out_glob(tables_dir, TZA, "*_samples.csv")[-1])
     e2, e3 = s[s.design == "first expansion"].set_index("outcome"), s[s.design != "first expansion"].set_index("outcome")
     rows = [f"{OUT_NAME[o]} & {e2.loc[o, 'years']} & {int(e2.loc[o, 'counties']):,} ({int(e2.loc[o, 'treated_counties'])}) & "
             f"{int(e3.loc[o, 'counties']):,} ({int(e3.loc[o, 'treated_counties'])}) & {_esc(e2.loc[o, 'cohorts'])}" for o in OUTCOMES]
@@ -1096,7 +1101,7 @@ def slide_fragments():
               "Counties in the Poor MH Days estimation sample by the census wave of their treatment. Source: designs.usable_sample on the panel. " + base_note, size=r"\footnotesize")
 
     # ---- controls: the 24 candidates
-    cov = pd.read_csv(sorted(glob.glob(os.path.join(db_data, "output", "tables", "script1c", "*_control_coverage.csv")))[-1])
+    cov = pd.read_csv(out_glob(tables_dir, "1c", "*_control_coverage.csv")[-1])
     cov = cov.sort_values(["type", "fill_pct"], ascending=[True, False]).reset_index(drop=True)
     half = (len(cov) + 1) // 2
     blocks = []
@@ -1106,11 +1111,11 @@ def slide_fragments():
                             for v, t, p, sel in zip(ch.variable, ch.type, ch.fill_pct, ch.selected)]))
     _fragment("controls__possible", [r"\begin{tabular}{@{}ll@{}}" + blocks[0] + "&" + blocks[1] + r"\end{tabular}"],
               f"The 24 candidate controls; percent of observations filled over the rural panel county-years 2015-2020; Sel. = in the pre-committed set of eight. "
-              f"Source: script1c control coverage ({stem(os.path.join(db_data, 'output', 'tables', 'script1c'), '*_control_coverage.csv')}).", size=r"\tiny")
+              f"Source: script1c control coverage ({stem('1c', '*_control_coverage.csv')}).", size=r"\tiny")
 
     # ---- controls: the eight
-    pre = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_control_pretrends.csv")))[-1]).set_index("variable")
-    corr = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_control_correlations_selected8.csv")))[-1]).set_index("variable")
+    pre = pd.read_csv(out_glob(tables_dir, T4C, "*_control_pretrends.csv")[-1]).set_index("variable")
+    corr = pd.read_csv(out_glob(tables_dir, T4C, "*_control_correlations_selected8.csv")[-1]).set_index("variable")
     ctl = pd.concat([cov.set_index("variable").loc[ctrl, ["type", "fill_pct"]], pre.loc[ctrl, ["description", "n_pre_significant", "n_pre_coefs"]]], axis=1)
     left = _tab(r"@{}rlcr@{}", "\\# & Control & Type & \\% filled",
                 [f"{i + 1} & {_esc(ctl.loc[c, 'description'])} & {ctl.loc[c, 'type'].split(' ')[0]} & {ctl.loc[c, 'fill_pct']:.1f}" for i, c in enumerate(ctrl)])
@@ -1118,7 +1123,7 @@ def slide_fragments():
                  [f"{i + 1} & " + " & ".join(f"{corr.loc[c, d]:.2f}" for d in ctrl) for i, c in enumerate(ctrl)])
     _fragment("controls__selected8", [r"\begin{tabular}{@{}ll@{}}" + left + "&\\hspace{6pt}" + right + r"\end{tabular}"],
               "The eight pre-committed controls (D-16, D-31) and their within-county correlation matrix (numbers refer to the list). Source: script4b controls "
-              f"({stem(T4A, '*_control_correlations_selected8.csv')}), script1c coverage.", size=r"\tiny")
+              f"({stem(T4C, '*_control_correlations_selected8.csv')}), script1c coverage.", size=r"\tiny")
 
     # ---- outcomes and units
     df = load_panel()
@@ -1132,7 +1137,7 @@ def slide_fragments():
               "The NIBRS measures are arrests, not offences. Panel " + pdate + ".", size=r"\footnotesize")
 
     # ---- A2 TWFE results
-    g = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_A1_A2_treatment_grid.csv")))[-1])
+    g = pd.read_csv(out_glob(tables_dir, T4A, "*_A1_A2_treatment_grid.csv")[-1])
     g = g[(g.registry == "A2") & g.treatment_id.isin(["T1", "T3", "T4", "E2"])]
     cols = [g[(g.outcome == o)] for o in OUTCOMES]
     rows = []
@@ -1151,7 +1156,7 @@ def slide_fragments():
               f"({stem(T4A, '*_A1_A2_treatment_grid.csv')}). Panel {pdate}.")
 
     # ---- Callaway-Sant'Anna vs TWFE
-    h = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_HEADLINE_twfe_vs_cs.csv")))[-1])
+    h = pd.read_csv(out_glob(tables_dir, T4A, "*_HEADLINE_twfe_vs_cs.csv")[-1])
     from scipy.stats import norm
     hr = list(h.itertuples())
     twfe_p = {o: g[(g.outcome == o) & (g.treatment_id == "E2")].iloc[0].p_state for o in OUTCOMES}
@@ -1169,7 +1174,7 @@ def slide_fragments():
               f"({stem(T4A, '*_HEADLINE_twfe_vs_cs.csv')}). Panel {pdate}.", size=r"\footnotesize")
 
     # ---- inference
-    c = pd.read_csv(sorted(glob.glob(os.path.join(TZ, "*_confirmatory_family.csv")))[-1])
+    c = pd.read_csv(out_glob(tables_dir, TZ, "*_confirmatory_family.csv")[-1])
     rows = [f"{OUT_NAME[r.outcome]} & {r.treatment_id} & {_f(r.beta, 3)} & {_f(r.p_state, 3)} & {_f(r.p_wild, 3)} & {_f(r.p_romano_wolf_within_outcome, 3)} & {_f(r.p_holm_over_8, 3)}"
             for r in c.itertuples()]
     _fragment("results__inference", _tab(r"@{}llrrrrr@{}", "Outcome & Treatment & Coefficient & p (state-clustered) & p (wild bootstrap) & p (Romano-Wolf, within outcome) & p (Holm, all 8)", rows),
@@ -1177,7 +1182,7 @@ def slide_fragments():
               f"seed {int(c.seed.iloc[0])}. Source: script4c ({stem(TZ, '*_confirmatory_family.csv')}). " + base_note, size=r"\footnotesize")
 
     # ---- estimator agreement (D-45)
-    a = pd.read_csv(sorted(glob.glob(os.path.join(TZA, "*_agreement.csv")))[-1])
+    a = pd.read_csv(out_glob(tables_dir, TZA, "*_agreement.csv")[-1])
     rows = []
     for o in OUTCOMES:
         cells = []
@@ -1191,7 +1196,7 @@ def slide_fragments():
               f"(LP-DiD, Sun-Abraham, imputation, dCDH, stacked DiD). Source: script4d agreement file ({stem(TZA, '*_agreement.csv')}).", size=r"\footnotesize")
 
     # ---- HonestDiD
-    hb = pd.read_csv(sorted(glob.glob(os.path.join(db_data, "output", "tables", "script4w", "*_honestdid_breakdown.csv")))[-1])
+    hb = pd.read_csv(out_glob(tables_dir, "4b-honestdid", "*_honestdid_breakdown.csv")[-1])
     rows = []
     for dn in ("first expansion", "first entry"):
         for o in OUTCOMES:
@@ -1203,19 +1208,19 @@ def slide_fragments():
             rows.append(f"{'E2' if dn == 'first expansion' else 'E3'} & {OUT_NAME[o]} & " + " & ".join(cells))
     _fragment("robust__honestdid", _tab(r"@{}llrrrr@{}", r"Design & Outcome & \multicolumn{2}{c}{Relative magnitudes, $\bar M$} & \multicolumn{2}{c}{Smoothness, $M$}\\ & & first post & avg. of five & first post & avg. of five", rows),
               f"Smallest value of the sensitivity parameter at which the 95% confidence set includes zero (0 = zero is already in the set under exact parallel trends). Rambachan-Roth, "
-              f"R package HonestDiD; output of {stem(os.path.join(db_data, 'output', 'tables', 'script4w'), '*_honestdid_breakdown.csv')}; the R run was not repeated for the D-53 panel because the inputs are unchanged.",
+              f"R package HonestDiD; output of {stem('4b-honestdid', '*_honestdid_breakdown.csv')}; the R run was not repeated for the D-53 panel because the inputs are unchanged.",
               size=r"\tiny")
 
     # ---- control-set sensitivity
-    cs_ = pd.read_csv(sorted(glob.glob(os.path.join(db_data, "output", "tables", "script4y", "*_selection_table.csv")))[-1])
+    cs_ = pd.read_csv(out_glob(tables_dir, "4b-control-set", "*_selection_table.csv")[-1])
     rows = [f"{_esc(v.covariate.replace('_per100k', '').replace('_', ' '))} & {_yn(v.in_final_8)} & {v.coverage_pct:.1f} & {v.pretrend_verdict} & "
             f"{_f(v.added_alone_median_abs_pct_change, 1)} & {_f(v.dropped_from_8_median_abs_pct_change, 1)}" for v in cs_.itertuples()]
     _fragment("robust__control_sets", _tab(r"@{}lcrlrr@{}", r"Covariate & In 8 & \% filled & Pre-trend & Added alone & Dropped from 8", rows),
               "Median absolute percent change of the treatment coefficient across outcomes and treatments when the covariate is added alone, or dropped from the final eight. Source: script4b control sets "
-              f"({stem(os.path.join(db_data, 'output', 'tables', 'script4y'), '*_selection_table.csv')}). Panel {pdate}.", size=r"\scriptsize")
+              f"({stem('4b-control-set', '*_selection_table.csv')}). Panel {pdate}.", size=r"\scriptsize")
 
     # ---- dairy x FSIS
-    f4 = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_A4_fsis_interaction.csv")))[-1])
+    f4 = pd.read_csv(out_glob(tables_dir, T4A, "*_A4_fsis_interaction.csv")[-1])
     f4 = f4[f4.treatment_id.isin(["T1", "T3", "T4", "E2"])]
     rows = []
     for o in OUTCOMES:
@@ -1234,14 +1239,14 @@ def link_slide_assets():
     import re
     assets = os.path.join(SLIDE_OUT, "assets")
     os.makedirs(assets, exist_ok=True)
-    sources = [(os.path.join(db_data, "output", "figs", "slides"), (".pdf",)),
-               (os.path.join(db_data, "output", "maps", "script1d"), (".png",))]
+    # (folder, output-name tag, extensions): the slide figures of script4f and three maps of script1d
+    sources = [(figs_dir, "4f-slides", (".pdf",)), (maps_dir, "1d", (".png",))]
     wanted_maps = {"estimation_sample_by_design", "expansion_cohort_year", "entry_cohort_year"}
     newest = {}
-    for folder, exts in sources:
-        for f in sorted(glob.glob(os.path.join(folder, "*"))):
-            m = re.match(r"^\d{4}-\d{2}-\d{2}_(.+)(\.[a-z]+)$", os.path.basename(f))
-            if m and m.group(2) in exts and (folder.endswith("slides") or m.group(1) in wanted_maps):
+    for folder, tag, exts in sources:
+        for f in out_glob(folder, tag, "*"):
+            m = re.match(r"^\d{4}-\d{2}-\d{2}_" + re.escape(tag) + r"_(.+)(\.[a-z]+)$", os.path.basename(f))
+            if m and m.group(2) in exts and (tag == "4f-slides" or m.group(1) in wanted_maps):
                 newest[m.group(1) + m.group(2)] = f                 # sorted ascending: the newest date wins
     for name, target in newest.items():
         link = os.path.join(assets, name)

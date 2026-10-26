@@ -5,14 +5,14 @@ Sections (run in this order; `--only` selects one):
                         D'Haultfoeuille (dCDH, R package), stacked DiD on ONE complete-case sample per (design, outcome). Rule fixed before the run
                         (D-45): an estimator agrees with CS if its overall post-treatment ATT has the same sign and lies inside CS's 95% interval;
                         the Poor MH Days first-expansion result is called estimator-robust if at least 4 of the 5 agree. Reported either way.
-                        Writes Data/output/tables/script4za/YYYY-MM-DD_{overall_estimates,event_paths,agreement,samples,failures}.csv
+                        Writes Data/output/tables/YYYY-MM-DD_4d-estimators_{overall_estimates,event_paths,agreement,samples,failures}.csv
   treatment-by-model  = old script4zc. Every treatment (T1, T3, T4, E2 first expansion, E3 first entry) against every model (D-46): one tidy table
                         for the forest plots. New estimation: dCDH for T1, T3, T4, NOT normalized. Everything else is read: TWFE T1/T3/T4 from
                         script4a's A2 grid (re-fitted and checked to 1e-6), E2/E3 for all models from the `estimators` section's overall estimates.
-                        Writes Data/output/tables/script4zc/YYYY-MM-DD_{treatment_by_model,failures}.csv
+                        Writes Data/output/tables/YYYY-MM-DD_4d-treatment-by-model_{treatment_by_model,failures}.csv
 Run:    PYTHONHASHSEED=0 python3 script4d-triangulation.py [--only estimators|treatment-by-model] [--quick] [--outcome "Poor MH Days"] [--design expansion|entry]
-        `--outcome` and `--design` apply to `estimators` only (as in the old scripts); `--quick` writes to the *_quick folders.
-Order:  `treatment-by-model` needs script4a (A1_A2 grid) and the `estimators` section already run (it reads the newest script4za overall estimates).
+        `--outcome` and `--design` apply to `estimators` only (as in the old scripts); `--quick` tags outputs *-quick (naming: packages.py).
+Order:  `treatment-by-model` needs script4a (A1_A2 grid) and the `estimators` section already run (it reads the newest 4d-estimators overall estimates).
 Plan:   code-audit/plans/2026-10-22_PLAN_estimator-triangulation.md.  Adapters and stacked DiD: estimators.py; sample builder: designs.usable_sample.
 Needs:  Rscript with polars and DIDmultiplegtDYN. Runtime: about 20 minutes (`estimators`, 7 outcomes x 2 designs) + 30 minutes (`treatment-by-model`).
 """
@@ -29,6 +29,7 @@ import estimators as est
 from designs import load_designs, usable_sample
 from estimators import run_cs
 from functions import latest_file_glob
+from packages import out_file, out_glob, out_latest
 from script4_treatment import (
     load_panel, OUTCOMES, CORE_TREATMENTS, CORE_TREATMENT_LABELS, SPEC_EXTRA_REGRESSORS, COVARIATE_ORDER, tables_dir, os, date,
 )
@@ -64,11 +65,10 @@ LABEL = {"E2": "First expansion (E2)", "E3": "First entry (E3)", "T1": "Presence
          "T3": "Per 10,000 residents (T3)", "T4": "Log(1 + count) (T4)"}
 
 
-def output_dir(stem):
-    """Output folder of a section (`script4za`, `script4zc`; `_quick` variants), created on demand."""
-    out = os.path.join(tables_dir, stem + ("_quick" if QUICK else ""))
-    os.makedirs(out, exist_ok=True)
-    return out
+def section_tag(section):
+    """Output-name tag of a section (packages.py): 4d-estimators, 4d-treatment-by-model; "-quick" in --quick runs.
+    The two sections wrote to folders script4za and script4zc before 2026-10-26."""
+    return f"4d-{section}" + ("-quick" if QUICK else "")
 
 
 # =============================================================================================================================================
@@ -85,7 +85,7 @@ def cs_benchmark(d):
 
 
 def run_estimators():
-    OUT = output_dir("script4za")
+    OUT, TAG = tables_dir, section_tag("estimators")
     _df, DESIGNS, _poly, _counts = load_designs()
     if ONLY_DESIGN:
         DESIGNS = {k: v for k, v in DESIGNS.items() if k.startswith("first " + ONLY_DESIGN)}
@@ -157,12 +157,12 @@ def run_estimators():
 
     def save(rows, name):
         df_ = pd.concat(rows, ignore_index=True) if rows and isinstance(rows[0], pd.DataFrame) else pd.DataFrame(rows)
-        df_.to_csv(os.path.join(OUT, f"{TODAY}_{name}.csv"), index=False)
+        df_.to_csv(out_file(tables_dir, TAG, f"{TODAY}_{name}.csv"), index=False)
         return df_
 
     save(overall_rows, "overall_estimates"); save(event_rows, "event_paths"); save(agree_rows, "agreement")
     save(sample_rows, "samples"); save(fail_rows, "failures")
-    print(f"\nwrote {OUT}/{TODAY}_*.csv   (failures: {len(fail_rows)})")
+    print(f"\nwrote {OUT}/{TODAY}_{TAG}_*.csv   (failures: {len(fail_rows)})")
 
 
 # =============================================================================================================================================
@@ -184,10 +184,10 @@ def first_change(d):
 
 
 def run_treatment_by_model():
-    OUT = output_dir("script4zc")
-    grid = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_A1_A2_treatment_grid.csv"))
+    OUT, TAG = tables_dir, section_tag("treatment-by-model")
+    grid = pd.read_csv(out_latest(tables_dir, "4a-designs", "*_A1_A2_treatment_grid.csv"))
     a2 = grid[grid.registry == "A2"].set_index(["treatment_id", "outcome"])
-    tri = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4za"), "*_overall_estimates.csv"))
+    tri = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_overall_estimates.csv"))
     df = load_panel()
     outcomes = dict(list(OUTCOMES.items())[:1]) if QUICK else OUTCOMES
 
@@ -230,16 +230,16 @@ def run_treatment_by_model():
         rows.append(row(MODEL[r.estimator], tid, r.outcome, float(r.est), float(r.se), "script4za overall estimate"))
 
     res = pd.DataFrame(rows)
-    res.to_csv(os.path.join(OUT, f"{TODAY}_treatment_by_model.csv"), index=False)
-    pd.DataFrame(failures).to_csv(os.path.join(OUT, f"{TODAY}_failures.csv"), index=False)
-    print(f"\n{len(res)} rows ({len(failures)} dCDH failures) written to {OUT}/{TODAY}_treatment_by_model.csv")
+    res.to_csv(out_file(tables_dir, TAG, f"{TODAY}_treatment_by_model.csv"), index=False)
+    pd.DataFrame(failures).to_csv(out_file(tables_dir, TAG, f"{TODAY}_failures.csv"), index=False)
+    print(f"\n{len(res)} rows ({len(failures)} dCDH failures) written to {OUT}/{TODAY}_{TAG}_treatment_by_model.csv")
 
 
 
 def main():
     parser = argparse.ArgumentParser(description="Estimator triangulation and treatment-by-model table (D-45, D-46).")
     parser.add_argument("--only", choices=SECTIONS, help="run one section (default: both, in order)")
-    parser.add_argument("--quick", action="store_true", help="first outcome only, 20 bootstrap draws, *_quick output folders")
+    parser.add_argument("--quick", action="store_true", help="first outcome only, 20 bootstrap draws, outputs tagged *-quick")
     parser.add_argument("--outcome", action="append", help="`estimators` only: restrict to this outcome (repeatable)")
     parser.add_argument("--design", choices=["expansion", "entry"], help="`estimators` only: restrict to one design")
     args = parser.parse_args()

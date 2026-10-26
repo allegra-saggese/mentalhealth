@@ -26,7 +26,8 @@ CONTROLS = COVARIATE_ORDER[:8]
 XCOLS = [f"x{i + 1}" for i in range(len(CONTROLS))]
 COVERAGE = 0.90          # a year is in the window if at least 90% of the best-covered year's counties report the outcome
 TOLERANCE = 1e-6         # replication-protocol: estimates at a fixed seed
-OUT = Path(tables_dir) / "qa_cs_crosscheck"
+TAG = "qa-cs-crosscheck"     # output-name tag (packages.py): <date>_qa-cs-crosscheck_<stem>; was folder tables/qa_cs_crosscheck
+OUT = Path(tables_dir)
 OUT.mkdir(parents=True, exist_ok=True)
 TODAY = date.today().strftime("%Y-%m-%d")
 
@@ -62,7 +63,7 @@ def own_estimates(d):
 
 def run_external(extract, tag):
     """R `did` and the venv packages (csdid, moderndid) on the same file; returns (cells, overall) frames."""
-    paths = {k: OUT / f"{TODAY}_{tag}_{k}.csv" for k in ("r_cells", "r_overall", "py_cells", "py_overall")}
+    paths = {k: OUT / f"{TODAY}_{TAG}_{tag}_{k}.csv" for k in ("r_cells", "r_overall", "py_cells", "py_overall")}
     subprocess.run(["Rscript", str(ROOT / "R" / "cs_crosscheck.R"), str(extract),
                     str(paths["r_cells"]), str(paths["r_overall"])], check=True, capture_output=True)
     subprocess.run([str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "qa-scripts" / "qa_cs_crosscheck_py.py"),
@@ -78,7 +79,7 @@ all_cells, summary = [], []
 df = load_panel()
 for okey in CHECKED:
     d, years = balanced_extract(df, OUTCOMES[okey])
-    extract = OUT / f"{TODAY}_{okey.replace(' ', '_')}_extract.csv"
+    extract = OUT / f"{TODAY}_{TAG}_{okey.replace(' ', '_')}_extract.csv"
     d[["fips", "year", "g", "y"] + XCOLS].to_csv(extract, index=False)
     ours, ours_overall = own_estimates(d)
     ext_cells, ext_overall = run_external(extract, okey.replace(" ", "_"))
@@ -101,8 +102,8 @@ for okey in CHECKED:
             ["outcome", "package", "cohort", "year", "att_own", "att_pkg", "abs_diff"]])
 
 cells_out, summary_out = pd.concat(all_cells), pd.DataFrame(summary)
-cells_out.to_csv(OUT / f"{TODAY}_cells.csv", index=False)
-summary_out.to_csv(OUT / f"{TODAY}_summary.csv", index=False)
+cells_out.to_csv(OUT / f"{TODAY}_{TAG}_cells.csv", index=False)
+summary_out.to_csv(OUT / f"{TODAY}_{TAG}_summary.csv", index=False)
 pd.set_option("display.width", 220)
 print("\n" + summary_out.round(8).to_string(index=False))
-print(f"\nwrote {OUT}/{TODAY}_cells.csv and _summary.csv")
+print(f"\nwrote {OUT}/{TODAY}_{TAG}_cells.csv and _summary.csv")

@@ -4,10 +4,10 @@
 designs.py -- the treatment designs, county groups and outcome windows shared by stages 4 (4u-4x) and 1.
 
 load_designs()      panel + the two designs (first expansion; first entry with clean controls)
-add_baseline_polynomial   2002 characteristics x time polynomial columns (used by script4u)
+add_baseline_polynomial   2002 characteristics x time polynomial columns (used by script4a cohorts)
 county_groups()     enters / expands only / large dairy throughout / never large dairy
-species_treatments()  count and T1, T3, T4, E2 for one species and size scope (script4x)
-usable_sample()     estimation sample for one outcome and cohort design (script4za, script4ze; script1d sample map)
+species_treatments()  count and T1, T3, T4, E2 for one species and size scope (script4a species)
+usable_sample()     estimation sample for one outcome and cohort design (script4d estimators, script4c permutation; script1d sample map)
 OUTCOME_WINDOWS    years each outcome is drawn over in the descriptive figures and maps (script1c, script1d); not estimation
 
 Definitions are in METHODS.md section 1.
@@ -22,10 +22,10 @@ from script4_treatment import load_panel, CENSUS_YEARS, OUTCOMES
 
 BASE_YEAR = 2002
 # Years over which each outcome is drawn in the descriptive stage (script1c figures, script1d maps), keyed by the labels
-# of script4_treatment.OUTCOMES. Descriptive stage only: the stage-4 estimation samples stay data-defined (script4za
+# of script4_treatment.OUTCOMES. Descriptive stage only: the stage-4 estimation samples stay data-defined (script4d estimators
 # samples file), and A21 and any use of these windows in estimation are separate decisions. Windows confirmed by the
-# owner 2026-10-25: crime stops at 2020 although 2021 exists (the script4za samples run to 2021).
-CRIME_WINDOW = (2002, 2020)       # the four crime outcomes; change the end year here (script4za samples run to 2021)
+# owner 2026-10-25: crime stops at 2020 although 2021 exists (the script4d estimators samples run to 2021).
+CRIME_WINDOW = (2002, 2020)       # the four crime outcomes; change the end year here (script4d estimators samples run to 2021)
 DESPAIR_WINDOW = (2002, 2020)
 OUTCOME_WINDOWS = {
     "Poor MH Days": (2010, 2023),

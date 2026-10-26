@@ -67,11 +67,38 @@ Data/
 │
 ├── merged/           # Panel outputs from script0f
 │
-└── output/
-    ├── figs/         # Figures from script1* and script4* (one subfolder per script)
-    ├── maps/         # HTML + PNG maps from script1d
-    └── tables/       # CSV outputs from script1* and script4* (one subfolder per script)
+└── output/          # one folder, split only by kind of file; the producing script and section are in the file name
+    ├── tables/       # every CSV / TXT / MD result, flat
+    ├── figures/      # every PDF / PNG figure, flat
+    ├── maps/         # HTML + PNG maps (script1d), flat
+    ├── latex/        # .tex fragments, REGRESSION_TABLES, FULL_RESULTS_APPENDIX, BEAMER_FRAMES; slides/ holds the deck's
+    │                 #   fragments and slides/assets/ the undated links to the newest slide figures (repo slides/generated -> here)
+    ├── codebooks/    # <date>_VARIABLE_REGISTER.{xlsx,csv} from script1b --only register (every dated version kept)
+    ├── _archive/     # superseded dated copies, by cleanup date, with MANIFEST.csv files (original -> new path)
+    ├── _legacy/      # outputs of retired scripts (stage 2, pre-October stage 4, Sept-18 slide build); MANIFEST.csv
+    └── _baseline_pre_refactor_2026-10-22/   # frozen 10-22 refactor baseline, old folder layout; do not move
 ```
+
+**File names.** Every output is `YYYY-MM-DD_<tag>_<stem>.<ext>`, e.g. `tables/2026-10-25_4a-cohorts_static_twfe.csv` or
+`figures/2026-10-26_4f-slides_forest_species_dairy__main.pdf`. The tag names the script and section that wrote the file:
+
+| Tag | Written by | | Tag | Written by |
+|---|---|---|---|---|
+| `0f` | `script0f-generate-panel.py` (ratio flags QA) | | `4b-honestdid` | `R/honestdid.R` |
+| `1a` `1b` `1c` `1d` | `script1a`-`script1d` (all sections) | | `4b-honestdid-inputs` | `script4b --only honestdid` (undated) |
+| `4a-designs` `4a-cohorts` `4a-species` `4a-fsis` | `script4a-estimates.py --only <section>` | | `4c-wild` `4c-permutation` | `script4c-inference.py` |
+| `4b-controls` `4b-leads` `4b-pretrends` `4b-balance` `4b-control-set` | `script4b-diagnostics.py` | | `4d-estimators` `4d-treatment-by-model` | `script4d-triangulation.py` |
+| `4f-triangulation` `4f-treatment-by-model` `4f-permutation` `4f-pretrends` `4f-slides` | `script4f-figures.py` | | `qa-cs-crosscheck` | `qa-scripts/qa_cs_crosscheck.py` |
+
+`--quick` runs add `-quick` to the tag (`4a-cohorts-quick`), so smoke-run files never mix with full runs. `4b-covariate-sequence` is the 09-23
+output of the archived `z-archive/script4b-covariate-sequence.py`. The rule lives in `packages.py` only: scripts build paths with
+`out_file(folder, tag, name)` and find inputs with `out_latest(folder, tag, pattern)` / `out_glob(...)`; the files in `latex/` keep fixed
+names because LaTeX `\input`s them. The 2026-10-26 move from per-script folders to this layout is recorded file by file in
+`_archive/2026-10-26_layout-migration_MANIFEST.csv`.
+
+**Archiving convention.** Nothing in `Data/output/` is deleted. When a newer dated copy of an output exists, the older copy moves to
+`_archive/<YYYY-MM-DD>_cleanup/` (first done 2026-10-26: 524 files); `out_latest()` always finds the newest copy, which stays in place.
+Outputs of a retired script move to `_legacy/`. `*-quick` files can be moved to `_archive/` after a smoke run.
 
 ---
 
@@ -96,12 +123,12 @@ Each script reads from `Data/raw/` and writes panel-ready CSVs to `Data/clean/`.
 
 | Script | Purpose | Output location |
 |--------|---------|-----------------|
-| `script1a-panel-qa.py` | Checks that can fail: key integrity and source duplication, variable inventory and coverage, CDC crude-rate sense check, correlation tables and FSIS column QA, missingness, county coverage check against the rural key, CAFO crosscheck, QA memo. `--only <section>` | `Data/output/tables/script1a/`, `Data/output/figs/script1a/` |
-| `script1b-tables.py` | Numeric tables: summary statistics, CAFO concentration (HHI, Gini, entry/exit), CAFO and FSIS size-bin summaries, species overlap, the master variable register (xlsx + csv codebook) | `Data/output/tables/script1b/`, `Data/output/codebooks/` |
-| `script1c-figures.py` | All non-map graphics: binned scatters, correlations, distributions, CAFO composition and top counties, threshold and presence, ridgelines, trend sweeps, state trends and dots, species overlap, raw trends and event-time paths, and the fill-rate bar chart of the 24 candidate controls (`control-coverage`, with a `.txt` table). Figures use `figstyle.py` (183 mm, 600 dpi PNG + vector PDF). Each outcome is drawn over its own window (`designs.OUTCOME_WINDOWS`: Poor MH Days 2010–2023, Frequent Mental Distress 2016–2023, deaths of despair and crime 2002–2020; descriptive stage only) | `Data/output/figs/script1c/`, `Data/output/tables/script1c/` |
-| `script1d-maps.py` | All maps (Plotly, HTML + PNG): FSIS density, outcome values, first differences, CAFO by animal and size, and one family per treatment (entry per wave, first-expansion cohort, large operations, species, the Poor MH Days estimation sample, sample coverage, FSIS entry, change between census waves) | `Data/output/maps/script1d/` |
+| `script1a-panel-qa.py` | Checks that can fail: key integrity and source duplication, variable inventory and coverage, CDC crude-rate sense check, correlation tables and FSIS column QA, missingness, county coverage check against the rural key, CAFO crosscheck, QA memo. `--only <section>` | `Data/output/tables/`, `Data/output/figures/` (tag `1a`) |
+| `script1b-tables.py` | Numeric tables: summary statistics, CAFO concentration (HHI, Gini, entry/exit), CAFO and FSIS size-bin summaries, species overlap, the master variable register (xlsx + csv codebook: role, control-set and reported-treatment flags, decision ids, coverage, source) | `Data/output/tables/` (tag `1b`), `Data/output/codebooks/` |
+| `script1c-figures.py` | All non-map graphics: binned scatters, correlations, distributions, CAFO composition and top counties, threshold and presence, ridgelines, trend sweeps, state trends and dots, species overlap, raw trends and event-time paths, and the fill-rate bar chart of the 24 candidate controls (`control-coverage`, with a `.txt` table). Figures use `figstyle.py` (183 mm, 600 dpi PNG + vector PDF). Each outcome is drawn over its own window (`designs.OUTCOME_WINDOWS`: Poor MH Days 2010–2023, Frequent Mental Distress 2016–2023, deaths of despair and crime 2002–2020; descriptive stage only) | `Data/output/figures/`, `Data/output/tables/` (tag `1c`) |
+| `script1d-maps.py` | All maps (Plotly, HTML + PNG): FSIS density, outcome values, first differences, CAFO by animal and size, and one family per treatment (entry per wave, first-expansion cohort, large operations, species, the Poor MH Days estimation sample, sample coverage, FSIS entry, change between census waves) | `Data/output/maps/` (tag `1d`) |
 
-The Hispanic-share and health explorer (`script2e-hispanic-chr-explorer.py`) is archived in `z-archive/`. Old stage-2 outputs stay in their original folders under `Data/output/`; D-49 records the consolidation.
+The Hispanic-share and health explorer (`script2e-hispanic-chr-explorer.py`) is archived in `z-archive/`. Old stage-2 outputs are in `Data/output/_legacy/` (moved 2026-10-26); D-49 records the consolidation.
 
 ### Stage 3 — Pilot (moved)
 The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test (`script4-model-test.py`) now live in `first-stage-testing/` as `firststage_*.py`. They were the first phase of development, are not part of the pipeline, and are not used for any reported result. ML variable selection remains specified-only (B-series in `code-audit/plans/2026-09-27_MODEL-NAMING.md`).
@@ -117,8 +144,8 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 | `script4b-diagnostics.py` | Sections `controls` (coverage, causal role and pre-trends of each control; also the lag-level pre-trend coefficients, the correlation among the 8 selected controls and plain-text `.txt` versions of the VIF and control tables), `leads` (outcome pre-trends for T1, T3, T4, E2 and first entry), `pretrends` (raw pre-period paths and straight-line fits for outcomes and controls), `balance` (balance and detectable-effect tables), `control-set` (**how the control set was chosen**: add-one-in, each alone, take-one-out; documents the pre-committed set, does not choose it) and `honestdid` (writes the inputs of the Rambachan–Roth sensitivity analysis; then `Rscript R/honestdid.R`) |
 | `script4c-inference.py` | Sections `wild` (wild cluster bootstrap, Holm, Romano–Wolf within outcome, Benjamini–Hochberg; D-42, D-43) and `permutation` (within-state cohort permutation test; D-47; flags `--design`, `--quick`) |
 | `script4d-triangulation.py` | Sections `estimators` (is the Callaway–Sant'Anna result specific to it? LP-DiD, Sun–Abraham, imputation, dCDH, stacked DiD; D-45; needs R `DIDmultiplegtDYN`) and `treatment-by-model` (every treatment against every model; D-46) |
-| `script4e-tables.py` | Sections `tables` (LaTeX regression tables, no estimation), `appendix` (combined appendix; needs `balance` and `tables` first), `frames` (Beamer drop-in frames) and `slides` (the table fragments of `slides/deck.tex`, plus undated links to the slide figures, in `latex-outputs-run2/slides/`) |
-| `script4f-figures.py` | Sections `slides` and `slides-other` (all 15 forest plots, event studies, leads, raw paths, control pre-trends and coverage and the permutation figure redrawn at slide size, 145 x 70 mm, 8 pt; main panels are the three mental-health and mortality outcomes, backup panels the crime outcomes; `Data/output/figs/slides/`), and sections `triangulation`, `treatment-by-model` and `permutation`: forest and null-distribution figures read from the result files (the species forest plots are drawn in `script4a-estimates.py --only species`); and the pre-trend figures with dotted straight-line fits, `pretrends-leads` (five treatment formats), `pretrends-controls` (the 8 selected controls on an x-y axis), `pretrends-raw` and `pretrends-controls-raw` (raw paths, treated against never-treated counties), written to `Data/output/figs/script4f/` |
+| `script4e-tables.py` | Sections `tables` (LaTeX regression tables, no estimation), `appendix` (combined appendix; needs `balance` and `tables` first), `frames` (Beamer drop-in frames) and `slides` (the table fragments of `slides/deck.tex`, plus undated links to the slide figures, in `latex/slides/`) |
+| `script4f-figures.py` | Sections `slides` and `slides-other` (all 15 forest plots, event studies, leads, raw paths, control pre-trends and coverage and the permutation figure redrawn at slide size, 145 x 70 mm, 8 pt; main panels are the three mental-health and mortality outcomes, backup panels the crime outcomes; `Data/output/figures/` (tag `4f-slides`)), and sections `triangulation`, `treatment-by-model` and `permutation`: forest and null-distribution figures read from the result files (the species forest plots are drawn in `script4a-estimates.py --only species`); and the pre-trend figures with dotted straight-line fits, `pretrends-leads` (five treatment formats), `pretrends-controls` (the 8 selected controls on an x-y axis), `pretrends-raw` and `pretrends-controls-raw` (raw paths, treated against never-treated counties), written to `Data/output/figures/` (tag `4f-pretrends`) |
 | `z-archive/script4b-…`, `z-archive/script4c-…` | Earlier run of adding controls in a fixed order and its summary; superseded by the `control-set` section, kept unchanged as the record of the 09-23 run |
 | `estimators.py` | Shared estimator code (DiD helpers, Callaway–Sant'Anna, LP-DiD, stacked, imputation, saturated, dCDH); formerly `did_tools.py` and `did_cs.py` |
 
@@ -128,7 +155,7 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 
 ## Running the reported results
 
-After the panel exists in `Data/merged/` (stages 0–1), the reported results are produced in this order. Each script writes dated files to `Data/output/`; the exhibit scripts read the newest file, so run in order and archive old outputs first (see `code-audit/plans/2026-10-17_MODEL-RUN-STATE.md`).
+After the panel exists in `Data/merged/` (stages 0–1), the reported results are produced in this order. Each script writes dated files to `Data/output/`; the exhibit scripts read the newest file, so run in order and archive old outputs first (convention under the Dropbox data tree above; run state in `code-audit/plans/2026-10-17_MODEL-RUN-STATE.md`).
 
 **Set `PYTHONHASHSEED=0` before running.** `pyfixest`'s results depend on Python's per-process string-hash seed: the same script run twice can differ by about 2e-5 in the standard errors (coefficients by about 1e-8) depending on the seed. Nothing material changes, but unseeded runs are not byte-for-byte reproducible. `environment.yml` sets it automatically for the conda environment; otherwise export it.
 
@@ -145,7 +172,7 @@ python3 script4f-figures.py --only slides slides-other && python3 script4e-table
 (cd slides && latexmk -xelatex deck.tex)                             # the deck (Gotham theme needs XeLaTeX; `slides/generated` is a link to the Dropbox folder)
 ```
 
-Each script takes `--only <section> ...` and keeps the flags of the script it replaced (`--quick`, `--no-cs`, `--plot-only`, `--design`, `--outcome`). Output folders keep the names of the scripts they came from (`script4a/`, `script4u/`, `script4x/`, `script4r/`, `script4t/`, `script4y/`, `script4z/`, `script4ze/`, `script4za/`, `script4zc/`, ...), because other sections read them by folder and file stem; the old-to-new name map is in `code-audit/plans/2026-10-26_SCRIPT-NAME-MAP.md`.
+Each script takes `--only <section> ...` and keeps the flags of the script it replaced (`--quick`, `--no-cs`, `--plot-only`, `--design`, `--outcome`). Outputs carry the tag of the script and section that wrote them (table above); the old-script-to-section map, with the folder each section used before 2026-10-26, is in `code-audit/plans/2026-10-26_SCRIPT-NAME-MAP.md`.
 
 The `cohorts` and `species` sections check themselves: for the first-expansion / dairy-large case they must reproduce the `designs` TWFE and CS estimates exactly (they assert or print the difference).
 
@@ -197,7 +224,7 @@ CDC suppresses crude rates when deaths < 10 per cell. This causes ~85–93% miss
 
 ### CHR Variable Handling
 - Rate-only CHR variables get back-calculated `*_count_imputed` columns using census population
-- Variables with num/denom pairs are ratio-checked; flags archived to `output/tables/*_ratio_flags_qa.csv` then dropped from the panel
+- Variables with num/denom pairs are ratio-checked; flags archived to `output/tables/*_0f_ratio_flags_qa.csv` then dropped from the panel
 - All CHR variables converted to per-100,000 scale where applicable; redundant raw_value columns dropped
 
 ### Analytical Panel Window

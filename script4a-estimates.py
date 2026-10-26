@@ -8,8 +8,8 @@ script4a-estimates.py -- every design-based estimate of the reported set, in fou
   species   (was script4x-species-forest.py)    per-species TWFE and Callaway-Sant'Anna estimates and forest plots (about 25 minutes)
   fsis      (was script4r-fsis-treatment.py)    slaughterhouses (FSIS plants) as the treatment
 
-Each section's code is the old script's code, moved unchanged; each writes the same files to the same folders as before
-(tables/script4a, script4u, script4x, script4r), because other scripts read them by folder and stem.
+Each section's code is the old script's code, moved unchanged. Outputs go to the flat Data/output/tables/ and figures/ folders,
+named <date>_<tag>_<stem> with tag 4a-designs, 4a-cohorts, 4a-species, 4a-fsis ("-quick" in --quick runs; naming: packages.py).
 Run:     PYTHONHASHSEED=0 python3 script4a-estimates.py [--only designs cohorts species fsis]
          flags passed through to the sections: --quick (cohorts, species), --no-cs (cohorts), --plot-only (species), --legacy-grid (designs)
 Order:   designs first (cohorts and species check themselves against its output); the default run does all four in that order.
@@ -30,6 +30,7 @@ from scipy.stats import norm as _norm
 from estimators import run_cs, clean
 from designs import species_treatments
 from script4_treatment import load_panel, OUTCOMES, COVARIATE_ORDER, figs_dir, tables_dir, os, date
+from packages import out_file, out_glob, out_latest, tagged
 
 # ---------------------------------------------------------------------------------------------------------------------
 # section `species` (was script4x-species-forest.py): constants and process-pool workers stay at module level, because
@@ -43,8 +44,8 @@ SPECIES = ["dairy"] if QUICK else ["dairy", "beef", "hogs", "chickens"]
 SCOPES = {"large": ["large"], "all sizes": ["small", "medium", "large"]}
 OUTCOME_LIST = dict(list(OUTCOMES.items())[:2]) if QUICK else OUTCOMES
 CONTROLS = COVARIATE_ORDER[:8]
-OUT_T = os.path.join(tables_dir, "script4x" + ("_quick" if QUICK else "")); os.makedirs(OUT_T, exist_ok=True)
-OUT_F = os.path.join(figs_dir, "script4x" + ("_quick" if QUICK else "")); os.makedirs(OUT_F, exist_ok=True)
+TAG_SP = "4a-species" + ("-quick" if QUICK else "")    # output-name tag (packages.py); was folder script4x
+OUT_T, OUT_F = tables_dir, figs_dir
 TODAY = date.today().strftime("%Y-%m-%d")
 ESTS = [("T1", "T1  presence (0/1)"), ("T3", "T3  per 10,000 residents"), ("T4", "T4  log(1 + count)"),
         ("E2", "E2  first expansion (0/1)"), ("CS", "CS  Callaway-Sant'Anna")]
@@ -134,7 +135,7 @@ def plot_species(res, sd, species):
     handles = [plt.Line2D([0], [0], marker=marks[e], color=colors[e], linestyle="none", markersize=7) for e, _ in ESTS]
     fig.legend(handles, [lab for _, lab in ESTS], loc="lower center", ncol=5, frameon=False, fontsize=8.5)
     fig.tight_layout(rect=(0, 0.035, 1, 0.955))
-    fig.savefig(os.path.join(OUT_F, f"{TODAY}_forest_{species}.png"), dpi=140, facecolor="#fcfcfb"); plt.close(fig)
+    fig.savefig(out_file(figs_dir, TAG_SP, f"{TODAY}_forest_{species}.png"), dpi=140, facecolor="#fcfcfb"); plt.close(fig)
 
 
 def section_species():
@@ -146,14 +147,14 @@ def section_species():
 
     Species: dairy, beef, hogs, chickens. Scope: large operations, and all sizes. Estimates: T1, T3, T4, E2 (TWFE) and CS-adjusted, for 7 outcomes.
     Reads:   panel via script4_treatment.load_panel()
-    Writes:  Data/output/tables/script4x/<date>_species_results.csv and figs/script4x/<date>_forest_<species>.png
+    Writes:  Data/output/tables/<date>_4a-species_species_results.csv and figures/<date>_4a-species_forest_<species>.png
     Run:     python3 script4x-species-forest.py     (about 25 minutes; --plot-only redraws the figures; --quick is a test run)
     Method:  METHODS.md sections 1, 2 and 5. Dairy / large is checked against script4a. Plot x-axis = coefficient / outcome within-county SD.
     """
     if PLOT_ONLY:
         import glob
-        res = pd.read_csv(sorted(glob.glob(os.path.join(OUT_T, "*_species_results.csv")))[-1])
-        sdf = pd.read_csv(sorted(glob.glob(os.path.join(OUT_T, "*_outcome_within_sd.csv")))[-1], index_col=0).iloc[:, 0]
+        res = pd.read_csv(out_glob(tables_dir, TAG_SP, "*_species_results.csv")[-1])
+        sdf = pd.read_csv(out_glob(tables_dir, TAG_SP, "*_outcome_within_sd.csv")[-1], index_col=0).iloc[:, 0]
         for sp in SPECIES:
             plot_species(res, sdf.to_dict(), sp)
         print("redrew figures for", SPECIES, "->", OUT_F)
@@ -169,12 +170,12 @@ def section_species():
                     checks = check
                 print(f"done: {species} / {scope}  ({len(rows)} estimates)", flush=True)
         res = pd.DataFrame(allrows)
-        res.to_csv(os.path.join(OUT_T, f"{TODAY}_species_results.csv"), index=False)
+        res.to_csv(out_file(tables_dir, TAG_SP, f"{TODAY}_species_results.csv"), index=False)
 
         # within-county SD of each outcome (for the common x-axis)
         df = load_panel()
         sd = {o: float((df[c] - df.groupby("fips")[c].transform("mean")).std()) for o, c in OUTCOME_LIST.items()}
-        pd.Series(sd).rename("within_county_sd").to_csv(os.path.join(OUT_T, f"{TODAY}_outcome_within_sd.csv"))
+        pd.Series(sd).rename("within_county_sd").to_csv(out_file(tables_dir, TAG_SP, f"{TODAY}_outcome_within_sd.csv"))
         for sp in SPECIES:
             plot_species(res, sd, sp)
 
@@ -182,8 +183,8 @@ def section_species():
         print("\nVALIDATION  dairy / large")
         print("  treatment variables vs script4_treatment (max abs diff):", {k: float(f"{v:.2e}") if isinstance(v, float) else v for k, v in checks.items()})
         import glob
-        g = sorted(glob.glob(os.path.join(tables_dir, "script4a", "*_A1_A2_treatment_grid.csv")))
-        cs = sorted(glob.glob(os.path.join(tables_dir, "script4a", "*_A6_cs_aggregated.csv")))
+        g = out_glob(tables_dir, "4a-designs", "*_A1_A2_treatment_grid.csv")
+        cs = out_glob(tables_dir, "4a-designs", "*_A6_cs_aggregated.csv")
         if g:
             grid = pd.read_csv(g[-1]); grid = grid[grid.registry == "A2"]
             for est, tid in [("T1", "T1"), ("T3", "T3"), ("T4", "T4"), ("E2", "E2")]:
@@ -210,8 +211,8 @@ def section_designs():
     script4a-design-estimates.py -- main design-based estimates: TWFE (A2), dairy x FSIS (A4), event study (A5), Callaway-Sant'Anna (A6).
 
     Reads:   panel via script4_treatment.load_panel(); Data/merged/*_panel_fsis.csv (A4 only)
-    Writes:  Data/output/tables/script4a/<date>_{A1_A2_treatment_grid, A4_fsis_interaction, A5_event_study, A6_cs_att_gt,
-             A6_cs_aggregated, HEADLINE_twfe_vs_cs, VIF_audit}.csv and figs/script4a/*.png
+    Writes:  Data/output/tables/<date>_4a-designs_{A1_A2_treatment_grid, A4_fsis_interaction, A5_event_study, A6_cs_att_gt,
+             A6_cs_aggregated, HEADLINE_twfe_vs_cs, VIF_audit}.csv and figures/<date>_4a-designs_*.png
     Run:     python3 script4a-design-estimates.py     (about 7 minutes; 300 bootstrap draws)
     Method:  METHODS.md sections 1-2; state-clustered SEs; CS functions come from estimators.py.
     Notes:   A1 (pooled state FE) and A7 (LP-DiD) are computed but not reported (D-32).
@@ -232,10 +233,7 @@ def section_designs():
     from functions import latest_file_glob
     from estimators import lpdid, conley_se, load_centroids, att_gt_table, base_period_covariates, clean as _clean
 
-    OUT_FIGS   = os.path.join(figs_dir,   "script4a")
-    OUT_TABLES = os.path.join(tables_dir, "script4a")
-    for _d in (OUT_FIGS, OUT_TABLES):
-        os.makedirs(_d, exist_ok=True)
+    OUT_FIGS, OUT_TABLES = figs_dir, tables_dir    # output-name tag "4a-designs" (packages.py); was folder script4a
     TODAY = date.today().strftime("%Y-%m-%d")
 
     # D-16 / D-29: the step-8 set is the ONLY control set run. CONTROL_PRETREAT was
@@ -406,7 +404,7 @@ def section_designs():
         print(f"  {tid} done")
 
     grid = pd.DataFrame(grid_rows)
-    gpath = os.path.join(OUT_TABLES, f"{TODAY}_A1_A2_treatment_grid.csv")
+    gpath = out_file(tables_dir, "4a-designs", f"{TODAY}_A1_A2_treatment_grid.csv")
     grid.to_csv(gpath, index=False)
     print(f"\nSaved: {gpath}   ({len(grid):,} rows)")
 
@@ -507,7 +505,7 @@ def section_designs():
 
     fs = pd.DataFrame(fsis_rows)
     if len(fs):
-        fs.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A4_fsis_interaction.csv"), index=False)
+        fs.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A4_fsis_interaction.csv"), index=False)
         ok = fs[fs.identified]
         print(f"\n  REPORTABLE ({len(ok)} of {len(fs)} specs -- the rest have 0 switchers):")
         if len(ok):
@@ -609,7 +607,7 @@ def section_designs():
     es_rows += rows
 
     es = pd.DataFrame(es_rows)
-    es.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A5_event_study.csv"), index=False)
+    es.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A5_event_study.csv"), index=False)
 
 
     # =============================================================================
@@ -761,8 +759,8 @@ def section_designs():
 
     cs   = pd.DataFrame(cs_rows)
     csag = pd.DataFrame(csagg_rows)
-    cs.to_csv(os.path.join(OUT_TABLES,   f"{TODAY}_A6_cs_att_gt.csv"), index=False)
-    csag.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A6_cs_aggregated.csv"), index=False)
+    cs.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A6_cs_att_gt.csv"), index=False)
+    csag.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A6_cs_aggregated.csv"), index=False)
 
 
     # =============================================================================
@@ -791,7 +789,7 @@ def section_designs():
             print(f"  {okey:26s} {arm:14s} pre sig={int((pre.p < .05).sum())}/{len(pre)}  "
                   f"h=0: {r.loc[r.h == 0, 'beta'].squeeze() if (r.h == 0).any() else float('nan'):+.4f}")
     lp_df = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
-    lp_df.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_A7_lpdid.csv"), index=False)
+    lp_df.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A7_lpdid.csv"), index=False)
 
 
     # =============================================================================
@@ -834,7 +832,7 @@ def section_designs():
                 conley_rows.append(rec)
             print(f"  {tid} done")
         pd.DataFrame(conley_rows).to_csv(
-            os.path.join(OUT_TABLES, f"{TODAY}_A2_conley_se.csv"), index=False)
+            out_file(tables_dir, "4a-designs", f"{TODAY}_A2_conley_se.csv"), index=False)
 
 
     # =============================================================================
@@ -892,7 +890,7 @@ def section_designs():
             "n_switchers_TWFE": a2.n_switchers, "n_treated_CS": a6.n_treated,
         })
     cmp = pd.DataFrame(cmp_rows)
-    cmp.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_HEADLINE_twfe_vs_cs.csv"), index=False)
+    cmp.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_HEADLINE_twfe_vs_cs.csv"), index=False)
     if len(cmp):
         print(cmp[["outcome", "TWFE_beta", "TWFE_se", "TWFE_sig",
                    "CS_ATT", "CS_se", "CS_sig", "verdict"]].to_string(index=False))
@@ -915,7 +913,7 @@ def section_designs():
     # So each row below is the VIF of the ACTUAL design matrix that produced the
     # corresponding coefficient, within-transformed wherever the model uses county FE.
     va = pd.DataFrame(VIF_AUDIT)
-    va.to_csv(os.path.join(OUT_TABLES, f"{TODAY}_VIF_audit.csv"), index=False)
+    va.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_VIF_audit.csv"), index=False)
     print("\n" + "=" * 78)
     print("VIF AUDIT -- per model, on the actual design matrix")
     print("=" * 78)
@@ -964,7 +962,7 @@ def section_designs():
         fig.suptitle("A2 within-county, step-8 pre-committed controls (95% CI, state-clustered)",
                      fontsize=10)
         fig.tight_layout()
-        f1 = os.path.join(OUT_FIGS, f"{TODAY}_F1_A2_treatment_grid.png")
+        f1 = out_file(figs_dir, "4a-designs", f"{TODAY}_F1_A2_treatment_grid.png")
         fig.savefig(f1, bbox_inches="tight"); plt.close(fig)
         print("\nSaved:", f1)
 
@@ -983,7 +981,7 @@ def section_designs():
             ax.axis("off")
         fig.suptitle("A5 TWFE event study (95% CI, state-clustered; ref = -1)", fontsize=10)
         fig.tight_layout()
-        f2 = os.path.join(OUT_FIGS, f"{TODAY}_F2_A5_event_study.png")
+        f2 = out_file(figs_dir, "4a-designs", f"{TODAY}_F2_A5_event_study.png")
         fig.savefig(f2, bbox_inches="tight"); plt.close(fig)
         print("Saved:", f2)
 
@@ -1005,7 +1003,7 @@ def section_designs():
             fig.suptitle("A6 Callaway-Sant'Anna ATT by event time (cohort-size weighted)",
                          fontsize=10)
             fig.tight_layout()
-            f3 = os.path.join(OUT_FIGS, f"{TODAY}_F3_A6_cs_event_time.png")
+            f3 = out_file(figs_dir, "4a-designs", f"{TODAY}_F3_A6_cs_event_time.png")
             fig.savefig(f3, bbox_inches="tight"); plt.close(fig)
             print("Saved:", f3)
 
@@ -1026,7 +1024,7 @@ def section_cohorts():
     Designs: first expansion (all rural counties); first entry (entry counties plus never-large counties as controls; D-32).
     Adjustments: county trends, state x year FE, baseline characteristics x time polynomial, past outcomes in CS.
     Reads:   panel via designs.load_designs()
-    Writes:  Data/output/tables/script4u/<date>_{static_twfe, event_study, event_study_leads_joint, cs_att_gt, cs_aggregated, validation_vs_script4a}.csv
+    Writes:  Data/output/tables/<date>_4a-cohorts_{static_twfe, event_study, event_study_leads_joint, cs_att_gt, cs_aggregated, validation_vs_script4a}.csv
     Run:     python3 script4u-did-by-treatment.py   (about 30 minutes; --no-cs skips CS; --quick is a test run)
     Method:  METHODS.md sections 2-3. The first-expansion baseline is checked against script4a; the CS code is in estimators.py.
     """
@@ -1046,7 +1044,7 @@ def section_cohorts():
     QUICK = "--quick" in sys.argv
     NO_CS = "--no-cs" in sys.argv
     N_BOOT = 20 if QUICK else 300
-    OUT = os.path.join(tables_dir, "script4u" + ("_quick" if QUICK else "")); os.makedirs(OUT, exist_ok=True)
+    OUT, TAG = tables_dir, "4a-cohorts" + ("-quick" if QUICK else "")    # was folder script4u
     TODAY = date.today().strftime("%Y-%m-%d")
     CONTROLS = COVARIATE_ORDER[:8]
     CLIP = 8
@@ -1146,13 +1144,12 @@ def section_cohorts():
         gt_df = pd.concat(gt_all, ignore_index=True); agg_df = pd.concat(agg_all, ignore_index=True)
         outputs += [("cs_att_gt", gt_df), ("cs_aggregated", agg_df)]
     for name, x in outputs:
-        x.to_csv(os.path.join(OUT, f"{TODAY}_{name}.csv"), index=False)
+        x.to_csv(out_file(tables_dir, TAG, f"{TODAY}_{name}.csv"), index=False)
 
     # ---------------------------- validation against script4a (first expansion, baseline) ------------------
     val = []
-    A4 = os.path.join(tables_dir, "script4a")
     def newest(pat):
-        f = sorted(glob.glob(os.path.join(A4, pat)))
+        f = out_glob(tables_dir, "4a-designs", pat)
         return pd.read_csv(f[-1]) if f else None
     grid, a5, a6 = newest("*_A1_A2_treatment_grid.csv"), newest("*_A5_event_study.csv"), newest("*_A6_cs_aggregated.csv")
     mine = "first expansion"
@@ -1178,7 +1175,7 @@ def section_cohorts():
     val.append({"check": "fe_ols (no trend) vs pyfixest, static beta", "max_abs_diff": float(fc.beta_diff.max()), "n": len(fc)})
     val.append({"check": "fe_ols (no trend) vs pyfixest, static se (RELATIVE diff)", "max_abs_diff": float(fc.se_diff.max()), "n": len(fc)})
     val = pd.DataFrame(val)
-    val.to_csv(os.path.join(OUT, f"{TODAY}_validation_vs_script4a.csv"), index=False)
+    val.to_csv(out_file(tables_dir, TAG, f"{TODAY}_validation_vs_script4a.csv"), index=False)
 
 
     print("\n" + "=" * 100 + "\nVALIDATION: first-expansion baseline vs script4a (should be ~0)\n" + "=" * 100)
@@ -1211,7 +1208,7 @@ def section_fsis():
 
     Treatments: F1 = number of FSIS plants (2017-2023); F2 = first year the count rises. Models R0-R3 (event counts, TWFE on F1 and F2, event study).
     Reads:   panel via script4_treatment.load_panel(); Data/merged/*_panel_fsis.csv
-    Writes:  Data/output/tables/script4r/<date>_{R0_entry_events, R1_R2_twfe, R3_event_study, R4_lpdid}.csv
+    Writes:  Data/output/tables/<date>_4a-fsis_{R0_entry_events, R1_R2_twfe, R3_event_study, R4_lpdid}.csv
     Run:     python3 script4r-fsis-treatment.py
     Notes:   FSIS starts in 2017, so entries before 2017 are invisible; R4 (LP-DiD) is computed but not reported.
     """
@@ -1221,7 +1218,7 @@ def section_fsis():
     from functions import latest_file_glob
     from estimators import lpdid
 
-    OUT = os.path.join(tables_dir, "script4r"); os.makedirs(OUT, exist_ok=True)
+    OUT = tables_dir    # output-name tag "4a-fsis" (packages.py); was folder script4r
     TODAY = date.today().strftime("%Y-%m-%d")
     CONTROLS = COVARIATE_ORDER[:8]
     SLAUGHTER = "n_slaughterhouse_present_establishments_fsis"
@@ -1272,8 +1269,8 @@ def section_fsis():
             use.append({"outcome": okey, "cohort": int(g), "counties": int(n),
                         "usable": (g - 1 in yrs) and (g in yrs)})
     use = pd.DataFrame(use)
-    r0.to_csv(os.path.join(OUT, f"{TODAY}_R0_entry_events.csv"))
-    use.to_csv(os.path.join(OUT, f"{TODAY}_R0_cohorts_by_outcome.csv"), index=False)
+    r0.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R0_entry_events.csv"))
+    use.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R0_cohorts_by_outcome.csv"), index=False)
     print("\n  usable entry counties by outcome:")
     print(use[use.usable].groupby("outcome").counties.sum().to_string())
 
@@ -1310,7 +1307,7 @@ def section_fsis():
             except Exception as e:
                 print(f"  R2 {okey}: {e}")
     tw = pd.DataFrame(rows)
-    tw.to_csv(os.path.join(OUT, f"{TODAY}_R1_R2_twfe.csv"), index=False)
+    tw.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R1_R2_twfe.csv"), index=False)
     print("\nR1/R2 TWFE")
     print(tw[["model", "outcome", "beta", "se_state", "p_state", "N", "n_switchers",
               "MDE_sd_within"]].to_string(index=False))
@@ -1340,7 +1337,7 @@ def section_fsis():
                             "se_state": se, "p_state": float(r["Pr(>|t|)"]),
                             "ci_lo": b - 1.96 * se, "ci_hi": b + 1.96 * se, "N": int(m._N)})
     es = pd.DataFrame(es_rows)
-    es.to_csv(os.path.join(OUT, f"{TODAY}_R3_event_study.csv"), index=False)
+    es.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R3_event_study.csv"), index=False)
     if len(es):
         pre = es[es.event_time < -1]
         print("\nR3 pre-trend: significant pre-period coefs at 5%")
@@ -1359,7 +1356,7 @@ def section_fsis():
             r.insert(0, "arm", arm); r.insert(0, "outcome", okey); r.insert(0, "model", "R4")
             lp_rows.append(r)
     lp = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
-    lp.to_csv(os.path.join(OUT, f"{TODAY}_R4_lpdid.csv"), index=False)
+    lp.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R4_lpdid.csv"), index=False)
     if len(lp):
         print("\nR4 LP-DiD, h=0 and pre-trend")
         for (o, a), g in lp.groupby(["outcome", "arm"]):
@@ -1367,7 +1364,7 @@ def section_fsis():
             pr = g[g.h < -1]
             print(f"  {o:26s} {a:14s} h0={h0.iloc[0] if len(h0) else np.nan:+.4f}  "
                   f"pre sig={int((pr.p < .05).sum())}/{len(pr)}  treated={g.n_treated.max()}")
-    print(f"\nscript4r COMPLETE -> {OUT}")
+    print(f"\nscript4a fsis COMPLETE -> {OUT} (tag 4a-fsis)")
 
 
 SECTIONS = {"designs": section_designs, "cohorts": section_cohorts, "species": section_species, "fsis": section_fsis}

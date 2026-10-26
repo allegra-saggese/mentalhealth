@@ -11,14 +11,15 @@ script4b-diagnostics.py -- diagnostics of the control set and the event-study de
     honestdid    inputs for the Rambachan-Roth analysis; R/honestdid.R is run afterwards     (was script4w-honestdid-export.py)
 
 Reads:   panel via script4_treatment.load_panel() (honestdid: designs.load_designs());
-         `leads` and `control-set` read the newest Data/output/tables/script4a/*_control_pretrends.csv, which `controls` writes
-Writes:  Data/output/tables/script4a/<date>_{control_roster, control_pretrends, vif_headline_within, control_pretrend_lags,
+         `leads` and `control-set` read the newest Data/output/tables/*_4b-controls_control_pretrends.csv, which `controls` writes
+Writes:  (all in Data/output/tables/, named <date>_<tag>_<stem>; naming: packages.py)
+         <date>_4b-controls_{control_roster, control_pretrends, vif_headline_within, control_pretrend_lags,
                                               control_correlations_selected8}.csv, and .txt versions of those and of VIF_audit  (controls)
-         Data/output/tables/script4b/<date>_{pretrend_raw_means, pretrend_fits}.csv and pretrend_fits.txt                   (pretrends)
-         Data/output/tables/script4t/<date>_{leads_coefficients, leads_joint_tests}.csv                       (leads)
-         LATEX_OUT/{BALANCEpanel.tex, BALANCEpanel.pdf, _BODY_balance.tex, <date>_balance_panel.csv}          (balance)
-         Data/output/tables/script4y[_quick]/<date>_{regressions, path_summary, covariate_summary, selection_table}.csv   (control-set)
-         Data/output/tables/script4w/honestdid_inputs/<design>__<outcome>__{beta, sigma}.csv and manifest.csv (honestdid)
+         <date>_4b-pretrends_{pretrend_raw_means, pretrend_fits}.csv and pretrend_fits.txt                                    (pretrends)
+         <date>_4b-leads_{leads_coefficients, leads_joint_tests}.csv                                          (leads)
+         <date>_4b-balance_balance_panel.csv; LATEX_OUT/{BALANCEpanel.tex, BALANCEpanel.pdf, _BODY_balance.tex}  (balance)
+         <date>_4b-control-set[-quick]_{regressions, path_summary, covariate_summary, selection_table}.csv       (control-set)
+         4b-honestdid-inputs_{<design>__<outcome>__beta, ..__sigma, manifest}.csv (undated; R/honestdid.R writes <date>_4b-honestdid_*) (honestdid)
 Run:     python3 script4b-diagnostics.py [--only controls leads pretrends balance control-set honestdid] [--quick]
          then Rscript R/honestdid.R     (--quick shortens control-set only; a few minutes without it)
 Method:  METHODS.md sections 3, 4 and 7. Roles are judgements, not findings; the control-set sweep documents the pre-committed
@@ -40,6 +41,7 @@ import pyfixest as pf
 from designs import load_designs, county_groups
 from estimators import clean, event_study_frame, joint_wald
 from figstyle import save_text_table
+from packages import out_file, out_glob, out_latest, tagged
 from script4_treatment import (
     load_panel, OUTCOMES, COVARIATE_ORDER, COVARIATE_EXCLUDED, CONTROL_PRETREAT,
     HEADLINE_TREATMENT, HEADLINE_OUTCOME, CORE_TREATMENTS, CORE_TREATMENT_LABELS,
@@ -88,7 +90,7 @@ META["log_pop"]=("Log population (placebo)","placebo","Not a control: tests whet
 META["teen_births_per100k"]=("Teen birth rate","collider","Responds to both local economic conditions and to social/mental-health conditions, so it is caused by treatment and outcome alike.")
 
 def controls():
-    OUT = os.path.join(tables_dir, "script4a"); os.makedirs(OUT, exist_ok=True)
+    OUT = tables_dir    # output-name tag "4b-controls" (packages.py); was folder script4a
 
     df = load_panel()
     ref = df[df[HEADLINE_OUTCOME].notna()]
@@ -176,10 +178,10 @@ def controls():
         "vif_raw":[vr.get(c,np.nan) for c in rhs],
         "vif_within":[vw.get(c,np.nan) for c in rhs]}).sort_values("vif_within",ascending=False)
 
-    cov.to_csv(os.path.join(OUT,f"{TODAY}_control_roster.csv"),index=False)
-    pre.to_csv(os.path.join(OUT,f"{TODAY}_control_pretrends.csv"),index=False)
-    vif.to_csv(os.path.join(OUT,f"{TODAY}_vif_headline_within.csv"),index=False)
-    pd.DataFrame(lag_rows).to_csv(os.path.join(OUT,f"{TODAY}_control_pretrend_lags.csv"),index=False)
+    cov.to_csv(out_file(tables_dir, "4b-controls", f"{TODAY}_control_roster.csv"),index=False)
+    pre.to_csv(out_file(tables_dir, "4b-controls", f"{TODAY}_control_pretrends.csv"),index=False)
+    vif.to_csv(out_file(tables_dir, "4b-controls", f"{TODAY}_vif_headline_within.csv"),index=False)
+    pd.DataFrame(lag_rows).to_csv(out_file(tables_dir, "4b-controls", f"{TODAY}_control_pretrend_lags.csv"),index=False)
 
     # =============================== 4. correlation among the selected controls ====
     # Two-way demeaned (county and year means removed), the same transformation as vif_within, so the matrix is
@@ -189,25 +191,24 @@ def controls():
         W[c] = (W[c]-W.groupby("fips")[c].transform("mean")-W.groupby("year")[c].transform("mean")+W[c].mean())
     corr = W[CONTROLS].corr()
     corr_out = corr.copy(); corr_out.insert(0,"variable",corr.index)
-    corr_out.to_csv(os.path.join(OUT,f"{TODAY}_control_correlations_selected8.csv"),index=False)
+    corr_out.to_csv(out_file(tables_dir, "4b-controls", f"{TODAY}_control_correlations_selected8.csv"),index=False)
 
     # =============================== 5. plain-text versions of the tables =========
-    vif_audit = pd.read_csv(sorted(glob.glob(os.path.join(OUT,"*_VIF_audit.csv")))[-1])
-    save_text_table(vif_audit.drop(columns=["note"],errors="ignore"), OUT, "VIF_audit",
+    vif_audit = pd.read_csv(out_latest(tables_dir, "4a-designs", "*_VIF_audit.csv"))   # written by script4a designs
+    save_text_table(vif_audit.drop(columns=["note"],errors="ignore"), tables_dir, tagged("4b-controls", "VIF_audit"),
         "Variance inflation factors by model: largest VIF among the regressors",
         "VIF_audit.csv is written by script4a-estimates.py. within = True: after removing county and year means. "
         "A VIF above 10 is the usual warning level; none is reached.")
-    save_text_table(vif, OUT, "vif_headline_within",
+    save_text_table(vif, tables_dir, tagged("4b-controls", "vif_headline_within"),
         "Variance inflation factors, headline specification (treatment T1, all candidate controls)",
         "vif_raw: on the levels; vif_within: after removing county and year means (what the fixed-effects model uses).")
-    save_text_table(corr_out, OUT, "control_correlations_selected8",
+    save_text_table(corr_out, tables_dir, tagged("4b-controls", "control_correlations_selected8"),
         "Correlation among the 8 selected controls (county and year means removed)",
         "Estimating sample of the headline specification. Off-diagonal values near 0 mean the controls carry separate information.",
         float_format="{:.2f}")
-    save_text_table(cov.drop(columns=["rationale"]), OUT, "control_roster",
+    save_text_table(cov.drop(columns=["rationale"]), tables_dir, tagged("4b-controls", "control_roster"),
         "Candidate controls: coverage and where each is used", "Share of non-missing values among the panel, outcome rows and estimating sample.")
-    save_text_table(pre[["variable","causal_role","n_pre_coefs","n_pre_significant","max_pre_in_sd","verdict"]], OUT,
-        "control_pretrends", "Covariate pre-trends: each control as the dependent variable in the event-study design",
+    save_text_table(pre[["variable","causal_role","n_pre_coefs","n_pre_significant","max_pre_in_sd","verdict"]], tables_dir, tagged("4b-controls", "control_pretrends"), "Covariate pre-trends: each control as the dependent variable in the event-study design",
         "max_pre_in_sd: largest absolute pre-period coefficient divided by the variable's overall standard deviation. "
         "FAILS = two or more pre-period coefficients significant at 5% (state-clustered).")
 
@@ -228,7 +229,7 @@ REPORTED = ["T1", "T3", "T4", "E2", "E3"]
 
 
 def leads():
-    OUT = os.path.join(tables_dir, "script4t"); os.makedirs(OUT, exist_ok=True)
+    OUT = tables_dir    # output-name tag "4b-leads"; was folder script4t
 
     df = load_panel()
     df = df.sort_values(["fips", "year"]).reset_index(drop=True)
@@ -304,8 +305,8 @@ def leads():
 
     coefs = pd.DataFrame(coef_rows)
     joint = pd.DataFrame(joint_rows)
-    coefs.to_csv(os.path.join(OUT, f"{TODAY}_leads_coefficients.csv"), index=False)
-    joint.to_csv(os.path.join(OUT, f"{TODAY}_leads_joint_tests.csv"), index=False)
+    coefs.to_csv(out_file(tables_dir, "4b-leads", f"{TODAY}_leads_coefficients.csv"), index=False)
+    joint.to_csv(out_file(tables_dir, "4b-leads", f"{TODAY}_leads_joint_tests.csv"), index=False)
 
 
     print("\n" + "=" * 100)
@@ -326,7 +327,7 @@ def leads():
             print(f"{o[:24]:24s} " + "  ".join(f"{int(r.lead):+d}:{r.beta:+.3g}(z{r.beta / r.se_state:+.1f})" for _, r in x.iterrows()))
 
     # ---------- covariate pre-trends from 4j, alongside ----------------------------------------
-    cp = sorted(glob.glob(os.path.join(tables_dir, "script4a", "*_control_pretrends.csv")))
+    cp = out_glob(tables_dir, "4b-controls", "*_control_pretrends.csv")
     if cp:
         c = pd.read_csv(cp[-1])
         print("\n" + "=" * 100)
@@ -386,7 +387,7 @@ def _raw_paths(df, info, col, treated_col, comparison_fips):
 
 
 def pretrends():
-    OUT = os.path.join(tables_dir, "script4b"); os.makedirs(OUT, exist_ok=True)
+    OUT = tables_dir    # output-name tag "4b-pretrends"; was folder script4b
     df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
     info = county_groups(df)
     # same comparison groups as the event-time figures in script1c: E2 against counties that never add or enter,
@@ -411,13 +412,13 @@ def pretrends():
     raw = pd.DataFrame(raw_rows)
 
     # fits through the lead coefficients of script4t and the control lag coefficients written by `controls`
-    lc = pd.read_csv(sorted(glob.glob(os.path.join(tables_dir, "script4t", "*_leads_coefficients.csv")))[-1])
+    lc = pd.read_csv(out_glob(tables_dir, "4b-leads", "*_leads_coefficients.csv")[-1])
     lc["x"] = np.where(lc.design == "lead test", -lc.lead, lc.lead)        # a lead k years ahead sits at -k
     for (t, o), g in lc.groupby(["treatment", "outcome"]):
         slope, icpt = _fit_line(g.x, g.beta)
         fit_rows.append({"source": "lead_coefficients", "design": t, "variable": o, "kind": "outcome", "series": "coefficient",
                          "n_points": len(g), "slope": slope, "intercept": icpt})
-    cl_ = pd.read_csv(sorted(glob.glob(os.path.join(tables_dir, "script4a", "*_control_pretrend_lags.csv")))[-1])
+    cl_ = pd.read_csv(out_glob(tables_dir, "4b-controls", "*_control_pretrend_lags.csv")[-1])
     cl_ = cl_[cl_.variable.isin(CONTROLS) & (cl_.lag < -1)]
     for c, g in cl_.groupby("variable"):
         slope, icpt = _fit_line(g.lag, g.estimate / g.outcome_sd)
@@ -425,9 +426,9 @@ def pretrends():
                          "series": "coefficient_in_sd", "n_points": len(g), "slope": slope, "intercept": icpt})
     fits = pd.DataFrame(fit_rows)
 
-    raw.to_csv(os.path.join(OUT, f"{TODAY}_pretrend_raw_means.csv"), index=False)
-    fits.to_csv(os.path.join(OUT, f"{TODAY}_pretrend_fits.csv"), index=False)
-    save_text_table(fits, OUT, "pretrend_fits",
+    raw.to_csv(out_file(tables_dir, "4b-pretrends", f"{TODAY}_pretrend_raw_means.csv"), index=False)
+    fits.to_csv(out_file(tables_dir, "4b-pretrends", f"{TODAY}_pretrend_fits.csv"), index=False)
+    save_text_table(fits, tables_dir, tagged("4b-pretrends", "pretrend_fits"),
         "Straight-line fits through the pre-period points of each pre-trend figure",
         "Descriptive: ordinary least-squares line through the plotted pre-period points (slope per year of event time). "
         "The joint pre-trend tests are in leads_joint_tests.csv and control_pretrends.csv. Raw-mean series are changes since "
@@ -507,7 +508,7 @@ def balance():
         print(f"  {tid} done")
 
     R = pd.DataFrame(rows)
-    R.to_csv(os.path.join(OUT, f"{TODAY}_balance_panel.csv"), index=False)
+    R.to_csv(out_file(tables_dir, "4b-balance", f"{TODAY}_balance_panel.csv"), index=False)   # the .tex stay in LATEX_OUT
 
     # --------------------------------------------------------------------- LaTeX
     def table(tid, g):
@@ -681,7 +682,7 @@ def run_cell(args):
 
 
 def control_set(quick=False):
-    OUT = os.path.join(tables_dir, "script4y" + ("_quick" if quick else "")); os.makedirs(OUT, exist_ok=True)
+    OUT, TAG = tables_dir, "4b-control-set" + ("-quick" if quick else "")    # was folder script4y
     TREATS = {"T1": CORE_TREATMENTS["T1"], "T3": CORE_TREATMENTS["T3"], "T4": CORE_TREATMENTS["T4"], "E2": "tr_e2_add_absorb"}
     if quick:
         TREATS = {"T1": TREATS["T1"]}
@@ -699,7 +700,7 @@ def control_set(quick=False):
     R["pct_change_vs_ref"] = 100 * (R.beta - R.beta_ref) / R.beta_ref.abs()
     R["sign_flip"] = np.sign(R.beta) != np.sign(R.beta_ref)
     R["sig_flip"] = (R.p < .05) != (R.p_ref < .05)
-    R.to_csv(os.path.join(OUT, f"{TODAY}_regressions.csv"), index=False)
+    R.to_csv(out_file(tables_dir, TAG, f"{TODAY}_regressions.csv"), index=False)
 
     # ---------------- A1 path summary (the old script4c) ----------------
     a1 = R[R.family == "A1 cumulative"].copy()
@@ -720,7 +721,7 @@ def control_set(quick=False):
                    "largest_single_step": int(step_move.idxmax()) if step_move.notna().any() else np.nan,
                    "largest_single_step_pct_of_step0": float(step_move.max()) if step_move.notna().any() else np.nan,
                    "N_step8": g.N.get(8, np.nan), "N_step14": g.N.get(14, np.nan)})
-    pd.DataFrame(ps).to_csv(os.path.join(OUT, f"{TODAY}_path_summary.csv"), index=False)
+    pd.DataFrame(ps).to_csv(out_file(tables_dir, TAG, f"{TODAY}_path_summary.csv"), index=False)
 
     # ---------------- per-covariate movement ----------------
     alt = R[~R.is_reference & ~R.family.str.startswith("A1")].copy()
@@ -729,14 +730,14 @@ def control_set(quick=False):
                   max_abs_pct_change=("pct_change_vs_ref", lambda s: float(s.abs().max())),
                   sign_flips=("sign_flip", "sum"), sig_flips=("sig_flip", "sum"), cells=("beta", "size")).reset_index()
              .rename(columns={"label": "covariate"}))
-    cs.to_csv(os.path.join(OUT, f"{TODAY}_covariate_summary.csv"), index=False)
+    cs.to_csv(out_file(tables_dir, TAG, f"{TODAY}_covariate_summary.csv"), index=False)
 
     # ---------------- the selection table ----------------
     panel = load_panel()
     cov = pd.DataFrame({"covariate": ALL14, "order": range(1, 15),
                         "coverage_pct": [100 * panel[c].notna().mean() for c in ALL14],
                         "in_final_8": [c in FINAL8 for c in ALL14]})
-    roster = sorted(glob.glob(os.path.join(tables_dir, "script4a", "*_control_pretrends.csv")))
+    roster = out_glob(tables_dir, "4b-controls", "*_control_pretrends.csv")
     if roster:
         pt = pd.read_csv(roster[-1])[["variable", "causal_role", "n_pre_significant", "n_pre_coefs", "verdict"]]
         cov = cov.merge(pt.rename(columns={"variable": "covariate", "verdict": "pretrend_verdict"}), on="covariate", how="left")
@@ -750,7 +751,7 @@ def control_set(quick=False):
     cov["dropped_from_8_median_abs_pct_change"] = pick("B1 drop one of final 8", "own", "median_abs_pct_change")
     cov["dropped_from_14_median_abs_pct_change"] = pick("B2 drop one of all 14", "own", "median_abs_pct_change")
     cov["dropped_from_14_common_sample"] = pick("B2 drop one of all 14", "common14", "median_abs_pct_change")
-    cov.to_csv(os.path.join(OUT, f"{TODAY}_selection_table.csv"), index=False)
+    cov.to_csv(out_file(tables_dir, TAG, f"{TODAY}_selection_table.csv"), index=False)
 
     pd.set_option("display.width", 250, "display.max_columns", 30)
     print("\nSELECTION TABLE  (median |% change in the treatment coefficient| across treatment x outcome cells)")
@@ -774,7 +775,7 @@ def slug(s):
 
 
 def honestdid():
-    OUT = os.path.join(tables_dir, "script4w", "honestdid_inputs"); os.makedirs(OUT, exist_ok=True)
+    OUT = tables_dir    # output-name tag "4b-honestdid-inputs" (undated names; R/honestdid.R reads them); was script4w/honestdid_inputs
 
     _df, _D, _, _ = load_designs()
     DESIGNS = {"first expansion": (_D["first expansion"]["data"], "add_year"),
@@ -800,12 +801,12 @@ def honestdid():
             cn = list(m._coefnames); idx = [cn.index(names[x]) for x in order]
             b = np.asarray(m.coef())[idx]; V = np.asarray(m._vcov)[np.ix_(idx, idx)]
             stem = f"{slug(dname)}__{slug(okey)}"
-            pd.DataFrame({"event_time": order, "beta": b}).to_csv(os.path.join(OUT, stem + "__beta.csv"), index=False)
-            pd.DataFrame(V).to_csv(os.path.join(OUT, stem + "__sigma.csv"), index=False, header=False)
+            pd.DataFrame({"event_time": order, "beta": b}).to_csv(out_file(tables_dir, "4b-honestdid-inputs", stem + "__beta.csv"), index=False)
+            pd.DataFrame(V).to_csv(out_file(tables_dir, "4b-honestdid-inputs", stem + "__sigma.csv"), index=False, header=False)
             manifest.append({"design": dname, "outcome": okey, "stem": stem, "num_pre": len(pre), "num_post": len(post),
                              "pre_range": f"{pre[0]}..{pre[-1]}", "post_range": f"{post[0]}..{post[-1]}", "N": int(m._N)})
             print(f"  {dname:16s} {okey:26s} pre {pre[0]}..{pre[-1]} ({len(pre)})  post {post[0]}..{post[-1]} ({len(post)})")
-    pd.DataFrame(manifest).to_csv(os.path.join(OUT, "manifest.csv"), index=False)
+    pd.DataFrame(manifest).to_csv(out_file(tables_dir, "4b-honestdid-inputs", "manifest.csv"), index=False)
     print(f"\nwrote {len(manifest)} input pairs -> {OUT}")
     print("next: Rscript R/honestdid.R   (reads these inputs; not run here)")
 

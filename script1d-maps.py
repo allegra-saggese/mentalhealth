@@ -5,7 +5,7 @@ script1d-maps.py -- every county map, one section per treatment family (stage 1,
 
 Reads:   newest Data/merged/*_panel.csv (via designs.load_designs: panel + first-expansion / first-entry designs),
          newest Data/merged/*_panel_fsis.csv (FSIS columns live only there), newest Data/clean/*rural-key.csv
-Writes:  Data/output/maps/script1d/YYYY-MM-DD_{section}_{map}.html and .png (plus one first-difference summary CSV)
+Writes:  Data/output/maps/YYYY-MM-DD_1d_{section}_{map}.html and .png (plus one first-difference summary CSV)
 Run:     PYTHONHASHSEED=0 python3 script1d-maps.py [--only SECTION [SECTION ...]] [--list] [--no-png]
 Moved from script2f-maps.py (fsis_density, outcomes, first_diff) and script2b-final-visuals.py (cafo_census = Figures G
 and H; snapshot_2012 = Figures F1 and F2). New: entry, expansion, large_ops, species, species_count, estimation_sample,
@@ -27,13 +27,14 @@ from plotly.subplots import make_subplots
 import figstyle
 from designs import load_designs, species_treatments, usable_sample
 from functions import latest_file_glob, load_county_geojson, log_per10k, normalize_panel_key, to_numeric_series
-from packages import db_data, output_dir
+from packages import db_data, maps_dir
 from script4_treatment import CENSUS_YEARS, COVARIATE_ORDER, OUTCOMES
 
 SCRIPT = "script1d-maps.py"
 MERGED_DIR = str(Path(db_data) / "merged")
 CLEAN_DIR = str(Path(db_data) / "clean")
-MAPS_DIR = Path(output_dir) / "maps" / "script1d"
+TAG = "1d"                      # output-name tag (packages.py): <date>_1d_<stem>
+MAPS_DIR = Path(maps_dir)
 
 LATEST_WAVE = max(CENSUS_YEARS)
 GEO_PRECISION = 2  # decimal degrees kept in the county outlines (about 1 km); geometry only
@@ -324,7 +325,7 @@ def write_map(fig, stem, width, height, no_png):
     """Single exit for every map: adds the national outline, then writes HTML and PNG."""
     outline_country(fig)
     MAPS_DIR.mkdir(parents=True, exist_ok=True)
-    base = MAPS_DIR / figstyle.dated(stem)
+    base = MAPS_DIR / figstyle.dated(f"{TAG}_{stem}")
     fig.write_html(str(base.with_suffix(".html")), include_plotlyjs="cdn")
     print("  HTML:", base.with_suffix(".html").name)
     if no_png:
@@ -560,7 +561,7 @@ def section_first_diff(data, no_png):
             hover_label="change",
             no_png=no_png,
         )
-    path = MAPS_DIR / figstyle.dated("first_diff_year_summary.csv")
+    path = MAPS_DIR / figstyle.dated(f"{TAG}_first_diff_year_summary.csv")
     pd.DataFrame(summaries).to_csv(path, index=False)
     print("  CSV: ", path.name)
 
@@ -854,7 +855,7 @@ def section_estimation_sample(data, no_png):
             "the 8 pre-committed "
             "controls non-missing and, for a treated county, an observed year before its cohort wave "
             "(designs.usable_sample, "
-            "the call of script4za). Cohort = first census wave of expansion (first expansion) or entry (first entry; "
+            "the call of script4d-triangulation.py, section estimators). Cohort = first census wave of expansion (first expansion) or entry (first entry; "
             "comparison = never large dairy)"
             + (
                 f"; no county of cohort {', '.join(map(str, dropped))} is in the sample "

@@ -11,7 +11,7 @@ Sections (one function each; run one with --only <name>):
   register       master variable register: xlsx + csv codebook                                 (from script4k)
 Reads:   newest Data/merged/*_panel.csv (all sections), Data/merged/*_panel_fsis.csv (sumstats, register),
          Data/clean/*_cafo_ops_by_size_compact.csv (concentration), Data/clean/*.csv headers (register source map)
-Writes:  Data/output/tables/script1b/<date>_<stem>.csv ; the codebook to Data/output/codebooks/<date>_VARIABLE_REGISTER.{xlsx,csv}
+Writes:  Data/output/tables/<date>_1b_<stem>.csv ; the codebook to Data/output/codebooks/<date>_VARIABLE_REGISTER.{xlsx,csv}
 Run:     PYTHONHASHSEED=0 python3 script1b-tables.py [--only summary concentration sumstats species register]
 Rules:   species handling per D-36 (cattle contains dairy and beef, so it is not a species); a missing cafo count is
          zero from 2002 (D-34). The numbers are those of the retired scripts; this file moves them, it does not redefine them.
@@ -25,10 +25,11 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
-from packages import os, db_data, output_dir, tables_dir
+from packages import os, db_data, codebooks_dir, tables_dir, out_file
 from functions import latest_file_glob, normalize_panel_key, to_numeric_series
 from script4_treatment import (load_panel, OUTCOMES, TREATMENTS, CONTROL_PRETREAT,
-                               CONTROL_COMPREHENSIVE, CONTROL_CORE9, CONTROL_MEDIATORS)
+                               CONTROL_COMPREHENSIVE, CONTROL_MEDIATORS, COVARIATE_ORDER,
+                               CORE_TREATMENTS, CORE_TREATMENT_LABELS, REPORT_TREATMENTS)
 
 warnings.filterwarnings("ignore")
 
@@ -38,9 +39,9 @@ warnings.filterwarnings("ignore")
 TODAY = date.today().strftime("%Y-%m-%d")
 MERGED_DIR = os.path.join(db_data, "merged")
 CLEAN_DIR = os.path.join(db_data, "clean")
-OUT_TABLES = os.path.join(tables_dir, "script1b")
+OUT_TABLES, TAG = tables_dir, "1b"     # output-name tag (packages.py): <date>_1b_<stem>
 # Codebooks keep their own folder (the running record of every variable listing), as script4k did.
-OUT_CODEBOOKS = os.path.join(output_dir, "codebooks")
+OUT_CODEBOOKS = codebooks_dir   # names unchanged: <date>_VARIABLE_REGISTER.{xlsx,csv}
 
 SPECIES = ["dairy", "beef", "hogs", "chickens"]
 ALL_COLUMNS = SPECIES + ["cattle"]      # cattle is read only for the appendix check
@@ -53,7 +54,7 @@ CANONICAL_CLASS = {"cattle": "incl calves", "hogs": "all classes", "chickens": "
 
 def write_table(frame, stem):
     """Write one dated CSV to the script's table folder and return its path."""
-    path = os.path.join(OUT_TABLES, f"{TODAY}_{stem}.csv")
+    path = out_file(OUT_TABLES, TAG, f"{TODAY}_{stem}.csv")
     frame.to_csv(path, index=False)
     print(f"  saved: {path}")
     return path
@@ -454,6 +455,8 @@ def species_overlap(panel_path):
 CONTROL_META = {
 "%_65_and_older":               dict(v="v053",src="Census PEP",yrs="2023",lag=2,tier="A",role="confounder",ptest="Y",pres="flat (0/5 sig)",why="Age structure predicts agricultural land use and mental-health reporting; not moved by a CAFO."),
 "%_asian":                      dict(v="v081",src="Census PEP",yrs="2023",lag=2,tier="A",role="confounder",ptest="Y",pres="flat (0/5 sig)",why="Predetermined composition. Near-zero in non-metro; adds little."),
+"%_asian_aian_nhpi":            dict(v="",src="Census PEP",yrs="annual",lag=0,tier="A",role="",ptest="Y",pres="",why="Combined Asian + AIAN + NHPI share, annual Census PEP (script0c); replaced %_asian in the control set (D-31)."),
+"%_black":                      dict(v="",src="Census PEP",yrs="annual",lag=0,tier="A",role="",ptest="Y",pres="",why="Black share, annual Census PEP (script0c); added to the control set (D-31)."),
 "%_below_18_years_of_age":      dict(v="v052",src="Census PEP",yrs="2023",lag=2,tier="A",role="confounder",ptest="Y",pres="flat (0/5 sig)",why="Age structure; predetermined."),
 "%_female":                     dict(v="v057",src="Census PEP",yrs="2023",lag=2,tier="A",role="confounder",ptest="Y",pres="flat (0/5 sig)",why="Predetermined."),
 "%_hispanic":                   dict(v="v056",src="Census PEP",yrs="2023",lag=2,tier="A",role="confounder",ptest="Y",pres="flat (0/5 sig)",why="Labelled mediator on labour-recruitment grounds, but pre-trend is FLAT (0.006 SD) -- the mediation concern is NOT supported by the data. Treat as confounder."),
@@ -489,6 +492,36 @@ DECISION = {
 }
 for _c in CONTROL_MEDIATORS:
     DECISION.setdefault(_c, "D-01 excluded as mediator")
+# The control set: the 8 full-coverage controls, pre-committed (D-16, membership revised D-31).
+CONTROL_SET = COVARIATE_ORDER[:8]
+for _c in CONTROL_SET:
+    DECISION[_c] = "; ".join(x for x in ["D-16/D-31 control set", DECISION.get(_c, "")] if x)
+GENERIC_CAFO = ["small_cafo", "medium_cafo", "large_cafo", "bin_sum_cafo", "total_heads_cafo",
+                "any_large_cafo", "any_medium_or_large_cafo"]
+
+
+def decision_of(col):
+    """Decision-register ids that bear on a column."""
+    ids = [DECISION.get(col, "")]
+    if col in GENERIC_CAFO:
+        ids.append("D-51 generic CAFO = cattle + hogs + chickens")
+    if "cafo" in col.lower():
+        ids.append("D-34 missing count = 0 from 2002; D-53 census-year blank = 0 before forward-fill")
+    if col.startswith("cafo_cattle"):
+        ids.append("D-36 cattle contains dairy and beef; not a species")
+    if col == "tr_e2_add_absorb":
+        ids.append("D-32 E2 reported")
+    return "; ".join(i for i in ids if i)
+
+
+# Treatment id(s) of each treatment column, and whether it is in the reported set (REPORT_TREATMENTS).
+TREATMENT_IDS = {}
+for _k, _c in CORE_TREATMENTS.items():
+    TREATMENT_IDS.setdefault(_c, []).append(_k)
+for _k, (_c, _cond, _lab) in TREATMENTS.items():
+    TREATMENT_IDS.setdefault(_c, []).append(_k)
+TREATMENT_LABEL = {_c: _lab for _k, (_c, _cond, _lab) in TREATMENTS.items()}
+TREATMENT_LABEL.update({_c: CORE_TREATMENT_LABELS[_k] for _k, _c in CORE_TREATMENTS.items()})
 INTERACTS = {
 "%_hispanic":"corr -0.775 with log_pop (within). Used in dairy x %hispanic interaction in the ML block -- that interaction is hard to read cleanly because of this.",
 "median_household_income":"VIF 5.35 raw / 1.19 within; the largest raw-level VIF in the set.",
@@ -573,12 +606,18 @@ def source_of(col, source_exact, source_stems):
                                                                "build_year", "consol_year", "log_pop"):
         return ("(derived in script4_treatment.py)", "script4_treatment", "derived from the USDA NASS CAFO block")
     if any(k in lc for k in ["assault", "rape", "incest", "intimidation", "kidnap", "fondling",
-                             "human_traffic", "statutory", "incident", "driving_under", "sexual_assault", "crime"]):
+                             "human_traffic", "statutory", "incident", "violence", "driving_under", "sexual_assault", "crime"]):
         return ("*_crime_fips_level_final.csv", "script0d", "FBI NIBRS: nibrs_arrestee_segment_YYYY.csv (ARRESTS)")
     if "despair" in lc or lc.startswith("crude_rate") or lc in ("deaths", "deaths_is_zero", "cdc_in_query", "homicides"):
         return ("*_cdc_county_year_deathsofdespair.csv", "script0c", "CDC WONDER: cty-level-deathsofdespair-YYYY.csv")
     if lc in ("rural", "non_large_metro", "nchs_code", "nchs_label"):
         return ("*-rural-key.csv", "script0a", "NCHS: NCHSurb-rural-codes.csv")
+    if lc.startswith(("pep_", "saipe_", "laus_", "sahie_")) or lc in ("%_asian_aian_nhpi", "%_black") \
+            or lc.endswith("_pep"):
+        return ("*_annual_controls_county_year.csv", "script0c",
+                "Census PEP / SAIPE / BLS LAUS / SAHIE (annual, data-year dated)")
+    if lc.endswith("_count_imputed"):
+        return ("(derived in script0f-generate-panel.py)", "script0f", "CHR count imputation from rate x population")
     if "pop" in lc:
         return ("*_population_full.csv", "script0a", "Census Population Estimates Program")
     if lc in ("fips", "state", "county", "state_fips", "county_fips", "state_abbrev", "state_abbreviation",
@@ -656,8 +695,8 @@ FSIS_NOTE = ("FSIS coverage is 2017-2023 ONLY, at roughly 46-50% of rural counti
              "file. The dairy x FSIS interaction (A6) is flagged DO NOT PRESENT: "
              "VIF 34.3 on %_rural in its thin sample.")
 
-REGISTER_ORDER = {"OUTCOME": 0, "TREATMENT": 1, "CONTROL (in use)": 2, "CONTROL (comprehensive only)": 3,
-                  "IDENTIFIER": 4, "not used": 5}
+REGISTER_ORDER = {"OUTCOME": 0, "TREATMENT": 1, "CONTROL (control set)": 2, "CONTROL (candidate)": 3,
+                  "CONTROL (comprehensive only)": 4, "IDENTIFIER": 5, "not used": 6}
 
 
 def fill_within_window(df, col, years):
@@ -694,8 +733,10 @@ def role_of(col):
         return "OUTCOME"
     if col in {t[0] for t in TREATMENTS.values()} or col.startswith("tr_"):
         return "TREATMENT"
+    if col in CONTROL_SET:
+        return "CONTROL (control set)"
     if col in CONTROL_PRETREAT:
-        return "CONTROL (in use)"
+        return "CONTROL (candidate)"
     if col in CONTROL_COMPREHENSIVE:
         return "CONTROL (comprehensive only)"
     if col in {"fips", "year", "state_fips", "rural", "population", "log_pop"}:
@@ -760,7 +801,11 @@ def variable_register(panel_path):
         rows.append({
             "colname": c,
             "role": r,
-            "description": meta.get("why", "") if r.startswith("CONTROL") else (om.get("note", "") if r == "OUTCOME" else ""),
+            "description": (meta.get("why", "") if r.startswith("CONTROL") else
+                            om.get("note", "") if r == "OUTCOME" else
+                            TREATMENT_LABEL.get(c, AUG.get(c, "")) if r == "TREATMENT" else ""),
+            "treatment_id": "/".join(TREATMENT_IDS.get(c, [])),
+            "reported_treatment": "Y" if set(TREATMENT_IDS.get(c, [])) & set(REPORT_TREATMENTS) else "",
             "outcome_label": inv[0] if inv else "",
             "type": str(s.dtype),
             "source": meta.get("src", om.get("src", "")),
@@ -773,16 +818,15 @@ def variable_register(panel_path):
             "covar_rationale": meta.get("why", ""),
             "pretrend_testable": meta.get("ptest", ""),
             "pretrend_result": meta.get("pres", ""),
-            "in_A1_pooled": "Y" if c in CONTROL_PRETREAT else "",
-            "in_A2_within": "Y" if c in CONTROL_PRETREAT else "",
-            "in_A7_event_study": "Y" if c in CONTROL_PRETREAT else "",
-            "in_A18_CS_with_cov": "Y" if c in CONTROL_PRETREAT else "",
-            "in_CORE9_legacy": "Y" if c in CONTROL_CORE9 else "",
-            "in_PRETREAT_19": "Y" if c in CONTROL_PRETREAT else "",
-            "in_COMPREHENSIVE_26": "Y" if c in CONTROL_COMPREHENSIVE else "",
+            # in_control_set: the 8 controls of every reported specification (TWFE and CS-adjusted).
+            # in_candidates: CONTROL_PRETREAT, the non-mediator candidates documented by script4b control-set.
+            # in_comprehensive: CONTROL_COMPREHENSIVE, the robustness arm that also includes mediators.
+            "in_control_set": "Y" if c in CONTROL_SET else "",
+            "in_candidates": "Y" if c in CONTROL_PRETREAT else "",
+            "in_comprehensive": "Y" if c in CONTROL_COMPREHENSIVE else "",
             "nibrs_offence_code": nibrs_note(c),
             "interactions_collinearity": INTERACTS.get(c, ""),
-            "decision_id": DECISION.get(c, ""),
+            "decision_id": decision_of(c),
             "pct_complete_full_panel": float(s.notna().mean()),
             "pct_complete_outcome_rows": float(ref[c].notna().mean()) if c in ref.columns else np.nan,
             "first_year": int(yrs.min()) if len(yrs) else None,
@@ -829,7 +873,8 @@ def variable_register(panel_path):
         os.path.basename(df.attrs["panel_path"]),
         fsis_src,
         f"{len(register)} main panel columns; {len(fsis_sheet)} FSIS panel columns",
-        "One row per variable, with a description of the variable, and every inclusion/exclusion decision for control set",
+        "One row per variable, with a description of the variable, and every inclusion/exclusion decision for control set. "
+        "in_control_set = the 8 pre-committed controls (D-16, D-31); reported_treatment = T1, T3, T4, E2 (REPORT_TREATMENTS)",
         "The decision to include or exclude a control variable, based on classification as a mediator or collider, and on review of coverage",
         "Share of rows with a non-missing value. coverage_pct_on_outcome_rows restricts to rows with a non-missing Poor MH Days.",
         "Traces the variable to the Data/clean file it came from and to the original raw source.",

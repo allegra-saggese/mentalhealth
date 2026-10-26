@@ -64,7 +64,7 @@ mentalhealth/                      # code only; data lives on Dropbox (db_base i
 └── qa-scripts/, fsis-scripts/, test-dfs/
 ```
 
-Naming: scripts `script{stage}{letter}-{description}.py`, no gaps in letters; outputs `YYYY-MM-DD_{descriptor}.csv`; latest file via `latest_file_glob()` in `functions.py`.
+Naming: scripts `script{stage}{letter}-{description}.py`, no gaps in letters; outputs `Data/output/{tables,figures,maps}/YYYY-MM-DD_{tag}_{descriptor}.{ext}` with tag = script + section (`4a-cohorts`, `1c`), built only through `out_file()` / `out_latest()` in `packages.py` (tag table in README); `latex/` keeps fixed `.tex` names.
 
 ---
 

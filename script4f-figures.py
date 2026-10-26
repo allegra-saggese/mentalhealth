@@ -11,16 +11,18 @@ Sections (run in this order; select with --only, e.g. --only triangulation permu
   pretrends-controls  pre-trend coefficients of the 8 selected controls, x-y panels with fits (new, D-55)
   pretrends-raw       raw pre-period paths, treated vs never-treated counties, outcomes        (new, D-55)
   pretrends-controls-raw  the same raw paths for the 8 selected controls                      (new, D-55)
-Reads:   triangulation: tables/script4za/*_{overall_estimates,agreement,samples}.csv, tables/script4x/*_outcome_within_sd.csv
-         treatment-by-model: tables/script4zc/*_treatment_by_model.csv, tables/script4x/*_outcome_within_sd.csv
-         permutation: tables/script4ze/*_permutation_pvalues*.csv and *_null_draws*.csv
-         pretrends-*: tables/script4t/*_leads_coefficients.csv, tables/script4a/*_{control_pretrend_lags,control_pretrends}.csv,
-                      tables/script4b/*_{pretrend_raw_means,pretrend_fits}.csv   (written by script4b-diagnostics.py --only controls pretrends)
-         (--quick reads script4zc_quick / script4ze_quick and writes script4zd_quick / script4zf_quick; triangulation has no quick mode)
-Writes:  figs/script4zb/YYYY-MM-DD_triangulation_{first_expansion,first_entry}.{pdf,png}
-         figs/script4zd/YYYY-MM-DD_treatment_by_model_{model, all_models}.{pdf,png}
-         figs/script4zf/YYYY-MM-DD_permutation_inference.{pdf,png}
-         figs/script4f/YYYY-MM-DD_pretrends_{leads_mental_health, leads_crime, controls, raw_<design>_outcomes, raw_<design>_controls}.{pdf,png}
+Reads:   (Data/output/tables/, by the tag of the section that wrote them; naming: packages.py)
+         triangulation: 4d-estimators_{overall_estimates,agreement,samples}, 4a-species_outcome_within_sd
+         treatment-by-model: 4d-treatment-by-model_treatment_by_model, 4a-species_outcome_within_sd
+         permutation: 4c-permutation_{permutation_pvalues*,null_draws*}
+         pretrends-*: 4b-leads_leads_coefficients, 4b-controls_{control_pretrend_lags,control_pretrends},
+                      4b-pretrends_{pretrend_raw_means,pretrend_fits}   (written by script4b-diagnostics.py --only controls pretrends)
+         (--quick reads the -quick tags of 4d / 4c and writes -quick tags; triangulation has no quick mode)
+Writes:  Data/output/figures/YYYY-MM-DD_4f-triangulation_triangulation_{first_expansion,first_entry}.{pdf,png}
+         YYYY-MM-DD_4f-treatment-by-model_treatment_by_model_{model, all_models}.{pdf,png}
+         YYYY-MM-DD_4f-permutation_permutation_inference.{pdf,png}
+         YYYY-MM-DD_4f-pretrends_pretrends_{leads_mental_health, leads_crime, controls, raw_<design>_outcomes, raw_<design>_controls}.{pdf,png}
+         YYYY-MM-DD_4f-slides_<stem>__{main,backup}.{pdf,png}   (sections slides, slides-other)
 Run:     PYTHONHASHSEED=0 python3 script4f-figures.py [--only triangulation|treatment-by-model|permutation ...] [--quick]
 Style:   figstyle.py (Nature/Science), checked with scripts/figure_check.py. Output folders keep their old names so no reader moves.
 """
@@ -36,6 +38,7 @@ import pandas as pd
 import figstyle
 from matplotlib.ticker import MaxNLocator
 from functions import latest_file_glob
+from packages import out_file, out_glob, out_latest, tagged
 from script4_treatment import OUTCOMES, figs_dir, tables_dir
 
 # Outcome labels shared by the treatment-by-model and permutation figures.
@@ -80,11 +83,10 @@ def triangulation_panel(ax, data, ag, sd, outcome, letter, n_text):
 
 def triangulation():
     """One forest-plot figure per design: a panel per outcome, a row per estimator, in within-county SD of the outcome."""
-    za = os.path.join(tables_dir, "script4za")
-    overall = pd.read_csv(latest_file_glob(za, "*_overall_estimates.csv"))
-    agree = pd.read_csv(latest_file_glob(za, "*_agreement.csv"))
-    samples = pd.read_csv(latest_file_glob(za, "*_samples.csv"))
-    within_sd = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4x"), "*_outcome_within_sd.csv"),
+    overall = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_overall_estimates.csv"))
+    agree = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_agreement.csv"))
+    samples = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_samples.csv"))
+    within_sd = pd.read_csv(out_latest(tables_dir, "4a-species", "*_outcome_within_sd.csv"),
                             index_col=0)["within_county_sd"]
     figstyle.apply_style()
 
@@ -112,7 +114,7 @@ def triangulation():
                  "(CS: state bootstrap,\n300 draws); imputation drops counties with a single untreated observation; LP-DiD and dCDH stop at event "
                  "time 8. Design: " + design + ".\nSource: script4za-estimator-triangulation.py; agreement rule D-45; scale: within-county SD "
                  "(script4x).", fontsize=5, va="bottom", ha="left", color="#333333")
-        pdf, png = figstyle.save_figure(fig, os.path.join(figs_dir, "script4zb"), f"triangulation_{tag}")
+        pdf, png = figstyle.save_figure(fig, figs_dir, tagged("4f-triangulation", f"triangulation_{tag}"))
         print("wrote", pdf, png)
 
 
@@ -180,10 +182,11 @@ def key_panel(ax, lines, colours=True):
 
 def treatment_by_model(quick=False):
     """Format A: one figure per model (panel per outcome, line per treatment). Format B: one figure, a panel per model."""
-    OUT_DIR = os.path.join(figs_dir, "script4zd" + ("_quick" if quick else ""))
+    OUT_DIR = figs_dir
+    TAG = "4f-treatment-by-model" + ("-quick" if quick else "")    # output-name tag (packages.py); was folder script4zd
 
-    res = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4zc" + ("_quick" if quick else "")), "*_treatment_by_model.csv"))
-    sd = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4x"), "*_outcome_within_sd.csv"), index_col=0)["within_county_sd"]
+    res = pd.read_csv(out_latest(tables_dir, "4d-treatment-by-model" + ("-quick" if quick else ""), "*_treatment_by_model.csv"))
+    sd = pd.read_csv(out_latest(tables_dir, "4a-species", "*_outcome_within_sd.csv"), index_col=0)["within_county_sd"]
     for c in ("est", "ci_lo", "ci_hi"):
         res[c] = res[c] / res.outcome.map(sd)                       # in within-county SDs of the outcome
     chg = res[(res.model == "dCDH") & res.note.notna()].copy()
@@ -219,7 +222,7 @@ def treatment_by_model(quick=False):
         key_panel(flat[-1], [f"Model: {model}"], colours=False)
         fig.text(0.005, 0.005, NOTE, fontsize=5, va="bottom", ha="left", color="#333333")
         stem = "treatment_by_model_" + re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
-        print("wrote", *figstyle.save_figure(fig, OUT_DIR, stem))
+        print("wrote", *figstyle.save_figure(fig, figs_dir, tagged(TAG, stem)))
 
     # ---------------- format B: one figure, a panel per model, colour = treatment, a row per outcome
     fig, axes = figstyle.new_grid(4, 2, width="double", height_mm=232.0)
@@ -241,7 +244,7 @@ def treatment_by_model(quick=False):
         style(ax, "abcdefg"[i], model, len(outs), xl)
     key_panel(flat[-1], ["Rows: outcomes. Each row has up to five", "colours, one per treatment."], colours=True)
     fig.text(0.005, 0.005, NOTE, fontsize=5, va="bottom", ha="left", color="#333333")
-    print("wrote", *figstyle.save_figure(fig, OUT_DIR, "treatment_by_model_all_models"))
+    print("wrote", *figstyle.save_figure(fig, figs_dir, tagged(TAG, "treatment_by_model_all_models")))
 
 
 # =============================================================== section permutation (was script4zf)
@@ -251,12 +254,12 @@ EXPANSION, ENTRY = "first expansion", "first entry (clean controls)"
 
 def permutation(quick=False):
     """Panels a, b: null distributions of the TWFE coefficient for the two confirmatory outcomes; panel c: permutation p-values."""
-    IN = os.path.join(tables_dir, "script4ze" + ("_quick" if quick else ""))
-    OUT_DIR = os.path.join(figs_dir, "script4zf" + ("_quick" if quick else ""))
+    IN, TAG_IN = tables_dir, "4c-permutation" + ("-quick" if quick else "")
+    OUT_DIR, TAG = figs_dir, "4f-permutation" + ("-quick" if quick else "")    # was folder script4zf
 
     def newest(pattern):
         """Concatenate the newest dated file per design suffix (the two designs may be written by separate runs)."""
-        files = sorted(glob.glob(os.path.join(IN, pattern)))
+        files = out_glob(tables_dir, TAG_IN, pattern)
         dates = sorted({os.path.basename(f)[:10] for f in files})
         return pd.concat([pd.read_csv(f) for f in files if os.path.basename(f).startswith(dates[-1])], ignore_index=True)
 
@@ -309,13 +312,13 @@ def permutation(quick=False):
              fontsize=5, va="bottom", ha="left", color="#333333")
     h, l = ax_c.get_legend_handles_labels()
     ax_note.legend(h, l, loc="lower left", fontsize=5.8, frameon=False)
-    print("wrote", *figstyle.save_figure(fig, OUT_DIR, "permutation_inference"))
+    print("wrote", *figstyle.save_figure(fig, figs_dir, tagged(TAG, "permutation_inference")))
 
 
 # =============================================================== sections pretrends-* (new 2026-10-26, D-55)
 # The dotted lines are ordinary least-squares straight lines through the plotted pre-period points, computed in
 # script4b-diagnostics.py (pretrend_fits.csv). They describe the drift; the pre-trend tests are in leads_joint_tests.csv.
-PRE_FIG_DIR = os.path.join(figs_dir, "script4f")
+PRE_FIG_DIR = figs_dir    # output-name tag "4f-pretrends" (sections pretrends-*); was folder script4f
 MENTAL_OUTCOMES = ["Poor MH Days", "Frequent Mental Distress", "Deaths of Despair"]
 CRIME_OUTCOMES = ["Aggravated Assault", "Assault, all severities", "Violence index (partial)", "NIBRS curated total"]
 DOTTED = dict(ls=":", lw=1.1)
@@ -333,14 +336,14 @@ def _fit_line(ax, fits, x_range, colour, **where):
 
 
 def _pre_inputs():
-    fits = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4b"), "*_pretrend_fits.csv"))
+    fits = pd.read_csv(out_latest(tables_dir, "4b-pretrends", "*_pretrend_fits.csv"))
     return fits
 
 
 def pretrends_leads():
     """Lead coefficients of the outcome on each treatment format (rows: outcomes, columns: treatments), with a dotted fit."""
     figstyle.apply_style()
-    lc = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4t"), "*_leads_coefficients.csv"))
+    lc = pd.read_csv(out_latest(tables_dir, "4b-leads", "*_leads_coefficients.csv"))
     lc["x"] = np.where(lc.design == "lead test", -lc.lead, lc.lead)          # a lead k years ahead sits at -k
     fits = _pre_inputs()
     for tag, outs, h in (("mental_health", MENTAL_OUTCOMES, 92), ("crime", CRIME_OUTCOMES, 118)):
@@ -365,14 +368,14 @@ def pretrends_leads():
                  "event study), outcome units, 95% interval, SE clustered by state;\ncounty and year fixed effects, 8 pre-committed controls. Dotted line: "
                  "least-squares line through the plotted points (descriptive; tests in leads_joint_tests.csv). Each panel has its own y-axis.\n"
                  "Source: script4b-diagnostics.py (leads, pretrends); script4f-figures.py.", fontsize=5, va="bottom", ha="left", color="#333333")
-        print("wrote", *figstyle.save_figure(fig, PRE_FIG_DIR, f"pretrends_leads_{tag}"))
+        print("wrote", *figstyle.save_figure(fig, figs_dir, tagged("4f-pretrends", f"pretrends_leads_{tag}")))
 
 
 def pretrends_controls():
     """Each selected control as the dependent variable in the event-study design: pre-period coefficients in SD, x-y panels."""
     figstyle.apply_style()
-    lag = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_control_pretrend_lags.csv"))
-    ver = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_control_pretrends.csv")).set_index("variable")
+    lag = pd.read_csv(out_latest(tables_dir, "4b-controls", "*_control_pretrend_lags.csv"))
+    ver = pd.read_csv(out_latest(tables_dir, "4b-controls", "*_control_pretrends.csv")).set_index("variable")
     fits = _pre_inputs()
     from script4_treatment import COVARIATE_ORDER
     ctrl = COVARIATE_ORDER[:8]
@@ -395,15 +398,15 @@ def pretrends_controls():
              "clustered by state; reference year -1 (open marker).\nDotted line: least-squares line through the plotted points (descriptive). "
              "Title: pre-period coefficients significant at 5% out of those estimated.\nSource: script4b-diagnostics.py (controls); script4f-figures.py.",
              fontsize=5, va="bottom", ha="left", color="#333333")
-    print("wrote", *figstyle.save_figure(fig, PRE_FIG_DIR, "pretrends_controls"))
+    print("wrote", *figstyle.save_figure(fig, figs_dir, tagged("4f-pretrends", "pretrends_controls")))
 
 
 def _raw_figures(kind):
     """Raw change since the year before treatment, treated vs never-treated counties, event times -8 to -1, dotted pre-period fits."""
     figstyle.apply_style()
-    raw = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4b"), "*_pretrend_raw_means.csv"))
+    raw = pd.read_csv(out_latest(tables_dir, "4b-pretrends", "*_pretrend_raw_means.csv"))
     fits = _pre_inputs()
-    ctrl_desc = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_control_pretrends.csv")).set_index("variable").description
+    ctrl_desc = pd.read_csv(out_latest(tables_dir, "4b-controls", "*_control_pretrends.csv")).set_index("variable").description
     names = {"E2": "first expansion (E2; also the timing of T3 and T4)", "E3": "first entry (E3; also the timing of T1)"}
     comparison = {"E2": "counties that never add or enter", "E3": "counties that never had a large dairy"}
     for d in ("E2", "E3"):
@@ -431,7 +434,7 @@ def _raw_figures(kind):
                  "averaged over cohorts weighted by treated counties (cohort-years with fewer than 10 treated or comparison counties are dropped). "
                  "No controls, no fixed effects.\nDotted lines: least-squares lines through event times -8 to -2 (descriptive). "
                  "Source: script4b-diagnostics.py (pretrends); script4f-figures.py.", fontsize=5, va="bottom", ha="left", color="#333333")
-        print("wrote", *figstyle.save_figure(fig, PRE_FIG_DIR, f"pretrends_raw_{d}_{kind}s"))
+        print("wrote", *figstyle.save_figure(fig, figs_dir, tagged("4f-pretrends", f"pretrends_raw_{d}_{kind}s")))
 
 
 def pretrends_raw():
@@ -446,7 +449,7 @@ def pretrends_controls_raw():
 # Slide-format redraws of every forest plot: 145 x 70 mm canvas, 8 pt text, placed at 1:1 in a 16:9 Beamer frame. The data are the same result
 # files as the print figures above (nothing is estimated). Each plot is drawn twice: `main` = Poor MH Days, Frequent Mental Distress and
 # Deaths of Despair (1 x 3 panels); `backup` = the four crime outcomes (2 x 2 panels), for the backup section of the deck.
-SLIDE_DIR = os.path.join(figs_dir, "slides")
+SLIDE_DIR = figs_dir      # output-name tag "4f-slides" (sections slides, slides-other); was folder figs/slides
 SLIDE_GROUPS = {"main": MENTAL_OUTCOMES, "backup": CRIME_OUTCOMES}
 SPECIES = ["dairy", "beef", "hogs", "chickens"]
 SPECIES_ROWS = [("T1", "T1 presence"), ("T3", "T3 per 10k"), ("T4", "T4 log count"), ("E2", "E2 first expansion"), ("CS", "Callaway-Sant'Anna")]
@@ -486,13 +489,19 @@ def _slide_interval(ax, y, r, xlim):
         ax.plot(xlim[0], y, "<", ms=ms, color=r.colour, clip_on=False)
 
 
-def slide_forest(tidy, panels, rows, row_labels, xlabel, stem, tag, series=None, series_style=None, bands=None):
+def slide_forest(tidy, panels, rows, row_labels, xlabel, stem, tag, series=None, series_style=None, bands=None, key=None, label_rows=True):
     """Forest plot on a slide canvas. tidy: panel, row, series, est, lo, hi, colour, marker, filled. rows: row keys top to bottom.
-    series: ordered series keys (offset within a row); series_style: {series: (label, colour, marker)} for the legend; bands: {panel: (lo, hi)}."""
+    series: ordered series keys (offset within a row); series_style: {series: (label, colour, marker)} for the legend; bands: {panel: (lo, hi)}.
+    key: [(label, colour)] or [(label, colour, marker)] drawn as one shared legend; with label_rows=False the rows carry no text, the key identifies them
+    (every panel has the same rows, so the labels would only repeat). The canvas height follows the number of rows."""
     n = len(panels)
     nrows, ncols = (1, n) if n <= 3 else (2, 2)
-    fig, axes = figstyle.new_slide(nrows, ncols, height_mm=figstyle.SLIDE_HEIGHT_MM if series_style is None else 66.0)
     series = series or [None]
+    n_leg = len(key) if key else (len(series_style) if series_style else 0)
+    leg_mm = 0.0 if not n_leg else (6.0 if n_leg <= 4 else 11.0)
+    axes_mm = len(rows) * (5.0 if len(series) == 1 else 8.5)
+    height = nrows * (axes_mm + 5.0) + 9.0 + leg_mm + (0.0 if label_rows else 0.0)
+    fig, axes = figstyle.new_slide(nrows, ncols, height_mm=min(height, figstyle.SLIDE_HEIGHT_MM + 10.0))
     w = 0.30 if len(series) > 1 else 0.0
     offsets = dict(zip(series, np.linspace(-w, w, len(series)))) if len(series) > 1 else {series[0]: 0.0}
     for ax, p in zip(axes.ravel(), panels):
@@ -510,18 +519,23 @@ def slide_forest(tidy, panels, rows, row_labels, xlabel, stem, tag, series=None,
                 if len(m):
                     _slide_interval(ax, k + offsets[s], m.iloc[0], xlim)
         ax.set_xlim(xlim)
-        ax.set_ylim(len(rows) - 0.4, -0.6)
-        ax.set_yticks(range(len(rows)), [row_labels[r] for r in rows] if ax in axes[:, 0] else [""] * len(rows))
+        ax.set_ylim(len(rows) - 0.45, -0.55)
+        if label_rows:
+            ax.set_yticks(range(len(rows)), [row_labels[r] for r in rows] if ax in axes[:, 0] else [""] * len(rows))
+        else:
+            ax.set_yticks([])
+            ax.spines["left"].set_visible(False)
         ax.set_title(SHORT_OUTCOME[p], loc="left", pad=2)
         if ax in axes[-1, :]:
             ax.set_xlabel(xlabel)
     for ax in axes.ravel()[n:]:
         ax.axis("off")
-    if series_style is not None:
+    entries = key if key else ([(l_, c_, m_) for l_, c_, m_ in series_style.values()] if series_style else [])
+    if entries:
         from matplotlib.lines import Line2D
-        handles = [Line2D([], [], marker=m_, ls="", color=c_, ms=4.2, label=l_) for l_, c_, m_ in series_style.values()]
-        fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
-    print("wrote", *figstyle.save_figure(fig, SLIDE_DIR, f"{stem}__{tag}", png_dpi=300))
+        handles = [Line2D([], [], marker=(e[2] if len(e) > 2 else "o"), ls="", color=e[1], ms=4.2, label=e[0]) for e in entries]
+        fig.legend(handles=handles, loc="outside lower center", ncol=min(len(handles), 4 if len(handles) > 5 else 5), frameon=False, columnspacing=1.0, handletextpad=0.2)
+    print("wrote", *figstyle.save_figure(fig, SLIDE_DIR, tagged("4f-slides", f"{stem}__{tag}"), png_dpi=300))
 
 
 def _emit(tidy, stem, rows, row_labels, xlabel, **kw):
@@ -536,34 +550,36 @@ def _tidy(panel, row, est, lo, hi, colour, marker="o", series="", filled=None):
 
 
 def _within_sd():
-    return pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4x"), "*_outcome_within_sd.csv"), index_col=0)["within_county_sd"]
+    return pd.read_csv(out_latest(tables_dir, "4a-species", "*_outcome_within_sd.csv"), index_col=0)["within_county_sd"]
 
 
 def slides_a2_grid():
-    g = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_A1_A2_treatment_grid.csv"))
+    g = pd.read_csv(out_latest(tables_dir, "4a-designs", "*_A1_A2_treatment_grid.csv"))
     g = g[(g.registry == "A2") & g.treatment_id.isin(TREATMENTS)]
     colour = g.treatment_id.map(lambda t: _hex(TREATMENT_COLOUR[t]))
+    rows = [t for t in TREATMENTS if t in set(g.treatment_id)]
     _emit(_tidy(g.outcome, g.treatment_id, g.beta, g.ci_lo, g.ci_hi, colour), "forest_a2_treatment_grid",
-          [t for t in TREATMENTS if t in set(g.treatment_id)], SHORT_TREATMENT, "Coefficient (outcome units)")
+          rows, SHORT_TREATMENT, "Coefficient (outcome units)", key=[(SHORT_TREATMENT[t], _hex(TREATMENT_COLOUR[t])) for t in rows], label_rows=False)
 
 
 def slides_species():
-    res = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4x"), "*_species_results.csv"))
+    res = pd.read_csv(out_latest(tables_dir, "4a-species", "*_species_results.csv"))
     sd = _within_sd()
-    style = {s: (s if s == "large" else "all sizes", _hex(SCOPE_COLOUR[s]), "o") for s in SCOPE_COLOUR}
+    spec_colour = {**{t: _hex(TREATMENT_COLOUR[t]) for t in ("T1", "T3", "T4", "E2")}, "CS": _hex("black")}      # colour = specification
+    scope_marker = {"large": "o", "all sizes": "s"}                                                            # shape = size class
+    key = [(lab, spec_colour[k]) for k, lab in SPECIES_ROWS] + [(sc, "#8c8c8c", m_) for sc, m_ in scope_marker.items()]
     for sp in SPECIES:
         r = res[(res.species == sp) & res.estimator.isin([k for k, _ in SPECIES_ROWS])].copy()
         scale = r.outcome.map(sd)
         r["est_sd"], r["half"] = r.estimate / scale, 1.96 * r.se / scale
-        _emit(_tidy(r.outcome, r.estimator, r.est_sd, r.est_sd - r.half, r.est_sd + r.half, r.scope.map(lambda s: _hex(SCOPE_COLOUR[s])),
-                    series=r.scope), f"forest_species_{sp}", [k for k, _ in SPECIES_ROWS], dict(SPECIES_ROWS),
-              "Effect (within-county SD)", series=list(SCOPE_COLOUR), series_style=style)
+        _emit(_tidy(r.outcome, r.estimator, r.est_sd, r.est_sd - r.half, r.est_sd + r.half, r.estimator.map(spec_colour),
+                    r.scope.map(scope_marker), series=r.scope), f"forest_species_{sp}", [k for k, _ in SPECIES_ROWS], dict(SPECIES_ROWS),
+              "Effect (within-county SD)", series=list(SCOPE_COLOUR), key=key, label_rows=False)
 
 
 def slides_triangulation():
-    za = os.path.join(tables_dir, "script4za")
-    overall = pd.read_csv(latest_file_glob(za, "*_overall_estimates.csv"))
-    agree = pd.read_csv(latest_file_glob(za, "*_agreement.csv"))
+    overall = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_overall_estimates.csv"))
+    agree = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_agreement.csv"))
     sd = _within_sd()
     for design, tag in DESIGNS.items():
         o = overall[overall.design == design].copy()
@@ -576,11 +592,12 @@ def slides_triangulation():
         marker = o.estimator.map(lambda e: "D" if e == CS else ("s" if e == TW else "o"))
         bands = {out: (g.ci_lo.iloc[0] / sd[out], g.ci_hi.iloc[0] / sd[out]) for out, g in o[o.estimator == CS].groupby("outcome")}
         _emit(_tidy(o.outcome, o.estimator, o.est / k, o.ci_lo / k, o.ci_hi / k, colour, marker, filled=o.filled), f"forest_triangulation_{tag}",
-              [n for n, _, _ in ROWS], {n: lab for n, lab, _ in ROWS}, "Effect (within-county SD)", bands=bands)
+              [n for n, _, _ in ROWS], {n: lab for n, lab, _ in ROWS}, "Effect (within-county SD)", bands=bands,
+              key=[(lab, _hex(c)) for _, lab, c in ROWS], label_rows=False)
 
 
 def _tbm_results():
-    res = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4zc"), "*_treatment_by_model.csv"))
+    res = pd.read_csv(out_latest(tables_dir, "4d-treatment-by-model", "*_treatment_by_model.csv"))
     sd = _within_sd()
     for c in ("est", "ci_lo", "ci_hi"):
         res[c] = res[c] / res.outcome.map(sd)
@@ -594,7 +611,8 @@ def slides_treatment_by_model():
         treats = [t for t in TREATMENTS if t in set(m.treatment_id)]
         colour = m.treatment_id.map(lambda t: _hex(TREATMENT_COLOUR[t]))
         stem = "forest_treatment_by_model_" + re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
-        _emit(_tidy(m.outcome, m.treatment_id, m.est, m.ci_lo, m.ci_hi, colour), stem, treats, SHORT_TREATMENT, "Effect (within-county SD)")
+        _emit(_tidy(m.outcome, m.treatment_id, m.est, m.ci_lo, m.ci_hi, colour), stem, treats, SHORT_TREATMENT, "Effect (within-county SD)",
+              key=[(SHORT_TREATMENT[t], _hex(TREATMENT_COLOUR[t])) for t in treats], label_rows=False)
     # all models together: panels = outcomes, rows = models, one offset slot per treatment
     colour = res.treatment_id.map(lambda t: _hex(TREATMENT_COLOUR[t]))
     style = {t: (SHORT_TREATMENT[t], _hex(TREATMENT_COLOUR[t]), "o") for t in TREATMENTS}
@@ -602,9 +620,21 @@ def slides_treatment_by_model():
           MODELS, {m: m for m in MODELS}, "Effect (within-county SD)", series=TREATMENTS, series_style=style)
 
 
+def slides_slaughterhouse():
+    """Slaughterhouses on their own, in the layout of the A2 grid: FSIS count (R1) and FSIS entry (R2), two-way fixed effects, outcome units.
+    Reads the 4a-fsis result file (dated by its own run; check MODEL-RUN-STATE for the panel it used)."""
+    r = pd.read_csv(out_latest(tables_dir, "4a-fsis", "*_R1_R2_twfe.csv"))
+    rows = {"F1 count": ("F1 slaughterhouse count", "orange"), "F2 entry": ("F2 slaughterhouse entry", "sky")}
+    r = r[r.treatment.isin(rows)]
+    colour = r.treatment.map(lambda t: _hex(rows[t][1]))
+    _emit(_tidy(r.outcome, r.treatment, r.beta, r.beta - 1.96 * r.se_state, r.beta + 1.96 * r.se_state, colour), "forest_slaughterhouse",
+          list(rows), {k: v[0] for k, v in rows.items()}, "Coefficient (outcome units)",
+          key=[(lab, _hex(c)) for lab, c in rows.values()], label_rows=False)
+
+
 def slides():
     figstyle.apply_style("slide")
-    for fn in (slides_a2_grid, slides_species, slides_triangulation, slides_treatment_by_model):
+    for fn in (slides_a2_grid, slides_species, slides_triangulation, slides_treatment_by_model, slides_slaughterhouse):
         fn()
 
 
@@ -628,7 +658,7 @@ def slide_panels(panels, draw, stem, tag, xlabel=None, ylabel=None, grid=None, h
             ax.axis("off")
         if handles:
             fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
-    print("wrote", *figstyle.save_figure(fig, SLIDE_DIR, f"{stem}__{tag}" if tag else stem, png_dpi=300))
+    print("wrote", *figstyle.save_figure(fig, figs_dir, tagged("4f-slides", f"{stem}__{tag}" if tag else stem), png_dpi=300))
 
 
 def _emit_panels(draw, stem, **kw):
@@ -638,9 +668,8 @@ def _emit_panels(draw, stem, **kw):
 
 def slides_event_studies():
     """TWFE event study (script4a A5) and Callaway-Sant'Anna event-time effects (A6, covariate-adjusted), event times -8 to 8, 95% intervals."""
-    ta = os.path.join(tables_dir, "script4a")
-    a5 = pd.read_csv(latest_file_glob(ta, "*_A5_event_study.csv")).rename(columns={"beta": "est"})
-    cs = pd.read_csv(latest_file_glob(ta, "*_A6_cs_aggregated.csv"))
+    a5 = pd.read_csv(out_latest(tables_dir, "4a-designs", "*_A5_event_study.csv")).rename(columns={"beta": "est"})
+    cs = pd.read_csv(out_latest(tables_dir, "4a-designs", "*_A6_cs_aggregated.csv"))
     cs = cs[(cs.arm == "covariate-adjusted") & (cs.agg_level == "event_time")].rename(columns={"att": "est"})
     cs = cs[cs.event_time.between(-8, 8)]
     blue = figstyle.PALETTE["blue"]
@@ -656,7 +685,7 @@ def slides_event_studies():
 
 def slides_leads():
     """Outcome leads on first expansion (E2) and first entry (E3) (event-study leads -8 to -2) with the dotted descriptive fits."""
-    lc = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4t"), "*_leads_coefficients.csv"))
+    lc = pd.read_csv(out_latest(tables_dir, "4b-leads", "*_leads_coefficients.csv"))
     fits = _pre_inputs()
     style = {"E2": ("E2 first expansion", figstyle.PALETTE["vermillion"], "o"), "E3": ("E3 first entry", figstyle.PALETTE["black"], "s")}
 
@@ -675,7 +704,7 @@ def slides_leads():
 
 def slides_raw():
     """Raw change since the year before treatment, treated versus comparison counties, with dotted pre-period fits (script4b pretrends)."""
-    raw = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4b"), "*_pretrend_raw_means.csv"))
+    raw = pd.read_csv(out_latest(tables_dir, "4b-pretrends", "*_pretrend_raw_means.csv"))
     fits = _pre_inputs()
     from matplotlib.lines import Line2D
     handles = [Line2D([], [], marker="o", ls="-", color=figstyle.PALETTE[c], ms=3, label=l) for l, c in (("treated", "vermillion"), ("comparison", "blue"))]
@@ -694,9 +723,8 @@ def slides_raw():
 def slides_controls_pretrends():
     """The 8 selected controls as dependent variables of the E2 event study: pre-period coefficients in SD, dotted fits (dense grid: 7 pt)."""
     from script4_treatment import COVARIATE_ORDER
-    ta = os.path.join(tables_dir, "script4a")
-    lag = pd.read_csv(latest_file_glob(ta, "*_control_pretrend_lags.csv"))
-    ver = pd.read_csv(latest_file_glob(ta, "*_control_pretrends.csv")).set_index("variable")
+    lag = pd.read_csv(out_latest(tables_dir, "4b-controls", "*_control_pretrend_lags.csv"))
+    ver = pd.read_csv(out_latest(tables_dir, "4b-controls", "*_control_pretrends.csv")).set_index("variable")
     fits, col = _pre_inputs(), figstyle.PALETTE["blue"]
 
     def draw(ax, c):
@@ -715,7 +743,7 @@ def slides_controls_pretrends():
 def slides_control_coverage():
     """Percent filled, 2015-2020, of the 24 candidate controls: two columns of 12 horizontal bars, coloured by type, selected controls outlined."""
     from designs import CONTROL_TYPE_COLOUR, FILL_THRESHOLD_PCT
-    cov = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script1c"), "*_control_coverage.csv"))
+    cov = pd.read_csv(out_latest(tables_dir, "1c", "*_control_coverage.csv"))
     cov["order"] = cov.type.map({t: i for i, t in enumerate(CONTROL_TYPE_COLOUR)})
     cov = cov.sort_values(["order", "fill_pct"], ascending=[True, False]).reset_index(drop=True)
     half = (len(cov) + 1) // 2
@@ -733,15 +761,15 @@ def slides_control_coverage():
         from matplotlib.patches import Patch
         handles = [Patch(color=_hex(c), label=t) for t, c in CONTROL_TYPE_COLOUR.items()] + [Patch(facecolor="white", edgecolor="black", label="selected (8)")]
         fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
-    print("wrote", *figstyle.save_figure(fig, SLIDE_DIR, "control_coverage", png_dpi=300))
+    print("wrote", *figstyle.save_figure(fig, figs_dir, tagged("4f-slides", "control_coverage"), png_dpi=300))
 
 
 def slides_permutation():
     """Panel a: null distribution of the TWFE coefficient for Poor MH Days under first expansion; panel b: permutation p-values, both designs."""
-    IN = os.path.join(tables_dir, "script4ze")
+    IN, TAG_IN = tables_dir, "4c-permutation"
 
     def newest(pattern):
-        files = sorted(glob.glob(os.path.join(IN, pattern)))
+        files = out_glob(tables_dir, TAG_IN, pattern)
         dates = sorted({os.path.basename(f)[:10] for f in files})
         return pd.concat([pd.read_csv(f) for f in files if os.path.basename(f).startswith(dates[-1])], ignore_index=True)
 
@@ -774,7 +802,7 @@ def slides_permutation():
     ax.set_xlabel("Permutation p-value (log scale)")
     ax.set_title("p-values, all outcomes", loc="left", pad=2)
     fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncol=2, frameon=False)
-    print("wrote", *figstyle.save_figure(fig, SLIDE_DIR, "permutation_inference", png_dpi=300))
+    print("wrote", *figstyle.save_figure(fig, figs_dir, tagged("4f-slides", "permutation_inference"), png_dpi=300))
 
 
 def slides_other():
@@ -792,7 +820,7 @@ QUICK_SECTIONS = {"treatment-by-model", "permutation"}
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", nargs="+", choices=list(SECTIONS), help="sections to run (default: all, in file order)")
-    ap.add_argument("--quick", action="store_true", help="read the script4zc_quick / script4ze_quick results (no effect on triangulation)")
+    ap.add_argument("--quick", action="store_true", help="read the -quick results of script4d / script4c and tag outputs -quick (no effect on triangulation)")
     args = ap.parse_args()
     for name in args.only or SECTIONS:
         print(f"=== {name}")

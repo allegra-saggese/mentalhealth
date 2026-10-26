@@ -33,3 +33,36 @@ Earlier in the consolidation: `did_tools.py` and `did_cs.py` are sections of `es
 
 ## Additions after the consolidation, 2026-10-26 (D-55)
 New sections, no old script behind them: `script4b-diagnostics.py --only pretrends` (raw pre-period paths and fits; folder `tables/script4b`); `script4f-figures.py --only pretrends-leads pretrends-controls pretrends-raw pretrends-controls-raw` (folder `figs/script4f`); `script1c-figures.py --only control-coverage`. The `controls` section of `script4b` also writes `control_pretrend_lags.csv`, `control_correlations_selected8.csv` and `.txt` tables to `tables/script4a`; its existing three CSVs are identical to before (checked).
+
+## Output layout, 2026-10-26 (after D-56)
+Per-script output folders are replaced by one flat folder per kind of file (`Data/output/{tables,figures,maps,latex,codebooks}`), with the
+writing script and section in the file name: `YYYY-MM-DD_<tag>_<stem>`. Helpers `tagged`, `out_file`, `out_glob`, `out_latest` in `packages.py`
+are the only place the rule is coded. Existing files were renamed, not rewritten; the file-by-file record is
+`Data/output/_archive/2026-10-26_layout-migration_MANIFEST.csv` (763 rows). Notes written before this date (MODEL-RUN-STATE, session notes)
+cite the old folders; read them through this table.
+| Old folder | New tag | Section |
+|---|---|---|
+| `tables/script4a`, `figs/script4a` | `4a-designs` | `script4a --only designs` |
+| `tables/script4a` (control_roster, control_pretrends, vif_headline_within, control_pretrend_lags, control_correlations_selected8, VIF_audit.txt) | `4b-controls` | `script4b --only controls` |
+| `tables/script4u` | `4a-cohorts` | `script4a --only cohorts` |
+| `tables/script4x`, `figs/script4x` | `4a-species` | `script4a --only species` |
+| `tables/script4r` | `4a-fsis` | `script4a --only fsis` |
+| `tables/script4t` | `4b-leads` | `script4b --only leads` |
+| `tables/script4b` (pretrend_*) | `4b-pretrends` | `script4b --only pretrends` |
+| `tables/script4b` (covariate_sequence, 09-23) | `4b-covariate-sequence` | `z-archive/script4b-covariate-sequence.py` |
+| `latex-outputs-run2/*_balance_panel.csv` | `4b-balance` | `script4b --only balance` (the .tex stay in `latex/`) |
+| `tables/script4y` | `4b-control-set` | `script4b --only control-set` |
+| `tables/script4w` | `4b-honestdid` | `R/honestdid.R` |
+| `tables/script4w/honestdid_inputs` | `4b-honestdid-inputs` (undated) | `script4b --only honestdid` |
+| `tables/script4z` | `4c-wild` | `script4c --only wild` |
+| `tables/script4ze` | `4c-permutation` | `script4c --only permutation` |
+| `tables/script4za` | `4d-estimators` | `script4d --only estimators` |
+| `tables/script4zc` | `4d-treatment-by-model` | `script4d --only treatment-by-model` |
+| `figs/script4zb` / `script4zd` / `script4zf` | `4f-triangulation` / `4f-treatment-by-model` / `4f-permutation` | `script4f` |
+| `figs/script4f` | `4f-pretrends` | `script4f --only pretrends-*` |
+| `figs/slides` | `4f-slides` | `script4f --only slides slides-other` |
+| `tables/script1b`, `tables/script1c`, `figs/script1c`, `maps/script1d`, `tables/script1a`, `figs/script1a` | `1b`, `1c`, `1d`, `1a` | stage-1 scripts |
+| `tables/<date>_ratio_flags_qa.csv` | `0f` | `script0f-generate-panel.py` |
+| `tables/qa_cs_crosscheck` | `qa-cs-crosscheck` | `qa-scripts/qa_cs_crosscheck.py` |
+| `latex-outputs-run2/` | `latex/` (folder renamed; names unchanged) | `script4b --only balance`, `script4e` |
+| `*_quick` folders | `<tag>-quick` | any `--quick` run |
