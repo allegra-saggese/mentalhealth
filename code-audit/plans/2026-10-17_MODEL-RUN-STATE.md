@@ -101,3 +101,19 @@ still compute A1, T2 and all three SEs (D-32).
 outside those seven, and no stage-4 script reads them (`git grep`), so **no estimation output needs re-running because of this change**; the table above still describes which script ran on which treatment values.
 Not changed, still open: forward-fill carries an earlier census wave's species counts into a later wave that has no row (T1, T3, T4 differ in 119 county-years across 21 counties if census-year blanks are set to 0 first; E2 and E3 do not change).
 Stage 1 (`script1a` to `script1d`) was run on the new panel on 2026-10-25; its outputs are in `Data/output/{tables,figs,maps}/script1*/`.
+
+---
+
+## Addendum 2026-10-25 (later): D-53 panel, re-run state
+**Correction to the addendum above:** its statement that no estimation output needs re-running holds for D-51 only. D-53 (census-year blanks are 0 before the forward-fill; `script0f` rebuilt the panel the same day, the D-51 files are in `Data/merged/_archive/2026-10-25_D-51/`) changes T1, T3, T4, `tr_c*`, `cond_log_*` and the species size classes, so everything that reads them was re-run on `Data/merged/2026-10-25_panel.csv` and **those 2026-10-25 outputs are the current ones**; earlier outputs of the same scripts are superseded.
+| Script | Run on 2026-10-25 | Result vs previous |
+|---|---|---|
+| `script4a` (A1/A2, A4, A5, A6, A7, VIF) | yes | A2 T1, T2, T3, T4 rows change; E2 rows, A6, A7, HEADLINE identical |
+| `script4j`, `4d`, `4t`, `4y` | yes | leads and control-set tables change |
+| `script4x` (species) | yes | hogs, chickens, dairy, beef rows change (193 of 280) |
+| `script4z` (inference) | yes | T1, T3, T4 p-values move; E2 estimate and wild p identical, Romano-Wolf p moves slightly |
+| `script4zc`, `4zd` | yes | TWFE and dCDH T1, T3, T4 rows change (42 of 140); E2/E3 rows identical |
+| `script4n`, `4p`, `4q` | yes | tables, appendix and frames rebuilt from the new files |
+| `script1b`, `1c`, `1d` | yes | stage-1 outputs rebuilt on the new panel |
+| `script4u`, `4w`, `4za`, `4zb`, `4ze`, `4zf`, `4r` | **no** | read none of the changed columns (first-expansion/first-entry dairy cohorts, outcomes and controls identical); their earlier outputs stand |
+Before/after numbers: `2026-10-25_D53-BEFORE-AFTER.md`. Not changed and still open: 68 county-years (dairy) stay blank because the county was not rural in the census year (D-53).
