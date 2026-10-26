@@ -33,11 +33,8 @@ QA_DIR = os.path.join(db_data, "FOIA-USDA-request", "qa-fsis")
 # ----------------------- DATA PART 1: EXECUTE FOLDER OF SCRIPTS -------------------- -#
 
 SCRIPT_ORDER = {
-    "extract_raw": "script0e-fsis-slaughterhouses.py",
-    "build_size_panel": "script0h-fsis-establishment-size-panel.py",
-    "hud_zip_fill": "script0i-fsis-hud-zip-fips-fill.py",
-    "hud_zipyear_refill": "script0j-fsis-hud-zipyear-refill.py",
-    "hud_bulk_fill": "script0k-fsis-hud-bulk-zipyear-fill.py",
+    "build_establishment_panel": "script0e-fsis-slaughterhouses.py",   # sections extract, size-panel
+    "hud_fill": "script0i-fsis-hud-fill.py",                            # --strategy bulk (default) or targeted
     "manual_and_deterministic_fill": "script0l-fsis-manual-and-deterministic-fill.py",   # manual ZIP, deterministic, manual county label
 }
 
@@ -80,21 +77,15 @@ def _run_script(script_name: str, dry_run=False, extra_args=()):
 
 
 def _build_steps(hud_strategy: str):
-    steps = [
-        SCRIPT_ORDER["extract_raw"],
-        SCRIPT_ORDER["build_size_panel"],
-    ]
+    """The steps as (script, extra arguments) pairs, in run order."""
+    steps = [(SCRIPT_ORDER["build_establishment_panel"], ())]
 
-    if hud_strategy == "bulk":
-        steps.append(SCRIPT_ORDER["hud_bulk_fill"])
-    elif hud_strategy == "targeted":
-        steps.extend([SCRIPT_ORDER["hud_zip_fill"], SCRIPT_ORDER["hud_zipyear_refill"]])
-    elif hud_strategy == "skip":
-        pass
-    else:
+    if hud_strategy in ("bulk", "targeted"):
+        steps.append((SCRIPT_ORDER["hud_fill"], ("--strategy", hud_strategy)))
+    elif hud_strategy != "skip":
         raise ValueError(f"Unknown hud strategy: {hud_strategy}")
 
-    steps.append(SCRIPT_ORDER["manual_and_deterministic_fill"])
+    steps.append((SCRIPT_ORDER["manual_and_deterministic_fill"], ()))
     return steps
 
 
@@ -162,11 +153,12 @@ def main():
                                       ("--require-manual-county", args.require_manual_county)) if on]
 
     print("FSIS pipeline steps:")
-    for idx, step in enumerate(steps, start=1):
-        print(f"{idx}. {step}")
+    for idx, (script, script_args) in enumerate(steps, start=1):
+        print(f"{idx}. {script} {' '.join(script_args)}".rstrip())
 
     for step in steps:
-        _run_script(step, dry_run=args.dry_run, extra_args=last_step_args if step == steps[-1] else ())
+        script, script_args = step
+        _run_script(script, dry_run=args.dry_run, extra_args=(*script_args, *(last_step_args if step == steps[-1] else ())))
 
     print("FSIS pipeline complete.")
 

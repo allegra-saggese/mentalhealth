@@ -211,9 +211,7 @@ def filter_to_us_state_codes(df, state_col="state_code", allowed_state_codes=Non
     return out.loc[state_vals.isin(allowed)].copy()
 
 
-# used in: fsis-scripts/script0e-fsis-slaughterhouses.py, fsis-scripts/script0h-fsis-establishment-size-panel.py,
-# used in: fsis-scripts/script0i-fsis-hud-zip-fips-fill.py, fsis-scripts/script0j-fsis-hud-zipyear-refill.py,
-# used in: fsis-scripts/script0k-fsis-hud-bulk-zipyear-fill.py,
+# used in: fsis-scripts/script0e-fsis-slaughterhouses.py, fsis-scripts/script0i-fsis-hud-fill.py,
 # used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py, script0c-health-controls.py
 def first_non_null(series: pd.Series):
     """
@@ -223,9 +221,7 @@ def first_non_null(series: pd.Series):
     return s.iloc[0] if len(s) else pd.NA
 
 
-# used in: fsis-scripts/script0i-fsis-hud-zip-fips-fill.py, fsis-scripts/script0j-fsis-hud-zipyear-refill.py,
-# used in: fsis-scripts/script0k-fsis-hud-bulk-zipyear-fill.py,
-# used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
+# used in: fsis-scripts/script0i-fsis-hud-fill.py, fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
 def normalize_zip5(series: pd.Series) -> pd.Series:
     """
     Extract 5-digit ZIP code from a string-like series.
@@ -283,7 +279,7 @@ def latest_file_glob(folder: str, pattern: str) -> str:
     return max(hits, key=os.path.getmtime)
 
 
-# used in: fsis-scripts/script0h-fsis-establishment-size-panel.py, fsis-scripts/script0i-fsis-hud-zip-fips-fill.py,
+# used in: fsis-scripts/script0e-fsis-slaughterhouses.py, fsis-scripts/script0i-fsis-hud-fill.py,
 # used in: fsis-scripts/script0l-fsis-manual-and-deterministic-fill.py
 def latest_file_by_regex(dirpath: str, pattern: str) -> str:
     """
