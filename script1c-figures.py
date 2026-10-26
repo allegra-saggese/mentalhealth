@@ -20,13 +20,14 @@ Sections (python3 script1c-figures.py --only <name> [<name> ...]; no flag runs a
   state-dots               county dots by state, 2017: poor mental health days vs total CAFO operations (script2a section 12)
   chicken-facets           chicken CAFOs vs poor mental health days by year and size class            (script2a section 12)
   species-overlap          counties by number of species with a large operation                     (script4s)
+  control-coverage         percent filled, 2015-2020, of the 24 candidate controls, by type          (new; D-55)
   trends                   raw trends by county group, event-time paths, pre-treatment slopes       (script4v)
 Reads:   newest Data/merged/*_panel.csv and *_panel_fsis.csv; Data/clean/*_cafo_ops_by_size_compact.csv; for `trends`
          the treatment definitions in script4_treatment.py and designs.py (no new definitions here)
 Window:  each outcome is drawn over its own designs.OUTCOME_WINDOWS entry (outcomes without one: all panel years); exposures use
          all panel years. Descriptive only, not the estimation samples (A21 open)
 Writes:  Data/output/figs/script1c/<date>_<stem>.{pdf,png} (183 mm / 89 mm, 600 dpi PNG + vector PDF) and the numbers behind
-         each figure in Data/output/tables/script1c/<date>_<stem>.csv
+         each figure in Data/output/tables/script1c/<date>_<stem>.csv (`control-coverage` also writes the same numbers as .txt)
 Run:     PYTHONHASHSEED=0 python3 script1c-figures.py            about 4 min (trend-sweep is most of it; --max-trend-vars N shortens it)
 Style:   figstyle.py (Nature/Science standards, .claude/rules/figure-and-table-standards.md). Stochastic code: the box-plot
          jitter only, seeded inside the section. Tables of the descriptive stage are written by script1b-tables.py.
@@ -51,9 +52,10 @@ import seaborn as sns
 from scipy import stats
 
 import figstyle
-from designs import OUTCOME_WINDOWS
+from designs import CONTROL_TYPE, CONTROL_TYPE_COLOUR, FILL_THRESHOLD_PCT, OUTCOME_WINDOWS
 from functions import latest_file_glob, log_per10k, normalize_panel_key, to_numeric_series
 from packages import db_data, figs_dir, tables_dir
+from script4_treatment import COVARIATE_ORDER
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -70,6 +72,8 @@ SIZES = ["Small", "Medium", "Large"]
 X_CAFO = "log(CAFO operations per 10,000 residents + 1)"
 STATE_PLOT_LIMIT = 12               # states with the most large operations in `state-trends` (Arkansas is always added)
 MAX_TREND_VARS = None               # cap on the variables of `trend-sweep` (--max-trend-vars); None = all
+COVERAGE_YEARS = (2015, 2020)       # `control-coverage`: years over which the fill rate of each candidate control is measured
+N_SELECTED = 8                      # the selected control set is COVARIATE_ORDER[:N_SELECTED] (D-16)
 
 # One colour per variable, the same in every figure (Okabe-Ito via figstyle).
 P = figstyle.PALETTE
@@ -77,6 +81,7 @@ ANIMAL_COLOUR = {"Cattle": P["orange"], "Hogs": P["purple"], "Chickens": P["gree
 COMMODITY_COLOUR = {"cattle": P["orange"], "hogs": P["purple"], "chickens": P["green"], "beef": P["vermillion"], "dairy": P["sky"]}
 ANIMAL_MARKER = {"Cattle": "o", "Hogs": "s", "Chickens": "^"}
 ANIMAL_HATCH = {"Cattle": "", "Hogs": "//", "Chickens": ".."}
+TYPE_HATCH = {"Health": "", "Demographic": "///", "Economic": "....", "Social and education": "xxx"}   # greyscale-legible control types
 EXPOSURE_COLOUR = {"total": P["blue"], "large": P["vermillion"], "small": P["sky"], "fsis": P["green"], "slaughter": P["purple"]}
 _viridis = plt.get_cmap(figstyle.SEQUENTIAL_CMAP)
 SIZE_COLOUR = dict(zip(SIZES, (mcolors.to_hex(_viridis(v)) for v in (0.95, 0.55, 0.10))))   # light -> dark = small -> large
@@ -1243,6 +1248,90 @@ def section_species_overlap():
 
 
 # =============================================================================
+# control-coverage (new; D-55)
+# =============================================================================
+def coverage_table(pan):
+    """Share of non-missing values of each candidate control over COVERAGE_YEARS, one row per control, in figure order
+    (type clusters in designs.CONTROL_TYPE_COLOUR order, then fill rate descending). Raises if a candidate is not in the panel."""
+    missing = [c for c in CONTROL_TYPE if c not in pan.columns]
+    if missing:
+        raise KeyError(f"candidate controls not in the panel (reported, not dropped): {missing}")
+    selected = set(COVARIATE_ORDER[:N_SELECTED])
+    assert selected <= set(CONTROL_TYPE), f"selected controls outside the 24 candidates: {sorted(selected - set(CONTROL_TYPE))}"
+    sub = pan[pan["year"].between(*COVERAGE_YEARS)]
+    assert not sub.duplicated(["fips", "year"]).any(), "panel must have one row per county-year"
+    rows = [{"variable": c, "type": t, "selected": c in selected, "n_obs": len(sub), "n_filled": int(sub[c].notna().sum())}
+            for c, t in CONTROL_TYPE.items()]
+    out = pd.DataFrame(rows)
+    out["fill_pct"] = out["n_filled"] / out["n_obs"] * 100
+    out["_cluster"] = out["type"].map({t: i for i, t in enumerate(CONTROL_TYPE_COLOUR)})
+    out = out.sort_values(["_cluster", "fill_pct", "variable"], ascending=[True, False, True]).drop(columns="_cluster").reset_index(drop=True)
+    # Second route (all columns at once); the two must agree to rounding error.
+    again = sub[out["variable"].tolist()].notna().mean() * 100
+    assert np.allclose(again.to_numpy(), out["fill_pct"].to_numpy(), rtol=0, atol=1e-9), "fill rates differ between the two routes"
+    return out, sub
+
+
+def control_label(name):
+    """Readable axis label for a panel column name."""
+    return name.replace("_per100k", "").replace("%_", "% ").replace("_", " ")
+
+
+def section_control_coverage():
+    """Horizontal bars of the percent of filled county-years, COVERAGE_YEARS, for the 24 candidate controls (designs.CONTROL_TYPE),
+    clustered by type and coloured by type; the selected set is outlined and the fill cutoff of script0c is dotted."""
+    pan = panel()
+    assert (pan["rural"] == 1).all(), "panel is expected to be pre-filtered to rural counties"
+    cov, sub = coverage_table(pan)
+    lo, hi = COVERAGE_YEARS
+    write_table(cov, "control_coverage")
+    txt = cov.assign(selected=np.where(cov["selected"], "yes", "no")).rename(columns={"selected": "selected (D-16)"})
+    sel = cov[cov["selected"]]
+    others = cov[~cov["selected"]]
+    note_txt = (f"Percent of non-missing values per variable over rural county-years {lo}-{hi} ({len(sub):,} county-years, {sub['fips'].nunique():,} counties). "
+                f"Rows follow the figure: type clusters, then fill rate descending. Cutoff line: {FILL_THRESHOLD_PCT}% (the HIGH FILL cutoff of "
+                f"script0c-health-controls.py). Selected = the {N_SELECTED} controls of the pre-committed set (D-16).")
+    path = figstyle.save_text_table(txt, OUT_TABLES, "control_coverage", f"Fill rate of the {len(cov)} candidate controls, {lo}-{hi}", note_txt)
+    print("  table", path.name)
+    print(f"  selected {N_SELECTED}: min {sel['fill_pct'].min():.3f}% max {sel['fill_pct'].max():.3f}%; other {len(others)}: "
+          f"max {others['fill_pct'].max():.3f}%, lowest {others.loc[others['fill_pct'].idxmin(), 'variable']} {others['fill_pct'].min():.3f}%")
+
+    # y positions from the top: one gap row between type clusters
+    ypos, y, prev = [], 0.0, None
+    for t in cov["type"]:
+        y += 0.8 if prev is not None and t != prev else 0.0
+        ypos.append(y)
+        y += 1.0
+        prev = t
+    cov = cov.assign(y=ypos)
+    fig, ax = figstyle.new_figure("double", height_mm=148)
+    for _, r in cov.iterrows():
+        ax.barh(r["y"], r["fill_pct"], height=0.78, color=P[CONTROL_TYPE_COLOUR[r["type"]]], hatch=TYPE_HATCH[r["type"]],
+                edgecolor="#333333", linewidth=0.3, zorder=2)          # same dark hatch on every bar
+        if r["selected"]:                                               # outline drawn separately so it does not change the hatch
+            ax.barh(r["y"], r["fill_pct"], height=0.78, fill=False, edgecolor="black", linewidth=1.3, zorder=4)
+        ax.text(r["fill_pct"] + 0.8, r["y"], f"{r['fill_pct']:.1f}%", va="center", ha="left", fontsize=5, color=NOTE_COLOUR)
+    ax.axvline(FILL_THRESHOLD_PCT, color="black", ls=":", lw=0.9, zorder=3)
+    ax.set_yticks(cov["y"], [control_label(v) for v in cov["variable"]], fontsize=5.5)
+    for tick, sel_flag in zip(ax.get_yticklabels(), cov["selected"]):
+        tick.set_fontweight("bold" if sel_flag else "normal")
+    ax.set_ylim(cov["y"].max() + 0.7, -0.7)
+    ax.set_xlim(0, 112)
+    ax.set_xticks(range(0, 101, 20))
+    ax.set_xlabel(f"Filled observations, rural county-years {lo}-{hi} (% of {len(sub):,})")
+    handles = [plt.Rectangle((0, 0), 1, 1, facecolor=P[CONTROL_TYPE_COLOUR[t]], hatch=TYPE_HATCH[t], edgecolor="#333333", linewidth=0.3, label=t)
+               for t in CONTROL_TYPE_COLOUR]
+    handles += [plt.Rectangle((0, 0), 1, 1, facecolor="white", edgecolor="black", linewidth=1.3, label="selected control set, D-16"),
+                plt.Line2D([0], [0], color="black", ls=":", lw=0.9, label=f"fill cutoff of the 0-series script, {FILL_THRESHOLD_PCT}%")]
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=5.5, title="Control type", title_fontsize=5.5)
+    save(fig, "control_coverage",
+         f"Percent of non-missing values of the {len(cov)} candidate controls (designs.CONTROL_TYPE), rural US county-years {lo}-{hi} "
+         f"({len(sub):,} county-years, {sub['fips'].nunique():,} counties). Bars sorted by fill rate within type; colour and hatch = type; dark outline and bold "
+         f"name = the {N_SELECTED} selected controls (D-16); dotted line = HIGH FILL cutoff of script0c-health-controls.py ({FILL_THRESHOLD_PCT}%). "
+         "Source: analysis panel.")
+
+
+# =============================================================================
 # trends (script4v)
 # =============================================================================
 UNIT = {"Poor MH Days": "days per month", "Frequent Mental Distress": "per 100,000", "Deaths of Despair": "per 100,000",
@@ -1431,6 +1520,7 @@ SECTIONS = {
     "state-dots": section_state_dots,
     "chicken-facets": section_chicken_facets,
     "species-overlap": section_species_overlap,
+    "control-coverage": section_control_coverage,
     "trends": section_trends,
 }
 
