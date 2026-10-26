@@ -36,3 +36,5 @@ When a mistake is corrected, append a `[LEARN:category]` entry below (most recen
 [LEARN:data] Treating blank `cafo_*` counts as missing for 2002 onward -> the agricultural census is exhaustive, so blank means zero from 2002 (rule D-34); 2000-01 stay missing because no census was taken.
 
 [LEARN:data] Loading FSIS columns from the main panel -> FSIS columns exist only in `*_panel_fsis.csv` (2017+).
+
+[LEARN:format] Regression tables on slides with "coefficient (SE) [p]" in one cell per outcome row -> journal layout: outcomes as numbered columns, coefficient with stars (* p<0.10, ** p<0.05, *** p<0.01) and the standard error in parentheses below, then a rule and rows for N, counties, clusters, fixed effects, controls. The owner asked for stars on the slide tables, which overrides the "no stars" default of the Nature/Science table standard for those tables only.

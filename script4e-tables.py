@@ -1019,6 +1019,27 @@ def _yn(v):
     return r"\textbullet" if bool(v) else ""
 
 
+def _stars(p):
+    """Significance stars for the slide regression tables: * p<0.10, ** p<0.05, *** p<0.01."""
+    return "" if pd.isna(p) else ("***" if p < 0.01 else "**" if p < 0.05 else "*" if p < 0.10 else "")
+
+
+def _est_se_rows(label, cells):
+    """Two table rows in the layout of a journal regression table: coefficient with stars, then the standard error in parentheses below.
+    cells: list of (beta, se, p); a missing beta leaves the cell blank."""
+    est = " & ".join("" if pd.isna(b) else f"{b:,.3f}" + (f"$^{{{_stars(p)}}}$" if _stars(p) else "") for b, _, p in cells)
+    se = " & ".join("" if pd.isna(b) else f"({s:,.3f})" for b, s, _ in cells)
+    return [f"{label} & {est}", f" & {se}"]
+
+
+def _reg_tab(names, body, footer):
+    """Journal-style regression table: numbered columns with the outcome stacked over two lines, coefficient/SE rows, a rule, then footer rows (N, fixed effects, ...)."""
+    head = " & ".join(f"\\shortstack{{{n}}}" for n in names)
+    nums = " & ".join(f"({i + 1})" for i in range(len(names)))
+    return ("\\begin{tabular}{@{}l" + "c" * len(names) + "@{}}\n\\toprule\n & " + nums + "\\\\\n & " + head + "\\\\\n\\midrule\n"
+            + "\\\\\n".join(body) + "\\\\\n\\midrule\n" + "\\\\\n".join(footer) + "\\\\\n\\bottomrule\n\\end{tabular}")
+
+
 def _fragment(name, tabulars, note, size=r"\scriptsize"):
     """Write one fragment: the tabular(s) side by side or stacked as given, shrunk to the text width when wider, then a neutral note."""
     body = []
@@ -1113,23 +1134,38 @@ def slide_fragments():
     # ---- A2 TWFE results
     g = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_A1_A2_treatment_grid.csv")))[-1])
     g = g[(g.registry == "A2") & g.treatment_id.isin(["T1", "T3", "T4", "E2"])]
+    cols = [g[(g.outcome == o)] for o in OUTCOMES]
     rows = []
-    for o in OUTCOMES:
-        cells = []
-        for t in ("T1", "T3", "T4", "E2"):
-            r = g[(g.outcome == o) & (g.treatment_id == t)].iloc[0]
-            cells.append(f"{_cs(r.beta, r.se_state)} [{r.p_state:.3f}]")
-        rows.append(f"{OUT_NAME[o]} & {int(g[g.outcome == o].N.iloc[0]):,} & " + " & ".join(cells))
-    _fragment("results__a2_twfe", _tab(r"@{}lrllll@{}", "Outcome & N & T1 presence & T3 per 10k & T4 log count & E2 first expansion", rows),
-              "Two-way fixed effects, coefficient (standard error) [p, state-clustered]; outcome units; T1, T3, T4 and E2 enter one regression each. Source: script4a A2 grid "
-              f"({stem(T4A, '*_A1_A2_treatment_grid.csv')}). " + base_note)
+    for t, lab in (("T1", "T1 presence"), ("T3", "T3 per 10k"), ("T4", "T4 log count"), ("E2", "E2 first expansion")):
+        cells = [tuple(c[c.treatment_id == t].iloc[0][["beta", "se_state", "p_state"]]) for c in cols]
+        rows += _est_se_rows(lab, cells)
+    yes = " & ".join("Yes" for _ in cols)
+    footer = ["Observations (county-years) & " + " & ".join(f"{int(c.N.iloc[0]):,}" for c in cols),
+              "Counties & " + " & ".join(f"{int(c.n_counties.iloc[0]):,}" for c in cols),
+              "States (clusters) & " + " & ".join(f"{int(c.n_states.iloc[0])}" for c in cols),
+              "County and year fixed effects & " + yes, "Controls (the control set of 8) & " + yes]
+    tab = _reg_tab([r"Poor MH\\Days", r"Frequent\\distress", r"Deaths of\\despair", r"Aggravated\\assault", r"Assault,\\all", r"Violence\\index", r"NIBRS\\total"], rows, footer)
+    _fragment("results__a2_twfe", tab,
+              "Each coefficient is a separate two-way fixed effects regression of the column outcome on the row treatment; standard errors clustered by state in parentheses. "
+              "* p < 0.10, ** p < 0.05, *** p < 0.01 (state-clustered p-values). Coefficients are in the outcome's own units (see the outcomes frame). Source: script4a A2 grid "
+              f"({stem(T4A, '*_A1_A2_treatment_grid.csv')}). Panel {pdate}.")
 
     # ---- Callaway-Sant'Anna vs TWFE
     h = pd.read_csv(sorted(glob.glob(os.path.join(T4A, "*_HEADLINE_twfe_vs_cs.csv")))[-1])
-    rows = [f"{OUT_NAME[r.outcome]} & {_cs(r.TWFE_beta, r.TWFE_se)} & {_cs(r.CS_ATT, r.CS_se)} & {_f(r.ratio_CS_over_TWFE, 2)} & {int(r.n_switchers_TWFE)} & {int(r.n_treated_CS):,}"
-            for r in h.itertuples()]
-    _fragment("results__cs", _tab(r"@{}lllrrr@{}", r"Outcome & TWFE, E2 & Callaway-Sant'Anna & CS/TWFE & Treated (TWFE) & Treated (CS)", rows),
-              "First expansion (E2). Callaway-Sant'Anna: covariate-adjusted overall ATT, not-yet-treated comparison, state bootstrap standard errors. Source: script4a headline file "
+    from scipy.stats import norm
+    hr = list(h.itertuples())
+    twfe_p = {o: g[(g.outcome == o) & (g.treatment_id == "E2")].iloc[0].p_state for o in OUTCOMES}
+    cs_p = [2 * norm.sf(abs(r.CS_ATT / r.CS_se)) for r in hr]                   # normal approximation to the bootstrap standard error
+    rows = _est_se_rows("TWFE, E2 first expansion", [(r.TWFE_beta, r.TWFE_se, twfe_p[r.outcome]) for r in hr])
+    rows += _est_se_rows("Callaway-Sant'Anna", [(r.CS_ATT, r.CS_se, q) for r, q in zip(hr, cs_p)])
+    footer = ["CS / TWFE & " + " & ".join(_f(r.ratio_CS_over_TWFE, 2) for r in hr),
+              "Treated counties (TWFE) & " + " & ".join(f"{int(r.n_switchers_TWFE):,}" for r in hr),
+              "Treated county-periods (CS) & " + " & ".join(f"{int(r.n_treated_CS):,}" for r in hr)]
+    short = dict(zip(OUTCOMES, [r"Poor MH\\Days", r"Frequent\\distress", r"Deaths of\\despair", r"Aggravated\\assault", r"Assault,\\all", r"Violence\\index", r"NIBRS\\total"]))
+    tab = _reg_tab([short[r.outcome] for r in hr], rows, footer)
+    _fragment("results__cs", tab,
+              "First expansion (E2). TWFE: two-way fixed effects, standard errors clustered by state. Callaway-Sant'Anna: covariate-adjusted overall ATT, not-yet-treated comparison, state bootstrap standard errors in parentheses. "
+              "* p < 0.10, ** p < 0.05, *** p < 0.01 (TWFE: state-clustered p; Callaway-Sant'Anna: normal approximation to the bootstrap standard error). Source: script4a headline file "
               f"({stem(T4A, '*_HEADLINE_twfe_vs_cs.csv')}). Panel {pdate}.", size=r"\footnotesize")
 
     # ---- inference

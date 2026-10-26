@@ -568,9 +568,9 @@ def slides_triangulation():
     for design, tag in DESIGNS.items():
         o = overall[overall.design == design].copy()
         o = o[o.estimator.isin([n for n, _, _ in ROWS])]
-        k = o.outcome.map(sd)
         a = agree[agree.design == design][["outcome", "estimator", "agrees"]]
-        o = o.merge(a, on=["outcome", "estimator"], how="left")
+        o = o.merge(a, on=["outcome", "estimator"], how="left")             # merge resets the row index: scale after it, so the divisor aligns row by row
+        k = o.outcome.map(sd)
         o["filled"] = (o.estimator == CS) | o.agrees.fillna(False).astype(bool)
         colour = o.estimator.map({n: _hex(c) for n, _, c in ROWS})
         marker = o.estimator.map(lambda e: "D" if e == CS else ("s" if e == TW else "o"))
