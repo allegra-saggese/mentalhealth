@@ -10,6 +10,9 @@ Run:     python3 script0f-generate-panel.py
 Notes:   CAFO census values are forward-filled between census years; a county with no CAFO row for any species is zero-filled in census years
          (species-by-species zeros are applied later, in script4_treatment.load_panel, D-34); FSIS columns live only in panel_fsis.csv.
          CDC missingness flags and CHR count imputation are explained in README.md, "Key Design Decisions".
+         The generic CAFO columns (small_cafo, medium_cafo, large_cafo, bin_sum_cafo, total_heads_cafo, any_large_cafo,
+         any_medium_or_large_cafo, n_rows) use the cattle, hogs and chickens rows only, because cattle contains beef and dairy
+         (D-36, D-51); the species columns cafo_{cattle,beef,dairy,hogs,chickens}_* use all five rows. any_* are 0/1.
 """
 
 from packages import *
@@ -164,7 +167,23 @@ def _read_filter_reduce(path, descriptor, allowed_keys):
         print(f"Skip {descriptor}: no rows after rural-key filter")
         return None
 
+    # Generic CAFO size columns (small/medium/large/bin_sum/total_heads/any_*): sum only the non-overlapping commodity rows.
+    # Cattle already contains beef and dairy (D-36), and beef and dairy rows carry the total cattle heads, so summing all five
+    # rows counted them two or three times. Same rule as cafo_total_ops_all_animals (D-51). Species columns use all five rows.
+    if descriptor == BASE_DESCRIPTOR:
+        n_before = len(df)
+        keep = df["commodity_desc"].astype("string").str.strip().str.lower().isin(CAFO_COMMODITIES_TOTAL)
+        df = df[keep].copy()
+        print(f"  {descriptor}: generic CAFO columns use cattle/hogs/chickens rows only ({len(df):,} of {n_before:,} rows)")
+
     out = _reduce_to_county_year(df, descriptor)
+    if descriptor == BASE_DESCRIPTOR:
+        # the per-row 0/1 flags were summed by the reduction; make them true indicators again (blank stays blank)
+        tag = _safe_descriptor_name(descriptor)
+        lg = pd.to_numeric(out[f"large_{tag}"], errors="coerce")
+        md = pd.to_numeric(out[f"medium_{tag}"], errors="coerce")
+        out[f"any_large_cafo_{tag}"] = (lg > 0).astype(float).where(lg.notna())
+        out[f"any_medium_or_large_cafo_{tag}"] = ((lg.fillna(0) + md.fillna(0)) > 0).astype(float).where(lg.notna() | md.notna())
     print(f"Use {descriptor}: {out.shape}")
     return out
 
@@ -354,6 +373,17 @@ print(
     f"(rural counties absent from USDA Census = confirmed no operations). "
     f"Census years: {sorted(_CAFO_CENSUS_YEARS)}."
 )
+
+# Self-check (D-51), per census wave, before any forward-fill: each generic size column equals the sum of the cattle, hogs and chickens
+# species blocks built from the same rows.
+_tag = _safe_descriptor_name(BASE_DESCRIPTOR)
+for _s in ("small", "medium", "large"):
+    _gc = f"{_s}_{_tag}"
+    _parts = merged_all[[f"cafo_{c}_{_s}" for c in CAFO_COMMODITIES_TOTAL]].sum(axis=1, min_count=1)
+    _ok = merged_all[_gc].notna() & _parts.notna() & merged_all["year"].isin(_CAFO_CENSUS_YEARS)
+    _bad = int((~np.isclose(merged_all.loc[_ok, _gc].astype(float), _parts[_ok].astype(float))).sum())
+    assert _bad == 0, f"{_gc} differs from cattle + hogs + chickens in {_bad} census rows"
+    print(f"  check: {_gc} == cattle + hogs + chickens on {int(_ok.sum()):,} census rows")
 
 # Forward-fill CAFO values across inter-census years.
 # Each USDA Agricultural Census is treated as valid until the next one:
@@ -833,6 +863,11 @@ for _col in merged_all.columns:
 merged_all.rename(columns=_rmap, inplace=True)
 print(f"Columns renamed: {len(_rmap)}. Final shape: {merged_all.shape}")
 
+
+# Flag check on the generic CAFO columns (D-51): true 0/1 indicators (the equality check against the species blocks runs before the
+# forward-fill, where both blocks still describe the same census wave).
+for _f in ("any_large_cafo", "any_medium_or_large_cafo"):
+    assert set(merged_all[_f].dropna().unique()) <= {0.0, 1.0}, f"{_f} is not a 0/1 indicator"
 
 os.makedirs(merged_dir, exist_ok=True)
 
