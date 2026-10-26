@@ -135,3 +135,8 @@ Every `savefig`, `write_html`, `to_csv`, `to_excel` call in the scripts being co
 | `script4k-variable-register.py` | 415 |  | table (xlsx) | `(name built from a variable: R.to_excel(w,sheet_name="variables",index=False))` |
 | `script4k-variable-register.py` | 416 |  | table (xlsx) | `(name built from a variable: FS.to_excel(w,sheet_name="FSIS_panel",index=False))` |
 | `script4k-variable-register.py` | 422 |  | table (csv) | `{TODAY}_VARIABLE_REGISTER.csv` |
+
+## Changes after 2026-10-25 (D-51, D-52)
+- Removed on the owner's decision: `script1c` section `county-series` (figure `county_series_cafo_vs_poor_mental_health_days`, parts 1-3, and tables `county_series_selection_metadata`, `county_series_values`); `script1d` map `selected_counties`.
+- `script1d` map 6 `treatment_status` is replaced by `estimation_sample` (Poor MH Days estimation sample for first expansion and first entry).
+- Values change in `script1b` (rows for the seven generic CAFO columns only) and in `script1c` (`binned_scatter_*`, `outcome_crosscorrelation`, `quartile_distribution_summary`, `presence_and_tier_means`: outcome windows and generic columns).

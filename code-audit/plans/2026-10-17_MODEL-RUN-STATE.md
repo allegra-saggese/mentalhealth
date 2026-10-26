@@ -92,3 +92,12 @@ still compute A1, T2 and all three SEs (D-32).
 - Hard-coded result numbers inside slide and appendix prose (e.g. switcher counts) go stale on re-run.
 - 16 files use `from packages import *`; `functions.py` "used in" comments name deleted scripts.
 - Internal notes (`code-audit/`) live in the same repo as the public code; decide what ships.
+
+---
+
+## Addendum 2026-10-25: new panel file, stage-4 inputs unchanged
+`Data/merged/2026-10-25_panel*.csv` (written by `script0f-generate-panel.py`, which replaced `script1b-generate-panel.py`) is now the newest panel. It differs from `2026-10-12_panel.csv` only in seven generic CAFO columns
+(`small_cafo`, `medium_cafo`, `large_cafo`, `bin_sum_cafo`, `total_heads_cafo`, `any_large_cafo`, `any_medium_or_large_cafo`; D-51). `script4_treatment.load_panel()` returns 184 columns that are identical on the old and the new panel
+outside those seven, and no stage-4 script reads them (`git grep`), so **no estimation output needs re-running because of this change**; the table above still describes which script ran on which treatment values.
+Not changed, still open: forward-fill carries an earlier census wave's species counts into a later wave that has no row (T1, T3, T4 differ in 119 county-years across 21 counties if census-year blanks are set to 0 first; E2 and E3 do not change).
+Stage 1 (`script1a` to `script1d`) was run on the new panel on 2026-10-25; its outputs are in `Data/output/{tables,figs,maps}/script1*/`.
