@@ -64,6 +64,11 @@ COUNT_BINS = ([0, 1, 4, 9, 24], ["0", "1", "2-4", "5-9", "10-24", "25+"])  # upp
 DELTA_BINS = ([-10, -5, -1, 0, 4, 9], ["<= -10", "-9 to -5", "-4 to -1", "0", "1 to 4", "5 to 9", ">= 10"])
 COUNT_COLOURS = [ZERO] + sample_colorscale(SEQ, [0.12, 0.35, 0.58, 0.8, 0.97])
 
+# National outline drawn over every map by outline_country (Plotly's built-in country boundaries, no county data used).
+OUTLINE_COLOUR = "#404040"  # dark grey: readable over the county fill and the light-grey land
+OUTLINE_WIDTH = 1  # px
+OUTLINE_RESOLUTION = 50  # Natural Earth scale of the boundary: 1:50 million (Plotly's alternative is 110)
+
 
 # =============================================================================
 # Data
@@ -303,7 +308,21 @@ def facet_map(
     write_map(fig, stem, panel_w, height, no_png)
 
 
+def outline_country(fig):
+    """Draw the US national border (country outline only; state borders are drawn by the geo settings above) on every
+    geo panel of fig. Plotly fetches its built-in boundary topology when the figure is drawn, so this adds no data
+    to the figure."""
+    fig.update_geos(
+        showcountries=True,
+        countrycolor=OUTLINE_COLOUR,
+        countrywidth=OUTLINE_WIDTH,
+        resolution=OUTLINE_RESOLUTION,
+    )
+
+
 def write_map(fig, stem, width, height, no_png):
+    """Single exit for every map: adds the national outline, then writes HTML and PNG."""
+    outline_country(fig)
     MAPS_DIR.mkdir(parents=True, exist_ok=True)
     base = MAPS_DIR / figstyle.dated(stem)
     fig.write_html(str(base.with_suffix(".html")), include_plotlyjs="cdn")
