@@ -7,13 +7,20 @@ Sections (run in this order; select with --only, e.g. --only triangulation permu
   triangulation       forest plot of the estimator triangulation, one figure per design     (was script4zb)
   treatment-by-model  every treatment against every model: one figure per model + one overall (was script4zd)
   permutation         permutation null distributions and p-values                            (was script4zf)
+  pretrends-leads     outcome leads for T1, T3, T4, E2, E3 with a dotted straight-line fit    (new 2026-10-26, D-55)
+  pretrends-controls  pre-trend coefficients of the 8 selected controls, x-y panels with fits (new, D-55)
+  pretrends-raw       raw pre-period paths, treated vs never-treated counties, outcomes        (new, D-55)
+  pretrends-controls-raw  the same raw paths for the 8 selected controls                      (new, D-55)
 Reads:   triangulation: tables/script4za/*_{overall_estimates,agreement,samples}.csv, tables/script4x/*_outcome_within_sd.csv
          treatment-by-model: tables/script4zc/*_treatment_by_model.csv, tables/script4x/*_outcome_within_sd.csv
          permutation: tables/script4ze/*_permutation_pvalues*.csv and *_null_draws*.csv
+         pretrends-*: tables/script4t/*_leads_coefficients.csv, tables/script4a/*_{control_pretrend_lags,control_pretrends}.csv,
+                      tables/script4b/*_{pretrend_raw_means,pretrend_fits}.csv   (written by script4b-diagnostics.py --only controls pretrends)
          (--quick reads script4zc_quick / script4ze_quick and writes script4zd_quick / script4zf_quick; triangulation has no quick mode)
 Writes:  figs/script4zb/YYYY-MM-DD_triangulation_{first_expansion,first_entry}.{pdf,png}
          figs/script4zd/YYYY-MM-DD_treatment_by_model_{model, all_models}.{pdf,png}
          figs/script4zf/YYYY-MM-DD_permutation_inference.{pdf,png}
+         figs/script4f/YYYY-MM-DD_pretrends_{leads_mental_health, leads_crime, controls, raw_<design>_outcomes, raw_<design>_controls}.{pdf,png}
 Run:     PYTHONHASHSEED=0 python3 script4f-figures.py [--only triangulation|treatment-by-model|permutation ...] [--quick]
 Style:   figstyle.py (Nature/Science), checked with scripts/figure_check.py. Output folders keep their old names so no reader moves.
 """
@@ -26,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 import figstyle
+from matplotlib.ticker import MaxNLocator
 from functions import latest_file_glob
 from script4_treatment import OUTCOMES, figs_dir, tables_dir
 
@@ -303,7 +311,139 @@ def permutation(quick=False):
     print("wrote", *figstyle.save_figure(fig, OUT_DIR, "permutation_inference"))
 
 
-SECTIONS = {"triangulation": triangulation, "treatment-by-model": treatment_by_model, "permutation": permutation}
+# =============================================================== sections pretrends-* (new 2026-10-26, D-55)
+# The dotted lines are ordinary least-squares straight lines through the plotted pre-period points, computed in
+# script4b-diagnostics.py (pretrend_fits.csv). They describe the drift; the pre-trend tests are in leads_joint_tests.csv.
+PRE_FIG_DIR = os.path.join(figs_dir, "script4f")
+MENTAL_OUTCOMES = ["Poor MH Days", "Frequent Mental Distress", "Deaths of Despair"]
+CRIME_OUTCOMES = ["Aggravated Assault", "Assault, all severities", "Violence index (partial)", "NIBRS curated total"]
+DOTTED = dict(ls=":", lw=1.1)
+
+
+def _fit_line(ax, fits, x_range, colour, **where):
+    """Dotted line from the saved slope and intercept; `where` picks the row of pretrend_fits.csv."""
+    m = fits
+    for k, v in where.items():
+        m = m[m[k] == v]
+    if m.empty or m.slope.isna().iloc[0]:
+        return
+    x = np.array(x_range, float)
+    ax.plot(x, m.intercept.iloc[0] + m.slope.iloc[0] * x, color=colour, **DOTTED)
+
+
+def _pre_inputs():
+    fits = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4b"), "*_pretrend_fits.csv"))
+    return fits
+
+
+def pretrends_leads():
+    """Lead coefficients of the outcome on each treatment format (rows: outcomes, columns: treatments), with a dotted fit."""
+    figstyle.apply_style()
+    lc = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4t"), "*_leads_coefficients.csv"))
+    lc["x"] = np.where(lc.design == "lead test", -lc.lead, lc.lead)          # a lead k years ahead sits at -k
+    fits = _pre_inputs()
+    for tag, outs, h in (("mental_health", MENTAL_OUTCOMES, 92), ("crime", CRIME_OUTCOMES, 118)):
+        fig, axes = figstyle.new_grid(len(outs), len(TREATMENTS), width="double", height_mm=h)
+        fig.get_layout_engine().set(rect=(0, 0.11, 1, 0.89))
+        for i, o in enumerate(outs):
+            for j, t in enumerate(TREATMENTS):
+                ax, g = axes[i, j], lc[(lc.treatment == t) & (lc.outcome == o)].sort_values("x")
+                col = figstyle.PALETTE[TREATMENT_COLOUR[t]]
+                ax.axhline(0, color="black", lw=0.4)
+                ax.errorbar(g.x, g.beta, yerr=1.96 * g.se_state, fmt="o", ms=2.6, lw=0.7, capsize=1, color=col)
+                _fit_line(ax, fits, [g.x.min(), g.x.max()], col, source="lead_coefficients", design=t, variable=o)
+                ax.set_xlim(-8.6, -1.4) if t in ("E2", "E3") else ax.set_xlim(-4.6, -0.4)
+                ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+                if i == 0:
+                    ax.set_title(SHORT_TREATMENT[t], fontsize=6.5, pad=2)
+                if j == 0:
+                    ax.set_ylabel(SHORT_OUTCOME[o], fontsize=6)
+                if i == len(outs) - 1:
+                    ax.set_xlabel("Years before treatment")
+        fig.text(0.005, 0.005, "Coefficient on treatment k years ahead (T1, T3, T4: lead test; plotted at minus k) or on event time -8 to -2 (E2, E3: "
+                 "event study), outcome units, 95% interval, SE clustered by state;\ncounty and year fixed effects, 8 pre-committed controls. Dotted line: "
+                 "least-squares line through the plotted points (descriptive; tests in leads_joint_tests.csv). Each panel has its own y-axis.\n"
+                 "Source: script4b-diagnostics.py (leads, pretrends); script4f-figures.py.", fontsize=5, va="bottom", ha="left", color="#333333")
+        print("wrote", *figstyle.save_figure(fig, PRE_FIG_DIR, f"pretrends_leads_{tag}"))
+
+
+def pretrends_controls():
+    """Each selected control as the dependent variable in the event-study design: pre-period coefficients in SD, x-y panels."""
+    figstyle.apply_style()
+    lag = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_control_pretrend_lags.csv"))
+    ver = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_control_pretrends.csv")).set_index("variable")
+    fits = _pre_inputs()
+    from script4_treatment import COVARIATE_ORDER
+    ctrl = COVARIATE_ORDER[:8]
+    fig, axes = figstyle.new_grid(2, 4, width="double", height_mm=100)
+    fig.get_layout_engine().set(rect=(0, 0.09, 1, 0.91))
+    col = figstyle.PALETTE["blue"]
+    for ax, c, letter in zip(axes.ravel(), ctrl, "abcdefgh"):
+        g = lag[(lag.variable == c) & (lag.lag < -1)].sort_values("lag")
+        ax.axhline(0, color="black", lw=0.4)
+        ax.errorbar(g.lag, g.estimate / g.outcome_sd, yerr=1.96 * g.se / g.outcome_sd, fmt="o", ms=2.6, lw=0.7, capsize=1, color=col)
+        ax.plot([-1], [0], "o", ms=2.6, mfc="white", color=col, mew=0.7)           # reference year, zero by construction
+        _fit_line(ax, fits, [g.lag.min(), -1], col, source="control_lag_coefficients", variable=c)
+        ax.set_xlim(-6.6, -0.4)
+        ax.set_title(f"{ver.loc[c, 'description']} ({ver.loc[c, 'n_pre_significant']} of {ver.loc[c, 'n_pre_coefs']} sig.)", fontsize=6, pad=2, loc="left")
+        figstyle.panel_label(ax, letter)
+        ax.set_xlabel("Years before first expansion")
+        if ax in axes[:, 0]:
+            ax.set_ylabel("Coefficient (SD of the control)")
+    fig.text(0.005, 0.005, "Each control is the dependent variable of the E2 event study (first expansion), county and year fixed effects, 95% interval, SE "
+             "clustered by state; reference year -1 (open marker).\nDotted line: least-squares line through the plotted points (descriptive). "
+             "Title: pre-period coefficients significant at 5% out of those estimated.\nSource: script4b-diagnostics.py (controls); script4f-figures.py.",
+             fontsize=5, va="bottom", ha="left", color="#333333")
+    print("wrote", *figstyle.save_figure(fig, PRE_FIG_DIR, "pretrends_controls"))
+
+
+def _raw_figures(kind):
+    """Raw change since the year before treatment, treated vs never-treated counties, event times -8 to -1, dotted pre-period fits."""
+    figstyle.apply_style()
+    raw = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4b"), "*_pretrend_raw_means.csv"))
+    fits = _pre_inputs()
+    ctrl_desc = pd.read_csv(latest_file_glob(os.path.join(tables_dir, "script4a"), "*_control_pretrends.csv")).set_index("variable").description
+    names = {"E2": "first expansion (E2; also the timing of T3 and T4)", "E3": "first entry (E3; also the timing of T1)"}
+    comparison = {"E2": "counties that never add or enter", "E3": "counties that never had a large dairy"}
+    for d in ("E2", "E3"):
+        sub = raw[(raw.design == d) & (raw.kind == kind) & (raw.event_time < 0)]
+        labels = [v for v in sub.variable.unique()]
+        fig, axes = figstyle.new_grid(2, 4, width="double", height_mm=100)
+        fig.get_layout_engine().set(rect=(0, 0.1, 1, 0.9))
+        for ax, v, letter in zip(axes.ravel(), labels, "abcdefgh"):
+            g = sub[sub.variable == v].sort_values("event_time")
+            ax.axhline(0, color="black", lw=0.4)
+            for series, colour, ls, lab in (("treated", "vermillion", "-", "treated"), ("comparison", "blue", "-", "comparison")):
+                c = figstyle.PALETTE[colour]
+                ax.plot(g.event_time, g[series], color=c, lw=0.8, marker="o", ms=2.2, label=lab)
+                _fit_line(ax, fits, [g.event_time.min(), -2], c, source="raw_mean", design=d, variable=v, series=series)
+            ax.set_xlim(-8.6, -0.4)
+            ax.set_title(SHORT_OUTCOME.get(v, ctrl_desc.get(v, v)), fontsize=6, pad=2, loc="left")
+            figstyle.panel_label(ax, letter)
+            ax.set_xlabel("Years before treatment")
+            if ax in axes[:, 0]:
+                ax.set_ylabel("Change since year -1")
+        axes.ravel()[0].legend(frameon=False, fontsize=5.5, loc="best")
+        for ax in axes.ravel()[len(labels):]:
+            ax.axis("off")                                              # no empty axes with default ticks
+        fig.text(0.005, 0.005, f"Design: {names[d]}, against {comparison[d]}. Mean change in the variable since the year before treatment,\n"
+                 "averaged over cohorts weighted by treated counties (cohort-years with fewer than 10 treated or comparison counties are dropped). "
+                 "No controls, no fixed effects.\nDotted lines: least-squares lines through event times -8 to -2 (descriptive). "
+                 "Source: script4b-diagnostics.py (pretrends); script4f-figures.py.", fontsize=5, va="bottom", ha="left", color="#333333")
+        print("wrote", *figstyle.save_figure(fig, PRE_FIG_DIR, f"pretrends_raw_{d}_{kind}s"))
+
+
+def pretrends_raw():
+    _raw_figures("outcome")
+
+
+def pretrends_controls_raw():
+    _raw_figures("control")
+
+
+SECTIONS = {"triangulation": triangulation, "treatment-by-model": treatment_by_model, "permutation": permutation,
+            "pretrends-leads": pretrends_leads, "pretrends-controls": pretrends_controls, "pretrends-raw": pretrends_raw,
+            "pretrends-controls-raw": pretrends_controls_raw}
 QUICK_SECTIONS = {"treatment-by-model", "permutation"}
 
 

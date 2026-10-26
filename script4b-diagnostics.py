@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-script4b-diagnostics.py -- diagnostics of the control set and the event-study design, five sections run in this order.
+script4b-diagnostics.py -- diagnostics of the control set and the event-study design, six sections run in this order.
 
     controls     candidate controls: coverage, causal role, covariate pre-trends, VIF      (was script4j-control-diagnostics.py)
     leads        outcome pre-trends (leads) for each reported treatment                     (was script4t-pretrend-leads.py)
+    pretrends    raw pre-period paths and straight-line fits behind the pre-trend figures   (new 2026-10-26, D-55)
     balance      balance and detectable-effect tables, LaTeX bodies and a CSV                (was script4d-balance-panel.py)
     control-set  add-one-in / take-one-out sensitivity of the treatment coefficient         (was script4y-control-set-selection.py)
     honestdid    inputs for the Rambachan-Roth analysis; R/honestdid.R is run afterwards     (was script4w-honestdid-export.py)
 
 Reads:   panel via script4_treatment.load_panel() (honestdid: designs.load_designs());
          `leads` and `control-set` read the newest Data/output/tables/script4a/*_control_pretrends.csv, which `controls` writes
-Writes:  Data/output/tables/script4a/<date>_{control_roster, control_pretrends, vif_headline_within}.csv      (controls)
+Writes:  Data/output/tables/script4a/<date>_{control_roster, control_pretrends, vif_headline_within, control_pretrend_lags,
+                                              control_correlations_selected8}.csv, and .txt versions of those and of VIF_audit  (controls)
+         Data/output/tables/script4b/<date>_{pretrend_raw_means, pretrend_fits}.csv and pretrend_fits.txt                   (pretrends)
          Data/output/tables/script4t/<date>_{leads_coefficients, leads_joint_tests}.csv                       (leads)
          LATEX_OUT/{BALANCEpanel.tex, BALANCEpanel.pdf, _BODY_balance.tex, <date>_balance_panel.csv}          (balance)
          Data/output/tables/script4y[_quick]/<date>_{regressions, path_summary, covariate_summary, selection_table}.csv   (control-set)
          Data/output/tables/script4w/honestdid_inputs/<design>__<outcome>__{beta, sigma}.csv and manifest.csv (honestdid)
-Run:     python3 script4b-diagnostics.py [--only controls leads balance control-set honestdid] [--quick]
+Run:     python3 script4b-diagnostics.py [--only controls leads pretrends balance control-set honestdid] [--quick]
          then Rscript R/honestdid.R     (--quick shortens control-set only; a few minutes without it)
 Method:  METHODS.md sections 3, 4 and 7. Roles are judgements, not findings; the control-set sweep documents the pre-committed
          set (D-16) and does not choose it. Output folders keep the names of the old scripts, so readers (script4p reads the
@@ -34,8 +37,9 @@ import numpy as np
 import pandas as pd
 import pyfixest as pf
 
-from designs import load_designs
+from designs import load_designs, county_groups
 from estimators import clean, event_study_frame, joint_wald
+from figstyle import save_text_table
 from script4_treatment import (
     load_panel, OUTCOMES, COVARIATE_ORDER, COVARIATE_EXCLUDED, CONTROL_PRETREAT,
     HEADLINE_TREATMENT, HEADLINE_OUTCOME, CORE_TREATMENTS, CORE_TREATMENT_LABELS,
@@ -112,6 +116,7 @@ def controls():
     # =============================== 2. pre-trends ===============================
     # Each control as the DEPENDENT variable in the event-study spec.
     pre_rows=[]
+    lag_rows=[]      # every event-time coefficient of the loop below, kept for the pre-trend figures
     # log_pop added 2026-10-12: population placebo. A differential pre-trend in log
     # population would mean treated counties were already depopulating (or growing)
     # before entry, which moves every per-100k outcome through the denominator.
@@ -133,6 +138,8 @@ def controls():
             if not str(idx).startswith("ev::"): continue
             try: e=int(float(str(idx).split("::")[1]))
             except Exception: continue
+            lag_rows.append({"variable":c,"lag":e,"estimate":float(r["Estimate"]),"se":float(r["Std. Error"]),
+                             "p":float(r["Pr(>|t|)"]),"outcome_sd":float(df[c].std())})
             if e< -1: pre.append((e,float(r["Estimate"]),float(r["Pr(>|t|)"])))
         if not pre: continue
         nsig=sum(1 for _,_,p in pre if p<0.05)
@@ -172,6 +179,37 @@ def controls():
     cov.to_csv(os.path.join(OUT,f"{TODAY}_control_roster.csv"),index=False)
     pre.to_csv(os.path.join(OUT,f"{TODAY}_control_pretrends.csv"),index=False)
     vif.to_csv(os.path.join(OUT,f"{TODAY}_vif_headline_within.csv"),index=False)
+    pd.DataFrame(lag_rows).to_csv(os.path.join(OUT,f"{TODAY}_control_pretrend_lags.csv"),index=False)
+
+    # =============================== 4. correlation among the selected controls ====
+    # Two-way demeaned (county and year means removed), the same transformation as vif_within, so the matrix is
+    # the correlation the fixed-effects regression sees.
+    W = est[["fips","year"]+CONTROLS].copy()
+    for c in CONTROLS:
+        W[c] = (W[c]-W.groupby("fips")[c].transform("mean")-W.groupby("year")[c].transform("mean")+W[c].mean())
+    corr = W[CONTROLS].corr()
+    corr_out = corr.copy(); corr_out.insert(0,"variable",corr.index)
+    corr_out.to_csv(os.path.join(OUT,f"{TODAY}_control_correlations_selected8.csv"),index=False)
+
+    # =============================== 5. plain-text versions of the tables =========
+    vif_audit = pd.read_csv(sorted(glob.glob(os.path.join(OUT,"*_VIF_audit.csv")))[-1])
+    save_text_table(vif_audit.drop(columns=["note"],errors="ignore"), OUT, "VIF_audit",
+        "Variance inflation factors by model: largest VIF among the regressors",
+        "VIF_audit.csv is written by script4a-estimates.py. within = True: after removing county and year means. "
+        "A VIF above 10 is the usual warning level; none is reached.")
+    save_text_table(vif, OUT, "vif_headline_within",
+        "Variance inflation factors, headline specification (treatment T1, all candidate controls)",
+        "vif_raw: on the levels; vif_within: after removing county and year means (what the fixed-effects model uses).")
+    save_text_table(corr_out, OUT, "control_correlations_selected8",
+        "Correlation among the 8 selected controls (county and year means removed)",
+        "Estimating sample of the headline specification. Off-diagonal values near 0 mean the controls carry separate information.",
+        float_format="{:.2f}")
+    save_text_table(cov.drop(columns=["rationale"]), OUT, "control_roster",
+        "Candidate controls: coverage and where each is used", "Share of non-missing values among the panel, outcome rows and estimating sample.")
+    save_text_table(pre[["variable","causal_role","n_pre_coefs","n_pre_significant","max_pre_in_sd","verdict"]], OUT,
+        "control_pretrends", "Covariate pre-trends: each control as the dependent variable in the event-study design",
+        "max_pre_in_sd: largest absolute pre-period coefficient divided by the variable's overall standard deviation. "
+        "FAILS = two or more pre-period coefficients significant at 5% (state-clustered).")
 
     print("=== CONTROL PRE-TRENDS (control used as the dependent variable) ===")
     print(pre[["variable","causal_role","n_pre_coefs","n_pre_significant","max_pre_in_sd","verdict"]]
@@ -297,6 +335,106 @@ def leads():
         print(c[["variable", "causal_role", "n_pre_coefs", "n_pre_significant", "max_pre_in_sd", "verdict"]]
               .round({"max_pre_in_sd": 3}).to_string(index=False))
     print(f"\nSaved -> {OUT}")
+
+# =============================================================================
+# pretrends  (new 2026-10-26, D-55): raw pre-period paths and straight-line fits behind the pre-trend figures
+# =============================================================================
+PRE_WINDOW = range(-CLIP, -1)        # event times -8 ... -2; -1 is the reference year (zero by construction)
+MIN_COHORT_N = 10                    # treated or comparison counties needed for a cohort-year to be used
+
+
+def _fit_line(x, y):
+    """Least-squares straight line y = intercept + slope * x through the plotted points (descriptive, not a test)."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if len(x) < 3:
+        return np.nan, np.nan
+    slope, intercept = np.polyfit(x, y, 1)
+    return float(slope), float(intercept)
+
+
+def _raw_paths(df, info, col, treated_col, comparison_fips):
+    """Mean change in `col` since the year before treatment (g-1), treated cohorts versus never-treated counties,
+    averaged over cohorts weighted by number of treated counties. Same construction as script1c-figures.event_paths."""
+    wide = df.pivot_table(index="fips", columns="year", values=col, aggfunc="first")
+    recs = []
+    for g in sorted(info[treated_col].dropna().unique()):
+        base = g - 1
+        if base not in wide.columns:
+            continue
+        treated = info.index[info[treated_col] == g]
+        for e in range(-CLIP, CLIP + 1):
+            t = g + e
+            if t not in wide.columns:
+                continue
+            dt = (wide[t] - wide[base]).reindex(treated).dropna()
+            dc = (wide[t] - wide[base]).reindex(comparison_fips).dropna()
+            if len(dt) < MIN_COHORT_N or len(dc) < MIN_COHORT_N:
+                continue
+            recs.append({"cohort": int(g), "e": e, "n_t": len(dt), "m_t": dt.mean(), "v_t": dt.var(ddof=1) / len(dt),
+                         "m_c": dc.mean(), "v_c": dc.var(ddof=1) / len(dc)})
+    if not recs:
+        return pd.DataFrame()
+    r = pd.DataFrame(recs)
+    out = []
+    for e, g in r.groupby("e"):
+        w = g.n_t.to_numpy(float)
+        se_t, se_c = np.sqrt(np.sum(w**2 * g.v_t)) / w.sum(), np.sqrt(np.sum(w**2 * g.v_c)) / w.sum()
+        m_t, m_c = np.average(g.m_t, weights=w), np.average(g.m_c, weights=w)
+        out.append({"event_time": int(e), "treated": m_t, "comparison": m_c, "difference": m_t - m_c,
+                    "se_difference": float(np.hypot(se_t, se_c)), "n_cohorts": g.cohort.nunique(), "n_treated": int(g.n_t.sum())})
+    return pd.DataFrame(out)
+
+
+def pretrends():
+    OUT = os.path.join(tables_dir, "script4b"); os.makedirs(OUT, exist_ok=True)
+    df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
+    info = county_groups(df)
+    # same comparison groups as the event-time figures in script1c: E2 against counties that never add or enter,
+    # E3 against counties that never had a large dairy
+    designs = {"E2": ("add", info.index[info["add"].isna() & info["entry"].isna()]),
+               "E3": ("entry", info.index[info.group == "never large dairy"])}
+    variables = [(k, c, "outcome") for k, c in OUTCOMES.items()] + [(c, c, "control") for c in CONTROLS]
+
+    raw_rows, fit_rows = [], []
+    for dname, (tcol, comp) in designs.items():
+        for label, col, kind in variables:
+            p = _raw_paths(df, info, col, tcol, comp)
+            if p.empty:
+                print(f"  {dname} {label}: no usable cohorts"); continue
+            for _, r in p.iterrows():
+                raw_rows.append({"design": dname, "variable": label, "kind": kind, **r.to_dict()})
+            pre_p = p[p.event_time.isin(PRE_WINDOW)]
+            for series in ("treated", "comparison", "difference"):
+                slope, icpt = _fit_line(pre_p.event_time, pre_p[series])
+                fit_rows.append({"source": "raw_mean", "design": dname, "variable": label, "kind": kind, "series": series,
+                                 "n_points": len(pre_p), "slope": slope, "intercept": icpt})
+    raw = pd.DataFrame(raw_rows)
+
+    # fits through the lead coefficients of script4t and the control lag coefficients written by `controls`
+    lc = pd.read_csv(sorted(glob.glob(os.path.join(tables_dir, "script4t", "*_leads_coefficients.csv")))[-1])
+    lc["x"] = np.where(lc.design == "lead test", -lc.lead, lc.lead)        # a lead k years ahead sits at -k
+    for (t, o), g in lc.groupby(["treatment", "outcome"]):
+        slope, icpt = _fit_line(g.x, g.beta)
+        fit_rows.append({"source": "lead_coefficients", "design": t, "variable": o, "kind": "outcome", "series": "coefficient",
+                         "n_points": len(g), "slope": slope, "intercept": icpt})
+    cl_ = pd.read_csv(sorted(glob.glob(os.path.join(tables_dir, "script4a", "*_control_pretrend_lags.csv")))[-1])
+    cl_ = cl_[cl_.variable.isin(CONTROLS) & (cl_.lag < -1)]
+    for c, g in cl_.groupby("variable"):
+        slope, icpt = _fit_line(g.lag, g.estimate / g.outcome_sd)
+        fit_rows.append({"source": "control_lag_coefficients", "design": "E2", "variable": c, "kind": "control",
+                         "series": "coefficient_in_sd", "n_points": len(g), "slope": slope, "intercept": icpt})
+    fits = pd.DataFrame(fit_rows)
+
+    raw.to_csv(os.path.join(OUT, f"{TODAY}_pretrend_raw_means.csv"), index=False)
+    fits.to_csv(os.path.join(OUT, f"{TODAY}_pretrend_fits.csv"), index=False)
+    save_text_table(fits, OUT, "pretrend_fits",
+        "Straight-line fits through the pre-period points of each pre-trend figure",
+        "Descriptive: ordinary least-squares line through the plotted pre-period points (slope per year of event time). "
+        "The joint pre-trend tests are in leads_joint_tests.csv and control_pretrends.csv. Raw-mean series are changes since "
+        "the year before treatment, event times -8 to -2; lead coefficients of T1/T3/T4 are placed at minus the lead.",
+        float_format="{:.4f}")
+    print(f"raw means {raw.shape}, fits {fits.shape}")
+    print(fits[fits.series.isin(["difference", "coefficient", "coefficient_in_sd"])].head(12).to_string(index=False))
 
 
 # =============================================================================
@@ -673,7 +811,7 @@ def honestdid():
 
 
 # =============================================================================
-SECTIONS = ["controls", "leads", "balance", "control-set", "honestdid"]     # run order: `leads` and `control-set` read `controls`
+SECTIONS = ["controls", "leads", "pretrends", "balance", "control-set", "honestdid"]     # run order: `leads` and `control-set` read `controls`
 
 
 def main():
@@ -688,6 +826,8 @@ def main():
             controls()
         elif s == "leads":
             leads()
+        elif s == "pretrends":
+            pretrends()
         elif s == "balance":
             balance()
         elif s == "control-set":
