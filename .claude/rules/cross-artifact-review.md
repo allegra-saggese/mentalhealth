@@ -12,7 +12,7 @@ A paper is not an island. Its claims depend on the code that produced them; revi
 ```
 manuscript.tex    --cites-->  Table 2 (booktabs fragment from script4n)
 Table 2           --from-->   Data/output/tables/<date>_twfe_results.csv
-results CSV       --by-->     script4a-design-estimates.py
+results CSV       --by-->     script4a-estimates.py
 script4a          --uses-->   script4_treatment.py (definitions) + <date>_panel.csv
 panel             --by-->     script0f-generate-panel.py  <--  script0a..0e  <--  Data/raw/
 ```

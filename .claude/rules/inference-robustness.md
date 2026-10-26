@@ -12,9 +12,9 @@ Advisory standards for the inference choices that decide whether a result surviv
 
 - **Reported inference:** county + year fixed effects, standard errors clustered by state. About 50 clusters: report a wild-cluster bootstrap p-value as a robustness check for the headline estimates.
 - **Outcomes:** 7 (3 mental-health/mortality, 4 crime). Declare the family before looking and report unadjusted and adjusted values. Python tools: `statsmodels.stats.multitest.multipletests` (Holm, Benjamini-Hochberg); Romano-Wolf by resampling, implemented once in a shared helper.
-- **Specification sweep:** the control set was pre-committed (D-16, D-31). The sweep over defensible control sets (`script4y`) documents sensitivity; it does not choose the set.
+- **Specification sweep:** the control set was pre-committed (D-16, D-31). The sweep over defensible control sets (`script4b-diagnostics.py --only control-set`) documents sensitivity; it does not choose the set.
 - **Leave-one-state-out** and drop-top-influential-county checks for each headline estimate.
-- **Pre-trends:** report the pre-trend test and the Rambachan-Roth sensitivity (`script4w`) next to every event study. Standing blockers: A21 (full-panel TWFE null vs 2010-2020 window significant, window not yet justified) and A22 (pre-trends fail for deaths of despair and violent crime). No headline claim on those outcomes while A22 is open.
+- **Pre-trends:** report the pre-trend test and the Rambachan-Roth sensitivity (`script4b-diagnostics.py --only honestdid`) next to every event study. Standing blockers: A21 (full-panel TWFE null vs 2010-2020 window significant, window not yet justified) and A22 (pre-trends fail for deaths of despair and violent crime). No headline claim on those outcomes while A22 is open.
 - **Post-selection inference (Phase 3, ML variable selection):** coefficients on variables chosen by lasso/ridge/tree methods are not valid with ordinary SEs. Use sample splitting (select on one fold, estimate on the other), double/debiased machine learning, or post-double-selection; pre-specify the candidate set and cross-validation scheme before running; report selection stability across folds and seeds.
 
 ## Multiple hypothesis testing

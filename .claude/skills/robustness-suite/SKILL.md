@@ -20,17 +20,17 @@ Echo: the estimate (registry A-id, treatment, outcome, estimator, fixed effects,
 | 1 | Alternative clustering: county, state (reported), state-by-year; wild-cluster bootstrap p-value for state clusters | Is inference driven by the clustering choice or few clusters? |
 | 2 | Leave-one-state-out (all states) | Is the estimate driven by one state? |
 | 3 | Drop the top influential counties (by leverage / leave-one-county-out) | Outlier sensitivity |
-| 4 | Control-set sweep (`script4y`: add-one-in, take-one-out) | Sensitivity to controls; documents, does not choose |
+| 4 | Control-set sweep (`script4b-diagnostics.py --only control-set`: add-one-in, take-one-out) | Sensitivity to controls; documents, does not choose |
 | 5 | Window sensitivity (full panel vs 2010-2015 vs 2010-2020) | The standing A21 question |
 | 6 | Comparison group: never-treated vs not-yet-treated (Callaway-Sant'Anna) | Control-group choice (A22) |
-| 7 | Pre-trend evidence: leads, Rambachan-Roth sensitivity (`script4w`) | Parallel-trends credibility |
+| 7 | Pre-trend evidence: leads, Rambachan-Roth sensitivity (`script4b-diagnostics.py --only honestdid`) | Parallel-trends credibility |
 | 8 | Placebo outcome or placebo treatment timing | Spurious-correlation check |
 | 9 | Multiple outcomes: declared family, Holm / Benjamini-Hochberg, Romano-Wolf if feasible | Familywise error across the 7 outcomes |
 | 10 | Alternative treatment definitions in the reported set (T1, T3, T4, E2) | Definition sensitivity |
 
 ## Phase 1: Run
 
-Reuse existing scripts (`script4a/4t/4u/4w/4x/4y`) wherever they already compute the check; write a new stage script only for what is missing, following the stage-letter convention, `PYTHONHASHSEED=0`, shared modules for definitions. Each specification run is appended to the spec ledger (`/spec-register`). Long runs go in the background with a log.
+Reuse existing scripts (`script4a-estimates.py`, `script4b-diagnostics.py`) wherever they already compute the check; write a new stage script only for what is missing, following the stage-letter convention, `PYTHONHASHSEED=0`, shared modules for definitions. Each specification run is appended to the spec ledger (`/spec-register`). Long runs go in the background with a log.
 
 ## Phase 2: Summarise
 

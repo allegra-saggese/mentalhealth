@@ -272,9 +272,7 @@ def to_numeric_series(series: pd.Series) -> pd.Series:
 
 
 # used in: script1a-panel-qa.py, script1b-tables.py, script1c-figures.py, script1d-maps.py, script4_treatment.py,
-# used in: script4a-design-estimates.py, script4r-fsis-treatment.py, script4z-inference.py,
-# used in: script4zb-triangulation-figure.py, script4zc-treatment-by-model.py, script4zd-treatment-by-model-figures.py,
-# used in: script4ze-permutation-inference.py
+# used in: script4a-estimates.py, script4c-inference.py, script4d-triangulation.py, script4f-figures.py
 def latest_file_glob(folder: str, pattern: str) -> str:
     """
     Return latest path matching a glob pattern by modified time.

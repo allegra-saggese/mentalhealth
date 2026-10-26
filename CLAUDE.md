@@ -73,8 +73,8 @@ Naming: scripts `script{stage}{letter}-{description}.py`, no gaps in letters; ou
 ```bash
 export PYTHONHASHSEED=0          # required: pyfixest SEs differ ~2e-5 across hash seeds
 # Reported results (run order and timings: README "Running the reported results")
-python3 script4a-design-estimates.py        # TWFE, event study, Callaway-Sant'Anna
-python3 script4n-regression-tables.py && python3 script4p-full-appendix.py
+python3 script4a-estimates.py                # TWFE, event study, Callaway-Sant'Anna (sections: designs, cohorts, species, fsis)
+python3 script4e-tables.py                   # regression tables, appendix, frames (after script4b-diagnostics.py --only balance)
 # Prove a refactor changed no result
 python3 tests/compare_outputs.py <baseline_root> <live_root>
 # Install the commit gate (once per clone)

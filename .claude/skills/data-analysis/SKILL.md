@@ -42,7 +42,7 @@ Summary statistics and missingness, distributions of key variables, pre-treatmen
 
 ## Phase 3: Estimation
 - Panel estimation with `pyfixest` (`feols` with county and year fixed effects); clustered by state unless the user chose otherwise (document why).
-- Start from the pre-committed specification; progressive controls follow `script4y`'s pattern, not ad hoc.
+- Start from the pre-committed specification; progressive controls follow the `control-set` section of `script4b-diagnostics.py`, not ad hoc.
 - Confirm each new term changes the fit.
 - Report standardized and raw effects; leads/lags for event studies; Callaway-Sant'Anna via `estimators.py`.
 - Each specification run is appended to the ledger (below), kept or not.
@@ -65,4 +65,4 @@ Tables: results CSV then LaTeX via the shared writer (booktabs, clustered-SE not
 - No hardcoded values: sample restrictions and windows are named constants in the shared module.
 
 ## Long-running fits
-For fits over a couple of minutes (`script4u` about 30 minutes, `script4x` about 25), launch with Bash `run_in_background: true`, log to a file under `Data/output/`, and use the Monitor tool on `tail -f` of that log filtered for milestones and `Error|Traceback`. Do not poll with sleep loops.
+For fits over a couple of minutes (`script4a-estimates.py --only cohorts` about 30 minutes, `--only species` about 25), launch with Bash `run_in_background: true`, log to a file under `Data/output/`, and use the Monitor tool on `tail -f` of that log filtered for milestones and `Error|Traceback`. Do not poll with sleep loops.

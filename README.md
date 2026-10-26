@@ -113,18 +113,13 @@ The ridge/LASSO pilot (`script3-ridge.py`) and the first single-file model test 
 | Script | Role |
 |--------|------|
 | `script4_treatment.py` | **Shared module** — treatment, sample, outcome and control definitions; the missing-count-is-zero rule (from 2002) is applied in `load_panel` (importable; not run) |
-| `script4a-design-estimates.py` | A2 TWFE (headline), A4 dairy × FSIS, A5 event study, A6 Callaway–Sant'Anna; also A1 pooled state-FE and A7 LP-DiD (computed, not reported) |
-| `z-archive/script4b-…`, `z-archive/script4c-…` | Earlier run of adding controls in a fixed order and its summary; **superseded by `script4y`**, kept unchanged as the record of the 09-23 run |
-| `script4d-balance-panel.py` | Balance and detectable-effect tables |
-| `script4j-control-diagnostics.py` | Coverage, causal role and pre-trends for each control |
-| `script4r-fsis-treatment.py` | Slaughterhouses as the treatment (R0–R3; R4 LP-DiD computed, not reported) |
-| `script4t-pretrend-leads.py` | Outcome pre-trends (leads) for T1, T3, T4, E2 and first entry |
-| `script4u-did-by-treatment.py` | TWFE, event study and CS for first expansion and **first entry** (0 → 1+ large dairies, clean controls) with the pre-trend adjustments: county trends, state × year FE, baseline characteristics × time polynomial, past outcomes in CS |
-| `script4w-honestdid-export.py`, `R/honestdid.R` | Rambachan–Roth sensitivity analysis on the TWFE event studies (Python writes inputs, R runs `HonestDiD`) |
-| `script4x-species-forest.py` | Per-species TWFE and CS estimates (large and all-sizes counts) and the forest plots |
-| `script4y-control-set-selection.py` | **How the control set was chosen:** cumulative add-one-in, each control added alone, take-one-out of the final 8, take-one-out of all 14, and one selection table. Documents the pre-committed set; does not choose it |
-| `script4n-regression-tables.py`, `script4p-full-appendix.py` | LaTeX tables and combined appendix (no estimation): reported exhibits plus a separate robustness set |
-| `script4q-beamer-frames.py` | Beamer drop-in frames from the result CSVs (reported set; robustness frames in a second file) |
+| `script4a-estimates.py` | **All design-based estimates**, sections `designs` (A2 TWFE headline, A4 dairy × FSIS, A5 event study, A6 Callaway–Sant'Anna; A1 pooled state-FE and A7 LP-DiD computed, not reported), `cohorts` (first expansion and **first entry** with the pre-trend adjustments: county trends, state × year FE, baseline characteristics × time polynomial), `species` (per-species TWFE and CS, large and all-sizes counts, forest plots) and `fsis` (slaughterhouses as the treatment; R4 LP-DiD computed, not reported). `cohorts` and `species` check themselves against `designs` |
+| `script4b-diagnostics.py` | Sections `controls` (coverage, causal role and pre-trends of each control), `leads` (outcome pre-trends for T1, T3, T4, E2 and first entry), `balance` (balance and detectable-effect tables), `control-set` (**how the control set was chosen**: add-one-in, each alone, take-one-out; documents the pre-committed set, does not choose it) and `honestdid` (writes the inputs of the Rambachan–Roth sensitivity analysis; then `Rscript R/honestdid.R`) |
+| `script4c-inference.py` | Sections `wild` (wild cluster bootstrap, Holm, Romano–Wolf within outcome, Benjamini–Hochberg; D-42, D-43) and `permutation` (within-state cohort permutation test; D-47; flags `--design`, `--quick`) |
+| `script4d-triangulation.py` | Sections `estimators` (is the Callaway–Sant'Anna result specific to it? LP-DiD, Sun–Abraham, imputation, dCDH, stacked DiD; D-45; needs R `DIDmultiplegtDYN`) and `treatment-by-model` (every treatment against every model; D-46) |
+| `script4e-tables.py` | Sections `tables` (LaTeX regression tables, no estimation), `appendix` (combined appendix; needs `balance` and `tables` first) and `frames` (Beamer drop-in frames) |
+| `script4f-figures.py` | Sections `triangulation`, `treatment-by-model` and `permutation`: forest and null-distribution figures read from the result files (the species forest plots are drawn in `script4a-estimates.py --only species`) |
+| `z-archive/script4b-…`, `z-archive/script4c-…` | Earlier run of adding controls in a fixed order and its summary; superseded by the `control-set` section, kept unchanged as the record of the 09-23 run |
 | `estimators.py` | Shared estimator code (DiD helpers, Callaway–Sant'Anna, LP-DiD, stacked, imputation, saturated, dCDH); formerly `did_tools.py` and `did_cs.py` |
 
 **Run state.** The panel was rebuilt on 2026-09-23 to fix the CHR release-year misalignment. Outputs dated before that predate the fix and should not be cited; `code-audit/plans/2026-09-27_MODEL-RUN-STATE.md` records which script was last run on which panel — check it before citing any output. `qa-scripts/` holds one-off diagnostics (population-column comparison, 2017 .dta vs API check).
@@ -139,19 +134,18 @@ After the panel exists in `Data/merged/` (stages 0–1), the reported results ar
 
 ```bash
 export PYTHONHASHSEED=0
-python3 script4j-control-diagnostics.py      # control pre-trends
-python3 script4a-design-estimates.py         # A2, A4, A5, A6 (and unreported A1, A7)        ~7 min
-python3 script4r-fsis-treatment.py           # slaughterhouse treatment
-python3 script4d-balance-panel.py            # balance tables
-python3 script4t-pretrend-leads.py           # outcome leads, all treatments
-python3 script4u-did-by-treatment.py         # first entry + pre-trend adjustments          ~30 min
-python3 script4w-honestdid-export.py && Rscript R/honestdid.R   # sensitivity analysis
-python3 script4x-species-forest.py           # per-species results and forest plots         ~25 min
-python3 script4y-control-set-selection.py    # control-set selection exhibit
-python3 script4n-regression-tables.py && python3 script4p-full-appendix.py && python3 script4q-beamer-frames.py
+python3 script4b-diagnostics.py --only controls                      # control roster and pre-trends (other sections read them)
+python3 script4a-estimates.py                                        # designs (~7 min), cohorts (~30 min), species (~25 min), fsis
+python3 script4b-diagnostics.py --only leads balance control-set honestdid && Rscript R/honestdid.R   # diagnostics, sensitivity analysis
+python3 script4c-inference.py                                        # wild bootstrap family (~15 min), then permutation tests (~1 h)
+python3 script4d-triangulation.py                                    # estimator triangulation (~20 min), treatment by model (~30 min)
+python3 script4e-tables.py                                           # tables, then appendix, then Beamer frames
+python3 script4f-figures.py                                          # triangulation, treatment-by-model and permutation figures
 ```
 
-`script4u` and `script4x` check themselves: for the first-expansion / dairy-large case they must reproduce `script4a`'s TWFE and CS estimates exactly (they assert or print the difference).
+Each script takes `--only <section> ...` and keeps the flags of the script it replaced (`--quick`, `--no-cs`, `--plot-only`, `--design`, `--outcome`). Output folders keep the names of the scripts they came from (`script4a/`, `script4u/`, `script4x/`, `script4r/`, `script4t/`, `script4y/`, `script4z/`, `script4ze/`, `script4za/`, `script4zc/`, ...), because other sections read them by folder and file stem; the old-to-new name map is in `code-audit/plans/2026-10-26_SCRIPT-NAME-MAP.md`.
+
+The `cohorts` and `species` sections check themselves: for the first-expansion / dairy-large case they must reproduce the `designs` TWFE and CS estimates exactly (they assert or print the difference).
 
 ---
 

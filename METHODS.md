@@ -83,7 +83,7 @@ observed wave. Event-time paths therefore mix real timing with measurement error
 
 ## 3. Pre-trend tests and adjustments
 
-**Outcome leads for continuous treatments (T1, T3, T4)** (`script4t`):
+**Outcome leads for continuous treatments (T1, T3, T4)** (`script4b-diagnostics.py --only leads`):
 
     Y_it = b0 · D_it + Σ_{k=1..4} b_k · D_{i,t+k} + [log pop for T4] + X_it'γ + a_i + d_t + ε_it
 
@@ -95,7 +95,7 @@ observed wave. Event-time paths therefore mix real timing with measurement error
 
 `c` = how much faster or slower treated counties' outcomes were already moving per year.
 
-**Adjustments** (each a second specification beside the baseline, `script4u`):
+**Adjustments** (each a second specification beside the baseline, `script4a-estimates.py --only cohorts`):
 
 | Name | Specification |
 |---|---|
@@ -106,7 +106,7 @@ observed wave. Event-time paths therefore mix real timing with measurement error
 
 County trends can absorb a treatment effect that builds gradually (Wolfers 2006; Meer & West 2016), so they are a robustness check, not the headline specification.
 
-**Sensitivity analysis** (`script4w`): Rambachan & Roth (2023) via R `HonestDiD`, applied to the TWFE event study. Relative-magnitudes restriction (post-treatment violations
+**Sensitivity analysis** (`script4b-diagnostics.py --only honestdid`): Rambachan & Roth (2023) via R `HonestDiD`, applied to the TWFE event study. Relative-magnitudes restriction (post-treatment violations
 no larger than `M̄` times the largest pre-treatment violation) and smoothness restriction, for the first post-period effect and the average of the first five.
 
 ---
@@ -115,7 +115,7 @@ no larger than `M̄` times the largest pre-treatment violation) and smoothness r
 
 The control set is the eight full-coverage controls `COVARIATE_ORDER[:8]`: median household income, unemployment, % 65+, % Hispanic, % under 18,
 children in poverty, % Asian/AIAN/NHPI, % Black. It was **pre-committed** (D-16, revised D-31) on coverage, causal role and whether the series can be
-tested for pre-trends. `script4y` does not select it; it documents how far the treatment coefficient moves under four families of regressions:
+tested for pre-trends. `script4b-diagnostics.py --only control-set` does not select it; it documents how far the treatment coefficient moves under four families of regressions:
 
 | Family | What is run |
 |---|---|
@@ -128,7 +128,7 @@ tested for pre-trends. `script4y` does not select it; it documents how far the t
 
 ---
 
-## 5. Species analysis (`script4x`)
+## 5. Species analysis (`script4a-estimates.py --only species`)
 
 For each species and scope (large; all sizes): TWFE for T1, T3, T4 and E2 and CS-adjusted on the E2 cohorts, for all seven outcomes. The forest plots divide
 each coefficient by the outcome's within-county SD, so rows share one scale; treatment units still differ by row.
@@ -137,7 +137,7 @@ each coefficient by the outcome's within-county SD, so rows share one scale; tre
 
 ## 6. Validation built into the scripts
 
-- `script4u` and `script4x` reproduce `script4a`'s TWFE and CS results exactly for first expansion / dairy-large (differences about 1e-15).
+- `script4a-estimates.py --only cohorts` and `script4a-estimates.py --only species` reproduce `script4a-estimates.py --only designs`'s TWFE and CS results exactly for first expansion / dairy-large (differences about 1e-15).
 - The county-trend routine equals `pyfixest` when trends are switched off (coefficients to 1e-9).
 - `tests/compare_outputs.py` compares two output trees file by file; it is how a refactor is shown to change no result.
 
@@ -145,7 +145,7 @@ each coefficient by the outcome's within-county SD, so rows share one scale; tre
 
 ## 7. Descriptive definitions
 
-**Causal role of a control** (`script4j`; judgements about the causal graph, stated so a reader can disagree explicitly, not statistical findings):
+**Causal role of a control** (`script4b-diagnostics.py --only controls`; judgements about the causal graph, stated so a reader can disagree explicitly, not statistical findings):
 
 | Role | Meaning | Effect of conditioning on it |
 |---|---|---|
@@ -153,10 +153,10 @@ each coefficient by the outcome's within-county SD, so rows share one scale; tre
 | mediator | plausibly caused by CAFO presence and in turn affects the outcome | blocks part of the causal path; biases the estimate toward zero |
 | collider | plausibly caused by both the treatment and the outcome | induces a spurious association |
 
-**Covariate pre-trend test** (`script4j`): each control is the dependent variable in the event-study specification (county + year FE). The number of significant
+**Covariate pre-trend test** (`script4b-diagnostics.py --only controls`): each control is the dependent variable in the event-study specification (county + year FE). The number of significant
 pre-period coefficients and their joint test show whether treated and comparison counties were already diverging on that control before treatment.
 
-**Balance table columns** (`script4d`): N = estimating-sample rows after listwise deletion. Treated / control = county-years with the treatment above / at zero
+**Balance table columns** (`script4b-diagnostics.py --only balance`): N = estimating-sample rows after listwise deletion. Treated / control = county-years with the treatment above / at zero
 (descriptive only for continuous treatments). Switching counties = counties whose treatment changes; under county FE only these identify the coefficient.
 SE = state-clustered, from the A2 regression. **MDE** = minimum detectable effect at 80% power, two-sided 5%: `2.8016 × SE`, expressed in within-county SDs of the outcome
 (within-county because that is the variation a county-FE model can use).
