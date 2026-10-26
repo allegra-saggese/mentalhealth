@@ -8,8 +8,8 @@ Reads:   newest Data/merged/*_panel.csv (via designs.load_designs: panel + first
 Writes:  Data/output/maps/script1d/YYYY-MM-DD_{section}_{map}.html and .png (plus one first-difference summary CSV)
 Run:     PYTHONHASHSEED=0 python3 script1d-maps.py [--only SECTION [SECTION ...]] [--list] [--no-png]
 Moved from script2f-maps.py (fsis_density, outcomes, first_diff) and script2b-final-visuals.py (cafo_census = Figures G
-and H; snapshot_2012 = Figures F1 and F2). New: entry, expansion, large_ops, species, species_count, treatment_status,
-coverage, fsis_entry, wave_change, selected_counties. Treatments are never redefined here: they come from
+and H; snapshot_2012 = Figures F1 and F2). New: entry, expansion, large_ops, species, species_count, estimation_sample,
+coverage, fsis_entry, wave_change. Treatments are never redefined here: they come from
 script4_treatment.py / designs.py. Missing cafo_* counts are 0 from 2002 (D-34).
 GeoJSON: functions.load_county_geojson downloads the plotly county file on every run (no cache, 20 s timeout) and only
 falls back to a map embedded in old HTML files; coordinates are rounded once here to keep each HTML file small.
@@ -25,10 +25,10 @@ from plotly.colors import sample_colorscale
 from plotly.subplots import make_subplots
 
 import figstyle
-from designs import load_designs, species_treatments
+from designs import load_designs, species_treatments, usable_sample
 from functions import latest_file_glob, load_county_geojson, log_per10k, normalize_panel_key, to_numeric_series
 from packages import db_data, output_dir
-from script4_treatment import CENSUS_YEARS
+from script4_treatment import CENSUS_YEARS, COVARIATE_ORDER, OUTCOMES
 
 SCRIPT = "script1d-maps.py"
 MERGED_DIR = str(Path(db_data) / "merged")
@@ -36,7 +36,6 @@ CLEAN_DIR = str(Path(db_data) / "clean")
 MAPS_DIR = Path(output_dir) / "maps" / "script1d"
 
 LATEST_WAVE = max(CENSUS_YEARS)
-ANALYSIS_WINDOW = (2010, 2015)  # README "Analytical Panel Window" (recommended); used only to label treatment status
 GEO_PRECISION = 2  # decimal degrees kept in the county outlines (about 1 km); geometry only
 FSIS_YEARS = list(range(2017, 2024))
 FSIS_ABSENT_AS_ZERO = True  # a county-year with no FSIS record has no listed establishment (see load_fsis)
@@ -44,7 +43,13 @@ PNG_SCALE = 2  # 1400 px wide x 2 = 2800 px, about 390 dpi at 183 mm
 
 SPECIES = {"Cattle": "cattle", "Beef": "beef", "Dairy": "dairy", "Hogs": "hogs", "Chickens": "chickens"}
 COUNT_SPECIES = {k: v for k, v in SPECIES.items() if v != "cattle"}  # D-36: cattle contains dairy and beef
-SIZE_COLS = {"Small": "small_cafo", "Medium": "medium_cafo", "Large": "large_cafo"}
+SIZE_COLS = {
+    "Small": "small_cafo",
+    "Medium": "medium_cafo",
+    "Large": "large_cafo",
+}  # panel columns: cattle + hogs + chickens
+ESTIMATION_OUTCOME = OUTCOMES["Poor MH Days"]  # the outcome whose estimation sample map 6 shows
+ESTIMATION_CONTROLS = COVARIATE_ORDER[:8]  # the 8 pre-committed full-coverage controls (D-16, D-31): "the control set"
 
 # Colour (one place). Sequential: Viridis (perceptually uniform); signed: ColorBrewer RdBu 7-class;
 # categories: Okabe-Ito.
@@ -140,11 +145,6 @@ class Data:
         assert not self.df.duplicated(["fips", "year"]).any(), "panel has duplicate county-years"
         self.df = apply_zero_rule(self.df)
         self.df["fips_str"] = self.df["fips"]
-        # large operations without double counting: cattle (which contains dairy and beef) + hogs + chickens,
-        # the same rule script0f uses for cafo_total_ops_all_animals. The panel column large_cafo sums all five
-        # types, counting dairy and beef twice, so it is used only where an old map plotted it (Figure H).
-        parts = [species_treatments(self.df, sp, ["large"])["count"] for sp in ("cattle", "hogs", "chickens")]
-        self.df["large_ops"] = pd.concat(parts, axis=1).sum(axis=1, min_count=1)
         self.fsis = load_fsis()
         self.fsis_path = latest_file_glob(MERGED_DIR, "*_panel_fsis.csv")
         self.key_path = latest_file_glob(CLEAN_DIR, "*rural-key.csv")
@@ -562,7 +562,7 @@ def section_cafo_census(data, no_png):
         )
     for size, col in SIZE_COLS.items():
         families[f"H_{size.lower()}_cafo_census_years"] = (
-            f"{size} operations (all animals)",
+            f"{size} operations (cattle + hogs + chickens)",
             df.assign(_v=log_per10k(df[col], df["population"])),
             "H",
         )
@@ -582,7 +582,8 @@ def section_cafo_census(data, no_png):
                 f"CAFO {label.lower()}: log(operations per 10,000 residents + 1)",
                 data.note(
                     "Source: USDA Census of Agriculture, operations by size bin; "
-                    "size panels sum all five animal types (large_cafo etc.)"
+                    "size panels sum cattle, hogs and chickens (panel small/medium/large_cafo; dairy and beef sit "
+                    "inside cattle)"
                     if fam == "H"
                     else "Source: USDA Census of Agriculture, operations by size bin"
                 ),
@@ -618,53 +619,6 @@ def section_snapshot_2012(data, no_png):
             hover_label=unit,
             no_png=no_png,
         )
-
-
-def selected_county_fips(df, years=ANALYSIS_WINDOW):
-    """The one county per state shown in Figure B of script2b (same rule): >=4 years of poor mental health days in the
-    window, top tercile of mean CAFO operations per 10,000 within the state, then the one closest
-    to that group's median.
-    """
-    b = df[df["year"].between(*years)].copy()
-    b["cafo_per10k"] = b["cafo_total_ops_all_animals"] / b["population"].replace(0, np.nan) * 10_000
-    b["_mh"] = to_numeric_series(b["poor_mental_health_days"])
-    cs = (
-        b.groupby("fips")
-        .agg(
-            state_fips=("state_fips", "first"),
-            mean_cafo=("cafo_per10k", "mean"),
-            n_mh=("_mh", lambda s: s.notna().sum()),
-        )
-        .reset_index()
-    )
-    cs = cs[cs["n_mh"] >= 4]
-    cs = cs[cs["mean_cafo"] >= cs.groupby("state_fips")["mean_cafo"].transform(lambda s: s.quantile(0.67))]
-    return {
-        st: g.loc[(g["mean_cafo"] - g["mean_cafo"].median()).abs().idxmin(), "fips"]
-        for st, g in cs.groupby("state_fips")
-    }
-
-
-def section_selected_counties(data, no_png):
-    """Map of the counties used in the county time-series figure (script2b Figure B). New: script2b drew no such map."""
-    sel = set(selected_county_fips(data.df).values())
-    allc = pd.Series(0.0, index=sorted(data.df["fips"].unique()))
-    allc[allc.index.isin(sel)] = 1.0
-    categorical_map(
-        data,
-        [("", allc)],
-        [("Rural county, not shown", NEUTRAL), ("Selected for the time-series figure", VERMILLION)],
-        "selected_counties_figure_b",
-        f"Counties shown in the county time-series figure (n={len(sel)}, one per state)",
-        data.note(
-            "Selection: >= 4 years of poor mental health days in "
-            f"{ANALYSIS_WINDOW[0]}-{ANALYSIS_WINDOW[1]}, top tercile of CAFO operations per 10k within state, "
-            "closest to the median; same rule as script2b Figure B"
-        ),
-        1,
-        "County",
-        no_png=no_png,
-    )
 
 
 # =============================================================================
@@ -763,7 +717,7 @@ def section_large_ops(data, no_png):
     source = (
         f"Source: USDA Census of Agriculture {y}; largest size bin, cattle (incl. dairy and beef) + hogs + chickens"
     )
-    total = data.at(y, "large_ops")
+    total = data.at(y, "large_cafo")
     count_map(data, [("", total)], "large_ops_total", f"Large CAFO operations, {y}", source, 1, no_png)
     per10k = total / data.at(y, "population").replace(0, np.nan) * 10_000
     continuous_map(
@@ -827,35 +781,77 @@ def section_species_count(data, no_png):
     )
 
 
-def section_treatment_status(data, no_png):
-    """Treatment status relative to the analysis window for both designs (map 6)."""
-    lo, hi = ANALYSIS_WINDOW
-    cats = [
-        ("Never treated", NEUTRAL),
-        (f"Treated by {lo} (before window)", sample_colorscale(SEQ, [0.15])[0]),
-        (f"Treated {lo + 1}-{hi} (in window)", sample_colorscale(SEQ, [0.55])[0]),
-        (f"Treated after {hi}", sample_colorscale(SEQ, [0.92])[0]),
-    ]
-    panels = []
+def section_estimation_sample(data, no_png):
+    """Poor mental health days estimation sample, both designs: treated by cohort, comparison, not in sample (map 6)."""
+    rural = pd.Index(sorted(data.df["fips"].unique()))
+    samples = {}
     for name, label in [("first expansion", "First expansion"), ("first entry (clean controls)", "First entry")]:
         des = data.designs[name]
-        coh = des["data"].groupby("fips")[des["cohort"]].first()
-        st = pd.Series(0.0, index=coh.index)
-        st[coh <= lo] = 1
-        st[(coh > lo) & (coh <= hi)] = 2
-        st[coh > hi] = 3
-        panels.append((f"{label} design (n={len(coh):,}; in window {int((st == 2).sum())})", st))
+        d = usable_sample(des["data"], ESTIMATION_OUTCOME, des["treat"], des["cohort"], ESTIMATION_CONTROLS)
+        d["fips"] = d["fips"].astype(str).str.zfill(5)
+        samples[label] = d
+    # a wave gets a legend entry only if a treated county of a design is in the sample (needs a pre-period)
+    waves = [
+        w
+        for w in CENSUS_YEARS
+        if w > min(CENSUS_YEARS) and any((d.drop_duplicates("fips")["cohort"] == w).any() for d in samples.values())
+    ]
+    dropped = [w for w in CENSUS_YEARS if w > min(CENSUS_YEARS) and w not in waves]
+    # codes 0..n_wave-1 = treated by wave, n_wave = comparison, n_wave + 1 = rural but not in the sample
+    n_wave = len(waves)
+    cats = [(f"Treated, cohort {w}", c) for w, c in zip(waves, wave_colours(waves))] + [
+        ("Comparison (in sample, not treated)", NEUTRAL),
+        ("Rural county, not in the sample", "#ffffff"),
+    ]
+    panels, years = [], set()
+    for label, d in samples.items():
+        cohort = d.groupby("fips")["cohort"].first()
+        code = (
+            cohort.map({w: j for j, w in enumerate(waves)})
+            .where(cohort.notna(), n_wave)
+            .reindex(rural)
+            .fillna(n_wave + 1)
+        )
+        n_treated, n_comp = int((code < n_wave).sum()), int((code == n_wave).sum())
+        per_wave = ", ".join(f"{w}: {int((code == j).sum())}" for j, w in enumerate(waves))
+        print(
+            f"  {label}: {len(cohort):,} counties in sample ({n_treated:,} treated [{per_wave}], {n_comp:,} "
+            "comparison), "
+            f"{int((code == n_wave + 1).sum()):,} rural counties not in sample; {len(d):,} county-years, "
+            f"{d['year'].min()}-{d['year'].max()}"
+        )
+        panels.append((f"{label} (in sample: {n_treated:,} treated, {n_comp:,} comparison)", code))
+        years |= {int(d["year"].min()), int(d["year"].max())}
     categorical_map(
         data,
         panels,
         cats,
-        "treatment_status_by_design",
-        f"Treatment status in the analysis window {lo}-{hi}, large dairy",
+        "estimation_sample_by_design",
+        "Poor mental health days estimation sample, large dairy",
         data.note(
-            "Source: USDA Census of Agriculture; cohorts from designs.load_designs",
-            f"first expansion = all rural counties; first entry = entering plus never-large counties; "
-            f"window {lo}-{hi} per README",
-        ),
+            "Source: USDA Census of Agriculture (large dairy = 500+ milk cows), County Health Rankings, "
+            "annual controls file. "
+            f"In sample = county-years {min(years)}-{max(years)} with the outcome, the treatment dummy and "
+            "the 8 pre-committed "
+            "controls non-missing and, for a treated county, an observed year before its cohort wave "
+            "(designs.usable_sample, "
+            "the call of script4za). Cohort = first census wave of expansion (first expansion) or entry (first entry; "
+            "comparison = never large dairy)"
+            + (
+                f"; no county of cohort {', '.join(map(str, dropped))} is in the sample "
+                f"(the outcome starts in {min(years)}, so none has a pre-period)"
+                if dropped
+                else ""
+            )
+            + ". A missing cafo_* count is 0 from 2002 (D-34), so a county without a record is a comparison "
+            "county, not missing. "
+            "FSIS is not used here; elsewhere in this script a county-year with no FSIS record is drawn as 0",
+            f"{len(rural):,} rural counties; the first-entry design holds entering plus never-large "
+            "counties, so other rural "
+            "counties are drawn as not in the sample",
+            land=False,
+        )
+        + " Very light grey: not a rural county of the panel.",
         2,
         "Status",
         no_png=no_png,
@@ -939,7 +935,7 @@ def section_wave_change(data, no_png):
     df = data.df
     panels = []
     for a, b in zip(CENSUS_YEARS[:-1], CENSUS_YEARS[1:]):
-        d = data.at(b, "large_ops") - data.at(a, "large_ops")
+        d = data.at(b, "large_cafo") - data.at(a, "large_cafo")
         panels.append((f"{a} to {b}: {int((d > 0).sum()):,} up, {int((d < 0).sum()):,} down", d))
     cats = list(zip(DELTA_BINS[1], DIVERGING_7))
     categorical_map(
@@ -963,13 +959,12 @@ SECTIONS = {  # run order: moved sections first, then one per treatment family
     "first_diff": section_first_diff,
     "cafo_census": section_cafo_census,
     "snapshot_2012": section_snapshot_2012,
-    "selected_counties": section_selected_counties,
     "entry": section_entry,
     "expansion": section_expansion,
     "large_ops": section_large_ops,
     "species": section_species,
     "species_count": section_species_count,
-    "treatment_status": section_treatment_status,
+    "estimation_sample": section_estimation_sample,
     "coverage": section_coverage,
     "fsis_entry": section_fsis_entry,
     "wave_change": section_wave_change,

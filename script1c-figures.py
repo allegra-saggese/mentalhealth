@@ -4,7 +4,6 @@
 
 Sections (python3 script1c-figures.py --only <name> [<name> ...]; no flag runs all, in this order):
   binned-scatter           CAFO and FSIS exposure vs outcomes: binned means, 95% CI, OLS line        (was script2b A1 A2 A3 I J; script2d P R)
-  county-series            one representative county per state: CAFO per 10,000 vs poor mental health days  (script2b B)
   outcome-correlation      Spearman correlations between the six outcomes                            (script2b C)
   quartile-distributions   violin and box plots of each outcome by CAFO-intensity quartile           (script2b D E)
   cafo-top-counties        top-20 counties by operations per 10,000, census years                   (script2c K L)
@@ -24,6 +23,8 @@ Sections (python3 script1c-figures.py --only <name> [<name> ...]; no flag runs a
   trends                   raw trends by county group, event-time paths, pre-treatment slopes       (script4v)
 Reads:   newest Data/merged/*_panel.csv and *_panel_fsis.csv; Data/clean/*_cafo_ops_by_size_compact.csv; for `trends`
          the treatment definitions in script4_treatment.py and designs.py (no new definitions here)
+Window:  each outcome is drawn over its own designs.OUTCOME_WINDOWS entry (outcomes without one: all panel years); exposures use
+         all panel years. Descriptive only, not the estimation samples (A21 open)
 Writes:  Data/output/figs/script1c/<date>_<stem>.{pdf,png} (183 mm / 89 mm, 600 dpi PNG + vector PDF) and the numbers behind
          each figure in Data/output/tables/script1c/<date>_<stem>.csv
 Run:     PYTHONHASHSEED=0 python3 script1c-figures.py            about 4 min (trend-sweep is most of it; --max-trend-vars N shortens it)
@@ -50,6 +51,7 @@ import seaborn as sns
 from scipy import stats
 
 import figstyle
+from designs import OUTCOME_WINDOWS
 from functions import latest_file_glob, log_per10k, normalize_panel_key, to_numeric_series
 from packages import db_data, figs_dir, tables_dir
 
@@ -59,7 +61,6 @@ SCRIPT = "script1c-figures.py"
 OUT_FIGS = Path(figs_dir) / "script1c"
 OUT_TABLES = Path(tables_dir) / "script1c"
 SEED = 20261024                     # box-plot jitter only
-PANEL_YEARS = (2010, 2015)          # window where the mental-health outcomes are well covered
 FSIS_YEARS = (2017, 2023)           # FSIS county linkage exists only for these years
 CENSUS_YEARS = [2002, 2007, 2012, 2017, 2022]
 POP, CAFO_TOTAL = "population", "cafo_total_ops_all_animals"
@@ -94,6 +95,13 @@ OUTCOMES = [
 ]
 OUTCOME_LABEL = {c: f"{n}\n({u})" for c, n, u in OUTCOMES}
 OUTCOME_TIGHT = {c: textwrap.fill(f"{n} ({u})", 22) for c, n, u in OUTCOMES}      # three short lines: fits a 25 mm tall panel
+# OUTCOMES column -> label of designs.OUTCOME_WINDOWS (same quantity as the stage-4 outcome). Excessive drinking, CHR violent
+# crime and homicides are not stage-4 outcomes, have no window, and are drawn over every panel year they are observed.
+WINDOW_LABEL_OF = {"poor_mental_health_days": "Poor MH Days", "aggravated_assault_per100k": "Aggravated Assault",
+                   "crude_rate_despair": "Deaths of Despair"}
+WINDOWS_NOTE = ("Each outcome is drawn over its own window (poor mental health days " + "{}-{}".format(*OUTCOME_WINDOWS["Poor MH Days"])
+                + ", aggravated assault " + "{}-{}".format(*OUTCOME_WINDOWS["Aggravated Assault"]) + ", deaths of despair "
+                + "{}-{}".format(*OUTCOME_WINDOWS["Deaths of Despair"]) + "; the other outcomes every year observed)")
 STATE_NAME = {
     "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas", "06": "California", "08": "Colorado", "09": "Connecticut",
     "10": "Delaware", "11": "District of Columbia", "12": "Florida", "13": "Georgia", "15": "Hawaii", "16": "Idaho", "17": "Illinois",
@@ -235,6 +243,23 @@ def window(df, years):
     return df[df["year"].between(*years)].copy()
 
 
+def window_text(col):
+    """'2010-2023' for an outcome with a designs.OUTCOME_WINDOWS entry, 'all years' otherwise."""
+    key = WINDOW_LABEL_OF.get(col)
+    return "{}-{}".format(*OUTCOME_WINDOWS[key]) if key else "all years"
+
+
+def outcome_windowed(df):
+    """Copy of df (all years) with every OUTCOMES column set to missing outside its own window; exposures are untouched, so a
+    pair of columns is complete only where each is observed inside its window (pairwise complete, as the figures drop NaN)."""
+    out = df.copy()
+    for col, _, _ in OUTCOMES:
+        key = WINDOW_LABEL_OF.get(col)
+        if key and col in out.columns:
+            out[col] = to_numeric_series(out[col]).where(out["year"].between(*OUTCOME_WINDOWS[key]))
+    return out
+
+
 # =============================================================================
 # binned-scatter (script2b A1 A2 A3 I J; script2d P R)
 # =============================================================================
@@ -316,9 +341,9 @@ def binned_figure(stem, cells, shape, height_mm, note, bin_rows, fit_rows, varia
 def section_binned_scatter():
     """Binned means of each outcome against log(exposure per 10,000 residents + 1); one figure per exposure family."""
     pan, fs = panel(), panel_fsis()
-    dp = window(pan, PANEL_YEARS)
+    dp = outcome_windowed(pan)
     dp["x_total"] = log_per10k(dp[CAFO_TOTAL], dp[POP])
-    base = f"Rural US counties, {PANEL_YEARS[0]}-{PANEL_YEARS[1]} county-years (analysis panel). Dots: equal-count bin means of the outcome " \
+    base = f"Rural US county-years. {WINDOWS_NOTE}. Dots: equal-count bin means of the outcome " \
            "with 95% CI (1.96 x SE); dashed line: OLS fit on the county-years with r and p; exposure = log(operations per 10,000 residents + 1)."
     bins_, fits_ = [], []
 
@@ -337,7 +362,7 @@ def section_binned_scatter():
     binned_figure("binned_cafo_by_animal_vs_outcomes", cells, (3, 3), 160, base + " Columns: animal type (small + medium + large operations); "
                   "rows: outcome.", bins_, fits_)
 
-    df = window(fs, FSIS_YEARS)
+    df = outcome_windowed(window(fs, FSIS_YEARS))
     if FSIS_TOTAL in df.columns and df[FSIS_TOTAL].notna().sum() > 50:
         x = log_per10k(df[FSIS_TOTAL], df[POP])
         cells = [dict(name=c, x=x, y=df[c], colour=EXPOSURE_COLOUR["fsis"], xlabel="log(FSIS establishments per 10,000 residents + 1)",
@@ -373,7 +398,7 @@ def section_binned_scatter():
                                   xlabel=f"log({animal.lower()}, {size.lower()}, per 10,000 + 1)",
                                   ylabel=f"{animal}\nDeaths of despair (per 100,000, CDC)" if size == "Small" else ""))
     binned_figure("binned_cafo_animal_size_vs_despair", cells, (3, 3), 160,
-                  f"Rural US counties, {PANEL_YEARS[0]}-{PANEL_YEARS[1]} county-years. Rows: animal type; columns: operation size class. 15 equal-count bins; "
+                  f"Rural US county-years; deaths of despair over {window_text('crude_rate_despair')}. Rows: animal type; columns: operation size class. 15 equal-count bins; "
                   "dots: bin means with 95% CI; dashed line: OLS on the county-years.", bins_, fits_)
 
     # script2d: the same plot for large operations only, and small vs large side by side (fit on bin means, t-based CI)
@@ -382,7 +407,7 @@ def section_binned_scatter():
     cells = [dict(name=c, x=dp["x_large"], y=dp[c], colour=EXPOSURE_COLOUR["large"], xlabel="log(large CAFO operations per 10,000 + 1)",
                   ylabel=OUTCOME_LABEL[c]) for c, _, _ in OUTCOMES if c in dp.columns]
     binned_figure("binned_large_cafo_vs_outcomes", cells, (2, 3), 112,
-                  f"Rural US counties, {PANEL_YEARS[0]}-{PANEL_YEARS[1]} county-years; large size class only (compare with the total-CAFO figure). 20 equal-count "
+                  f"Rural US county-years. {WINDOWS_NOTE}; large size class only (compare with the total-CAFO figure). 20 equal-count "
                   "bins; dots: bin means with t-based 95% CI; dashed line: OLS on the bin means.", bins_, fits_, variant="bins")
     cells = []
     for c, label in ((o[0], OUTCOME_LABEL[o[0]]) for o in (OUTCOMES[5], OUTCOMES[0], OUTCOMES[4])):
@@ -391,7 +416,7 @@ def section_binned_scatter():
         cells.append(dict(name=f"{c}|large", x=dp["x_large"], y=dp[c], colour=EXPOSURE_COLOUR["large"], ylabel="",
                           title="Large CAFO operations" if c == "crude_rate_despair" else None, xlabel="log(large CAFO operations per 10,000 + 1)"))
     binned_figure("binned_small_vs_large_cafo", cells, (3, 2), 150,
-                  f"Rural US counties, {PANEL_YEARS[0]}-{PANEL_YEARS[1]} county-years. Left: small, right: large operations; y-axes are matched within each row. "
+                  f"Rural US county-years. {WINDOWS_NOTE}. Left: small, right: large operations; y-axes are matched within each row. "
                   "Dots: bin means with t-based 95% CI; dashed line: OLS on the bin means.", bins_, fits_, variant="bins", sharey_row=True)
 
     write_table(pd.DataFrame(bins_), "binned_scatter_bins")
@@ -399,71 +424,10 @@ def section_binned_scatter():
 
 
 # =============================================================================
-# county-series (script2b B)
-# =============================================================================
-def section_county_series():
-    """One county per state: top tercile of CAFO density within the state, at least 4 years of mental-health data,
-    the one closest to the state median of that tercile. Two axes per county: CAFO per 10,000 residents, poor mental health days."""
-    mh = "poor_mental_health_days"
-    d = window(panel(), PANEL_YEARS)
-    d["cafo_per10k"] = (d[CAFO_TOTAL] / d[POP].replace(0, np.nan)) * 10_000
-    stats_ = (d.groupby("fips").agg(state_fips=("state_fips", "first"), mean_cafo_per10k=("cafo_per10k", "mean"),
-                                    n_mh_years=(mh, lambda s: s.notna().sum())).reset_index())
-    stats_ = stats_[stats_["n_mh_years"] >= 4].copy()
-    stats_["state_p67"] = stats_.groupby("state_fips")["mean_cafo_per10k"].transform(lambda s: s.quantile(0.67))
-    stats_ = stats_[stats_["mean_cafo_per10k"] >= stats_["state_p67"]].copy()
-    selected = {}
-    for st, grp in stats_.groupby("state_fips"):
-        median = grp["mean_cafo_per10k"].median()
-        selected[st] = grp.loc[(grp["mean_cafo_per10k"] - median).abs().idxmin(), "fips"]
-    print(f"  {len(selected)} counties selected (one per state)")
-    meta = stats_[stats_["fips"].isin(selected.values())].sort_values("state_fips")
-    write_table(meta, "county_series_selection_metadata")
-    ts = d[d["fips"].isin(selected.values())].sort_values(["state_fips", "year"])
-    write_table(ts[["state_fips", "fips", "year", "cafo_per10k", mh]], "county_series_values")
-
-    states = sorted(selected)
-    per_page, ncols = 24, 4
-    n_pages = int(np.ceil(len(states) / per_page))
-    pages = [list(chunk) for chunk in np.array_split(states, n_pages)]      # even pages, no one-panel last page
-    for page, chunk in enumerate(pages, 1):
-        nrows = int(np.ceil(len(chunk) / ncols))
-        fig, axes = figstyle.new_grid(nrows, ncols, width="double", height_mm=min(36.0 * nrows + 22, figstyle.MAX_HEIGHT_MM))
-        flat = axes.ravel()
-        for i, st in enumerate(chunk):
-            ax, fips = flat[i], selected[st]
-            cdf = ts[ts["fips"] == fips]
-            years = cdf["year"].astype(int).to_numpy()
-            ax.plot(years, cdf["cafo_per10k"], color=P["blue"], lw=0.9, marker="o", ms=2.2)
-            ax.tick_params(axis="y", colors=P["blue"], labelsize=5)
-            ax.spines["left"].set_color(P["blue"])
-            ax2 = ax.twinx()
-            ax2.plot(years, cdf[mh], color=P["vermillion"], lw=0.9, marker="s", ms=2.2, ls="--")
-            ax2.tick_params(axis="y", colors=P["vermillion"], labelsize=5)
-            ax2.spines["right"].set_visible(True)
-            ax2.spines["right"].set_color(P["vermillion"])
-            ax2.spines["top"].set_visible(False)
-            ax.set_xticks([2010, 2012, 2014])
-            ax.tick_params(axis="x", labelsize=5)
-            ax.set_title(f"{STATE_ABBR.get(st, st)} (FIPS {fips})", fontsize=5.5, pad=2)
-            if i + ncols >= len(chunk):
-                ax.set_xlabel("Year", fontsize=5.5)
-        hide_unused(flat, len(chunk))
-        handles = [plt.Line2D([0], [0], color=P["blue"], marker="o", ms=3, lw=0.9),
-                   plt.Line2D([0], [0], color=P["vermillion"], marker="s", ms=3, lw=0.9, ls="--")]
-        fig.legend(handles, ["CAFO operations per 10,000 residents (left axis, solid)",
-                             "Poor mental health days per month (right axis, dashed)"],
-                   loc="outside upper center", ncol=2, fontsize=6)
-        save(fig, f"county_series_cafo_vs_poor_mental_health_days_part{page}of{len(pages)}",
-             f"One county per state (page {page} of {len(pages)}): county with at least 4 years of mental-health data in {PANEL_YEARS[0]}-{PANEL_YEARS[1]}, in the top "
-             "tercile of CAFO operations per 10,000 residents within its state and closest to the median of that tercile. Source: analysis panel (CHR).")
-
-
-# =============================================================================
 # outcome-correlation (script2b C)
 # =============================================================================
 def section_outcome_correlation():
-    d = window(panel(), PANEL_YEARS)
+    d = outcome_windowed(panel())
     short = {"poor_mental_health_days": "Poor mental health days (CHR)", "excessive_drinking_per100k": "Excessive drinking (CHR)",
              "violent_crime": "Violent crime (CHR)", "homicides": "Homicides (CHR)",
              "aggravated_assault_per100k": "Aggravated assault (UCR)", "crude_rate_despair": "Deaths of despair rate (CDC)"}
@@ -480,7 +444,7 @@ def section_outcome_correlation():
     for lab in ax.get_xticklabels():
         lab.set_ha("right")
     save(fig, "outcome_crosscorrelation",
-         f"Spearman correlations between the six outcomes, rural US county-years {PANEL_YEARS[0]}-{PANEL_YEARS[1]}; pairs need at least 200 joint observations. "
+         f"Spearman correlations between the six outcomes, rural US county-years, pairwise complete. {WINDOWS_NOTE}; pairs need at least 200 joint observations. "
          "Lower triangle shown. Source: analysis panel.")
 
 
@@ -489,7 +453,7 @@ def section_outcome_correlation():
 # =============================================================================
 def section_quartile_distributions():
     rng = np.random.default_rng(SEED)
-    d = window(panel(), PANEL_YEARS)
+    d = outcome_windowed(panel())
     d["cafo_log_per10k"] = log_per10k(d[CAFO_TOTAL], d[POP])
     labels = ["Q1\n(lowest)", "Q2", "Q3", "Q4\n(highest)"]
     d["cafo_quartile"] = pd.qcut(d["cafo_log_per10k"], q=4, labels=labels, duplicates="drop")
@@ -530,10 +494,10 @@ def section_quartile_distributions():
         letters(flat)
         stem = f"{kind}_cafo_quartile_vs_outcomes"
         if kind == "violin":
-            save(fig, stem, f"Rural US county-years {PANEL_YEARS[0]}-{PANEL_YEARS[1]}, grouped by quartile of log(total CAFO operations per 10,000 residents + 1). "
+            save(fig, stem, f"Rural US county-years, grouped by quartile of log(total CAFO operations per 10,000 residents + 1) over all panel years. {WINDOWS_NOTE}. "
                  "Violin width = density (cut at the observed range); inner lines = Q1, median, Q3; the median is printed under each quartile label.")
         else:
-            save(fig, stem, f"Rural US county-years {PANEL_YEARS[0]}-{PANEL_YEARS[1]}, grouped by quartile of log(total CAFO operations per 10,000 residents + 1). "
+            save(fig, stem, f"Rural US county-years, grouped by quartile of log(total CAFO operations per 10,000 residents + 1) over all panel years. {WINDOWS_NOTE}. "
                  "Box = interquartile range, red line = median, whiskers = 1.5 x IQR, grey dots = county-years (jittered, seed fixed).")
     write_table(pd.DataFrame(rows), "quartile_distribution_summary")
 
@@ -690,10 +654,10 @@ def _positive(series):
 
 def section_threshold_presence():
     """Mean outcome with 95% CI by presence of large CAFOs / FSIS establishments (0/1) and by count tier."""
-    dp, df = window(panel(), PANEL_YEARS), window(panel_fsis(), FSIS_YEARS)
+    dp, df = outcome_windowed(panel()), outcome_windowed(window(panel_fsis(), FSIS_YEARS))
     df["fsis_any"] = _positive(df[FSIS_TOTAL])
     df["fsis_slaughter_any"] = _positive(df[FSIS_SLAUGHTER])
-    win_p, win_f = f"{PANEL_YEARS[0]}-{PANEL_YEARS[1]}", f"{FSIS_YEARS[0]}-{FSIS_YEARS[1]}"
+    win_p, win_f = "outcome windows", f"{FSIS_YEARS[0]}-{FSIS_YEARS[1]}"
     rows = []
 
     specs = [("Any large CAFO", "any_large_cafo", dp, ["No large CAFO", "Large CAFO"], EXPOSURE_COLOUR["large"], win_p),
@@ -708,7 +672,7 @@ def section_threshold_presence():
                 s = data.loc[data[col] == gval, oc]
                 m, lo, hi = mean_ci(s)
                 n = int(s.notna().sum())
-                rows.append({"figure": "presence", "exposure": title, "window": win, "outcome": oc, "group": glab, "n": n, "mean": m, "ci95_lo": lo, "ci95_hi": hi})
+                rows.append({"figure": "presence", "exposure": title, "window": window_text(oc) if win == win_p else win, "outcome": oc, "group": glab, "n": n, "mean": m, "ci95_lo": lo, "ci95_hi": hi})
                 ax.bar(gi, m, color=colour if gval else "#bbbbbb", width=0.55, edgecolor="white")
                 if np.isfinite(lo):
                     ax.errorbar(gi, m, yerr=[[m - lo], [hi - m]], fmt="none", color="black", capsize=2, lw=0.6)
@@ -720,7 +684,7 @@ def section_threshold_presence():
                 ax.set_title(f"{title}\n({win})", fontsize=6.5, pad=2)
     letters(axes)
     save(fig, "presence_vs_absence_outcome_means",
-         f"Mean outcome with 95% CI (t-based) for rural US county-years with and without a large CAFO ({win_p}, analysis panel) and with and without an FSIS establishment or "
+         f"Mean outcome with 95% CI (t-based) for rural US county-years with and without a large CAFO (all panel years; {WINDOWS_NOTE}) and with and without an FSIS establishment or "
          f"slaughterhouse ({win_f}, FSIS panel). An FSIS count is missing, not zero, for county-years without an establishment, so the 'No FSIS' groups are empty (n = 0). "
          "Y-axes are shared along each row.")
 
@@ -738,7 +702,7 @@ def section_threshold_presence():
                 s = data.loc[data["_tier"] == tl, oc]
                 m, lo, hi = mean_ci(s)
                 n = int(s.notna().sum())
-                rows.append({"figure": "tiers", "exposure": title, "window": win, "outcome": oc, "group": tl, "n": n, "mean": m, "ci95_lo": lo, "ci95_hi": hi})
+                rows.append({"figure": "tiers", "exposure": title, "window": window_text(oc) if win == win_p else win, "outcome": oc, "group": tl, "n": n, "mean": m, "ci95_lo": lo, "ci95_hi": hi})
                 ax.bar(ti, m, color=colour, width=0.65, edgecolor="white")
                 if np.isfinite(lo):
                     ax.errorbar(ti, m, yerr=[[m - lo], [hi - m]], fmt="none", color="black", capsize=2, lw=0.6)
@@ -750,7 +714,7 @@ def section_threshold_presence():
                 ax.set_title(f"{title}\n(count tier, {win})", fontsize=6.5, pad=2)
     letters(axes)
     save(fig, "dose_response_count_tiers",
-         f"Mean outcome with 95% CI (t-based) by count tier of large CAFO operations per county-year ({win_p}, analysis panel) and of FSIS establishments and slaughterhouses "
+         f"Mean outcome with 95% CI (t-based) by count tier of large CAFO operations per county-year (all panel years; {WINDOWS_NOTE}) and of FSIS establishments and slaughterhouses "
          f"({win_f}, FSIS panel; county-years without an establishment have a missing count and are not in any tier). Y-axes are shared along each row.")
     write_table(pd.DataFrame(rows), "presence_and_tier_means")
 
@@ -1451,7 +1415,6 @@ def section_trends():
 
 SECTIONS = {
     "binned-scatter": section_binned_scatter,
-    "county-series": section_county_series,
     "outcome-correlation": section_outcome_correlation,
     "quartile-distributions": section_quartile_distributions,
     "cafo-top-counties": section_cafo_top_counties,
