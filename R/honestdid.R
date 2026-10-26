@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # R/honestdid.R  --  Rambachan & Roth (2023) sensitivity analysis on the TWFE event studies
-# (added 2026-10-17). Reads the inputs written by script4w-honestdid-export.py.
+# (added 2026-10-17). Reads the inputs written by script4b-diagnostics.py --only honestdid.
 #
 # For each treatment definition x outcome, for two target parameters
 #     first post-period effect (e = 0)
@@ -14,7 +14,7 @@
 #     * the BREAKDOWN value: the smallest Mbar (or M) at which the confidence set includes zero.
 # DESCRIPTIVE: no verdicts are assigned here.
 #
-# Usage: Rscript R/honestdid.R      (after: python3 script4w-honestdid-export.py)
+# Usage: Rscript R/honestdid.R      (after: python3 script4b-diagnostics.py --only honestdid)
 
 suppressMessages(library(HonestDiD))
 
