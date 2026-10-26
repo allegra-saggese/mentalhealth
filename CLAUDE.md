@@ -126,7 +126,7 @@ Full definitions are in `.claude/skills/*/SKILL.md`.
 
 | Item | State |
 |------|-------|
-| Stage 0-1 (ingestion, panel) | Run and verified; current panel `Data/merged/2026-10-25_panel.csv` (identical to 2026-10-12 except seven generic CAFO columns, D-51; stage-4 inputs unchanged) |
+| Stage 0-1 (ingestion, panel) | Run and verified; current panel `Data/merged/2026-10-25_panel.csv` (D-51 generic CAFO columns, D-53 census-year zeros); T1, T3, T4 and the species size classes changed, so everything that reads them was re-run on 2026-10-25 (see MODEL-RUN-STATE addendum); the D-51 panel is archived in `Data/merged/_archive/2026-10-25_D-51/` |
 | Stage 4 (design-based estimates) | Reported set fixed 2026-10-15; run state in `code-audit/plans/2026-10-17_MODEL-RUN-STATE.md` |
 | Refactor 2026-10-22 | Shared modules and `METHODS.md` added; output-equivalent (71 files identical under `PYTHONHASHSEED=0`) |
 | Phase 3 (ML selection) | Specified, not built (B-series, `2026-09-27_MODEL-NAMING.md`) |

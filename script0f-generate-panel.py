@@ -8,7 +8,7 @@ Reads:   Data/clean/*.csv (script0a-0e outputs)
 Writes:  Data/merged/<date>_{panel, panel_05_10, panel_10_20, panel_census_years, panel_fsis}.csv
 Run:     python3 script0f-generate-panel.py
 Notes:   CAFO census values are forward-filled between census years; a county with no CAFO row for any species is zero-filled in census years
-         (species-by-species zeros are applied later, in script4_treatment.load_panel, D-34); FSIS columns live only in panel_fsis.csv.
+         (a census-year blank species count is set to 0 before the forward-fill, D-53; 2000-01 stay blank); FSIS columns live only in panel_fsis.csv.
          CDC missingness flags and CHR count imputation are explained in README.md, "Key Design Decisions".
          The generic CAFO columns (small_cafo, medium_cafo, large_cafo, bin_sum_cafo, total_heads_cafo, any_large_cafo,
          any_medium_or_large_cafo, n_rows) use the cattle, hogs and chickens rows only, because cattle contains beef and dairy
@@ -385,6 +385,14 @@ for _s in ("small", "medium", "large"):
     assert _bad == 0, f"{_gc} differs from cattle + hogs + chickens in {_bad} census rows"
     print(f"  check: {_gc} == cattle + hogs + chickens on {int(_ok.sum()):,} census rows")
 
+# D-53: a blank CAFO count in a census year means no row for that species, i.e. zero operations (the census is exhaustive, D-34).
+# Set it to 0 BEFORE the forward-fill; otherwise the fill replaces it with the previous wave's count and a county that has lost its
+# operations keeps them. 2000-01 (before the first census) stay blank.
+_cen_zero = merged_all["year"].isin(_CAFO_CENSUS_YEARS) & (merged_all["year"] >= 2002)
+_n_blank = int(merged_all.loc[_cen_zero, _cafo_fill_cols].isna().sum().sum())
+merged_all.loc[_cen_zero, _cafo_fill_cols] = merged_all.loc[_cen_zero, _cafo_fill_cols].fillna(0)
+print(f"CAFO census-year blanks set to 0 before the forward-fill (D-53): {_n_blank:,} cells")
+
 # Forward-fill CAFO values across inter-census years.
 # Each USDA Agricultural Census is treated as valid until the next one:
 # e.g., 2003–2006 inherit 2002 census values; 2008–2011 inherit 2007 values.
@@ -395,6 +403,34 @@ merged_all[_cafo_fill_cols] = (
     .ffill()
 )
 print(f"CAFO forward-fill: {len(_cafo_fill_cols)} columns carried forward to inter-census years.")
+
+# Self-checks against the compact file (D-53), species by size class: (a) every census-year value equals the compact value for that
+# county-year, or 0 where the compact has no row; (b) every later non-census year equals the value of its preceding census year,
+# wherever that census-year row is in the panel. The build stops if either fails.
+_SIZES = ("small", "medium", "large")
+_raw = _ensure_key(read_and_prepare(latest[BASE_DESCRIPTOR]))
+_raw["commodity_desc"] = _raw["commodity_desc"].astype("string").str.strip().str.lower()
+for _s in _SIZES:
+    _raw[_s] = pd.to_numeric(_raw[_s], errors="coerce")
+_raw = _raw[_raw["commodity_desc"].isin(CAFO_COMMODITIES_ALL)]
+_cen_years = sorted(_CAFO_CENSUS_YEARS)
+_prev_cen = merged_all["year"].map(lambda y: max([c for c in _cen_years if c <= y], default=np.nan))
+_bad_a = _bad_b = _n_a = _n_b = 0
+for _c in CAFO_COMMODITIES_ALL:
+    _r = _raw[_raw["commodity_desc"] == _c].groupby(["fips", "year"])[list(_SIZES)].sum(min_count=1).reset_index()
+    for _s in _SIZES:
+        _col = f"cafo_{_c}_{_s}"
+        _m = merged_all.loc[merged_all["year"].isin(_cen_years), ["fips", "year", _col]]
+        _exp = _m.merge(_r[["fips", "year", _s]], on=["fips", "year"], how="left")[_s].fillna(0)
+        _bad_a += int((~np.isclose(_m[_col].to_numpy(float), _exp.to_numpy(float))).sum()); _n_a += len(_m)
+        _cv = _m.rename(columns={"year": "prev_cen", _col: "cv"})
+        _x = merged_all[["fips", "year", _col]].assign(prev_cen=_prev_cen)
+        _x = _x[(_x["year"] >= 2002) & ~_x["year"].isin(_cen_years)].merge(_cv, on=["fips", "prev_cen"], how="inner")
+        _bad_b += int((~np.isclose(_x[_col].to_numpy(float), _x["cv"].to_numpy(float), equal_nan=True)).sum()); _n_b += len(_x)
+assert _bad_a == 0, f"census-year CAFO counts differ from the compact file in {_bad_a} cells"
+assert _bad_b == 0, f"inter-census CAFO counts differ from the preceding census year in {_bad_b} cells"
+print(f"  check (D-53): census-year species counts equal the compact file or 0 ({_n_a:,} cells); "
+      f"inter-census years equal the preceding census year ({_n_b:,} cells)")
 
 
 # Merge remaining selected datasets on top of base keys
