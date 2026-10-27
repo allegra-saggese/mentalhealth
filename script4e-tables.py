@@ -30,6 +30,7 @@ import pandas as pd
 
 from script4_treatment import db_data, os, date, LATEX_OUT, REPORT_TREATMENTS, REPORT_CS_ARM
 from packages import tables_dir, figs_dir, maps_dir, out_glob
+from estimators import INCLUDE_LPDID                      # False: no LP-DiD tables or columns (D-57)
 
 OUT = LATEX_OUT   # output/latex (packages.latex_dir); .tex names are fixed because LaTeX \input's them
 TAB = os.path.join(LATEX_OUT, "tables")
@@ -134,6 +135,8 @@ MAIN_TABLES   = ["tab_A2.tex", "tab_A4.tex", "tab_A5_pretrend.tex", "tab_A6.tex"
                  "tab_R0_entry_events.tex", "tab_R1_R2.tex"]
 ROBUST_TABLES = ["tab_A2_all_treatments.tex", "tab_A1.tex", "tab_A4_all_treatments.tex",
                  "tab_A6_both_arms.tex", "tab_A7_lpdid.tex", "tab_A2_conley.tex", "tab_R4_lpdid.tex"]
+if not INCLUDE_LPDID:
+    ROBUST_TABLES = [t for t in ROBUST_TABLES if "lpdid" not in t]
 
 
 def regression_tables():
@@ -290,7 +293,7 @@ def regression_tables():
         return "\n".join(L)
 
 
-    if a7 is not None and len(a7):
+    if INCLUDE_LPDID and a7 is not None and len(a7):
         written.append(save("tab_A7_lpdid.tex", lp_table(a7, [-5, -3, -2, 0, 2, 5], "step-8 at t-1")))
 
     # ------------------------------------------------------------- VIF -----------
@@ -364,7 +367,7 @@ def regression_tables():
               r"\bottomrule", r"\end{tabular}"]
         written.append(save("tab_R1_R2.tex", "\n".join(L)))
     r4 = latest(T4R, "*_R4_lpdid.csv")
-    if r4 is not None and len(r4):
+    if INCLUDE_LPDID and r4 is not None and len(r4):
         written.append(save("tab_R4_lpdid.tex", lp_table(r4, [-4, -3, -2, 0, 2, 4], "step-8 at t-1")))
 
     print("written:", written)
@@ -1183,6 +1186,8 @@ def slide_fragments():
 
     # ---- estimator agreement (D-45)
     a = pd.read_csv(out_glob(tables_dir, TZA, "*_agreement.csv")[-1])
+    if not INCLUDE_LPDID:
+        a = a[a.estimator != "LP-DiD"]                                   # 3 of 4 rule (D-57); each estimator's flag is against CS alone, so the rest are unchanged
     rows = []
     for o in OUTCOMES:
         cells = []
@@ -1192,8 +1197,8 @@ def slide_fragments():
             cells.append(f"{int(x.agrees.sum())} of {len(x)}" + (f" (not: {_esc(no)})" if no else ""))
         rows.append(f"{OUT_NAME[o]} & " + " & ".join(cells))
     _fragment("compare__agreement", _tab(r"@{}lll@{}", "Outcome & E2 first expansion & E3 first entry", rows),
-              "Estimators that agree with covariate-adjusted Callaway-Sant'Anna: same sign and overall ATT inside its 95% interval (rule D-45); five estimators compared "
-              f"(LP-DiD, Sun-Abraham, imputation, dCDH, stacked DiD). Source: script4d agreement file ({stem(TZA, '*_agreement.csv')}).", size=r"\footnotesize")
+              "Estimators that agree with covariate-adjusted Callaway-Sant'Anna: same sign and overall ATT inside its 95% interval (rule D-45, 3 of 4 since D-57); four estimators compared "
+              f"(Sun-Abraham, imputation, dCDH, stacked DiD). Source: script4d agreement file ({stem(TZA, '*_agreement.csv')}).", size=r"\footnotesize")
 
     # ---- HonestDiD
     hb = pd.read_csv(out_glob(tables_dir, "4b-honestdid", "*_honestdid_breakdown.csv")[-1])
@@ -1248,6 +1253,12 @@ def link_slide_assets():
             m = re.match(r"^\d{4}-\d{2}-\d{2}_" + re.escape(tag) + r"_(.+)(\.[a-z]+)$", os.path.basename(f))
             if m and m.group(2) in exts and (tag == "4f-slides" or m.group(1) in wanted_maps):
                 newest[m.group(1) + m.group(2)] = f                 # sorted ascending: the newest date wins
+    if not INCLUDE_LPDID:                                          # LP-DiD is off (D-57): no LP-DiD figure is linked, and an earlier link is removed
+        for name in [n for n in newest if "lp_did" in n]:
+            del newest[name]
+        for name in os.listdir(assets):
+            if "lp_did" in name and os.path.islink(os.path.join(assets, name)):
+                os.remove(os.path.join(assets, name))              # a symlink only; the figure file itself stays in the figures folder
     for name, target in newest.items():
         link = os.path.join(assets, name)
         if os.path.lexists(link):

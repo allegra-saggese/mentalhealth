@@ -215,7 +215,7 @@ def section_designs():
              A6_cs_aggregated, HEADLINE_twfe_vs_cs, VIF_audit}.csv and figures/<date>_4a-designs_*.png
     Run:     python3 script4a-design-estimates.py     (about 7 minutes; 300 bootstrap draws)
     Method:  METHODS.md sections 1-2; state-clustered SEs; CS functions come from estimators.py.
-    Notes:   A1 (pooled state FE) and A7 (LP-DiD) are computed but not reported (D-32).
+    Notes:   A1 (pooled state FE) is computed but not reported (D-32); A7 (LP-DiD) is switched off (estimators.INCLUDE_LPDID, D-57).
     """
     import warnings; warnings.filterwarnings("ignore")
     import sys
@@ -231,7 +231,7 @@ def section_designs():
         db_data, figs_dir, tables_dir, os, date,
     )
     from functions import latest_file_glob
-    from estimators import lpdid, conley_se, load_centroids, att_gt_table, base_period_covariates, clean as _clean
+    from estimators import lpdid, conley_se, load_centroids, att_gt_table, base_period_covariates, clean as _clean, INCLUDE_LPDID
 
     OUT_FIGS, OUT_TABLES = figs_dir, tables_dir    # output-name tag "4a-designs" (packages.py); was folder script4a
     TODAY = date.today().strftime("%Y-%m-%d")
@@ -772,24 +772,27 @@ def section_designs():
     # treated) counties only. Regression-based inference, state-clustered. h < -1 is
     # the pre-trend test. Treatment timing is still only observed at census waves,
     # so h is in years but the identifying events occur every 5 years.
-    print("\n" + "=" * 78)
-    print("A7: LP-DiD (clean controls: not-yet-treated + never-treated)")
-    print("=" * 78)
-    lp_rows = []
-    for okey, ocol in OUTCOMES.items():
-        pan = df[["fips", "year", "state_fips", "cohort", ocol] + CONTROLS_HEADLINE].copy()
-        pan = pan.rename(columns={c: _clean(c) for c in pan.columns})
-        for arm, ctrls in [("no controls", []), ("step-8 at t-1", CLEAN_HEAD)]:
-            r = lpdid(pan, _clean(ocol), horizons=range(-LEADS, LAGS + 1), controls=ctrls)
-            if r.empty:
-                continue
-            r.insert(0, "arm", arm); r.insert(0, "outcome", okey); r.insert(0, "registry", "A7")
-            lp_rows.append(r)
-            pre = r[r.h < -1]
-            print(f"  {okey:26s} {arm:14s} pre sig={int((pre.p < .05).sum())}/{len(pre)}  "
-                  f"h=0: {r.loc[r.h == 0, 'beta'].squeeze() if (r.h == 0).any() else float('nan'):+.4f}")
-    lp_df = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
-    lp_df.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A7_lpdid.csv"), index=False)
+    if INCLUDE_LPDID:
+        print("\n" + "=" * 78)
+        print("A7: LP-DiD (clean controls: not-yet-treated + never-treated)")
+        print("=" * 78)
+        lp_rows = []
+        for okey, ocol in OUTCOMES.items():
+            pan = df[["fips", "year", "state_fips", "cohort", ocol] + CONTROLS_HEADLINE].copy()
+            pan = pan.rename(columns={c: _clean(c) for c in pan.columns})
+            for arm, ctrls in [("no controls", []), ("step-8 at t-1", CLEAN_HEAD)]:
+                r = lpdid(pan, _clean(ocol), horizons=range(-LEADS, LAGS + 1), controls=ctrls)
+                if r.empty:
+                    continue
+                r.insert(0, "arm", arm); r.insert(0, "outcome", okey); r.insert(0, "registry", "A7")
+                lp_rows.append(r)
+                pre = r[r.h < -1]
+                print(f"  {okey:26s} {arm:14s} pre sig={int((pre.p < .05).sum())}/{len(pre)}  "
+                      f"h=0: {r.loc[r.h == 0, 'beta'].squeeze() if (r.h == 0).any() else float('nan'):+.4f}")
+        lp_df = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
+        lp_df.to_csv(out_file(tables_dir, "4a-designs", f"{TODAY}_A7_lpdid.csv"), index=False)
+    else:
+        print("A7 LP-DiD skipped (estimators.INCLUDE_LPDID = False; D-57)")
 
 
     # =============================================================================
@@ -1210,13 +1213,13 @@ def section_fsis():
     Reads:   panel via script4_treatment.load_panel(); Data/merged/*_panel_fsis.csv
     Writes:  Data/output/tables/<date>_4a-fsis_{R0_entry_events, R1_R2_twfe, R3_event_study, R4_lpdid}.csv
     Run:     python3 script4r-fsis-treatment.py
-    Notes:   FSIS starts in 2017, so entries before 2017 are invisible; R4 (LP-DiD) is computed but not reported.
+    Notes:   FSIS starts in 2017, so entries before 2017 are invisible; R4 (LP-DiD) is switched off (estimators.INCLUDE_LPDID, D-57).
     """
     import warnings; warnings.filterwarnings("ignore")
     import numpy as np, pandas as pd, pyfixest as pf
     from script4_treatment import load_panel, OUTCOMES, COVARIATE_ORDER, db_data, tables_dir, os, date
     from functions import latest_file_glob
-    from estimators import lpdid
+    from estimators import lpdid, INCLUDE_LPDID
 
     OUT = tables_dir    # output-name tag "4a-fsis" (packages.py); was folder script4r
     TODAY = date.today().strftime("%Y-%m-%d")
@@ -1344,26 +1347,29 @@ def section_fsis():
         print(pre.groupby("outcome").apply(lambda g: f"{int((g.p_state < .05).sum())}/{len(g)}").to_string())
 
     # ============================== R4 LP-DiD ====================================
-    lp_rows = []
-    for okey, ocol in OUTCOMES.items():
-        pan = df[df.year.between(2012, 2023)][["fips", "year", "state_fips", "F_cohort", ocol] + CONTROLS]
-        pan = pan.rename(columns={c: cl(c) for c in pan.columns})
-        for arm, ctrls in [("no controls", []), ("step-8 at t-1", [cl(c) for c in CONTROLS])]:
-            r = lpdid(pan, cl(ocol), cohort="F_cohort", horizons=range(-LEADS, LAGS + 1),
-                      controls=ctrls)
-            if r.empty:
-                continue
-            r.insert(0, "arm", arm); r.insert(0, "outcome", okey); r.insert(0, "model", "R4")
-            lp_rows.append(r)
-    lp = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
-    lp.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R4_lpdid.csv"), index=False)
-    if len(lp):
-        print("\nR4 LP-DiD, h=0 and pre-trend")
-        for (o, a), g in lp.groupby(["outcome", "arm"]):
-            h0 = g.loc[g.h == 0, "beta"]
-            pr = g[g.h < -1]
-            print(f"  {o:26s} {a:14s} h0={h0.iloc[0] if len(h0) else np.nan:+.4f}  "
-                  f"pre sig={int((pr.p < .05).sum())}/{len(pr)}  treated={g.n_treated.max()}")
+    if INCLUDE_LPDID:
+        lp_rows = []
+        for okey, ocol in OUTCOMES.items():
+            pan = df[df.year.between(2012, 2023)][["fips", "year", "state_fips", "F_cohort", ocol] + CONTROLS]
+            pan = pan.rename(columns={c: cl(c) for c in pan.columns})
+            for arm, ctrls in [("no controls", []), ("step-8 at t-1", [cl(c) for c in CONTROLS])]:
+                r = lpdid(pan, cl(ocol), cohort="F_cohort", horizons=range(-LEADS, LAGS + 1),
+                          controls=ctrls)
+                if r.empty:
+                    continue
+                r.insert(0, "arm", arm); r.insert(0, "outcome", okey); r.insert(0, "model", "R4")
+                lp_rows.append(r)
+        lp = pd.concat(lp_rows, ignore_index=True) if lp_rows else pd.DataFrame()
+        lp.to_csv(out_file(tables_dir, "4a-fsis", f"{TODAY}_R4_lpdid.csv"), index=False)
+        if len(lp):
+            print("\nR4 LP-DiD, h=0 and pre-trend")
+            for (o, a), g in lp.groupby(["outcome", "arm"]):
+                h0 = g.loc[g.h == 0, "beta"]
+                pr = g[g.h < -1]
+                print(f"  {o:26s} {a:14s} h0={h0.iloc[0] if len(h0) else np.nan:+.4f}  "
+                      f"pre sig={int((pr.p < .05).sum())}/{len(pr)}  treated={g.n_treated.max()}")
+    else:
+        print("R4 LP-DiD skipped (estimators.INCLUDE_LPDID = False; D-57)")
     print(f"\nscript4a fsis COMPLETE -> {OUT} (tag 4a-fsis)")
 
 

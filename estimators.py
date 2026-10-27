@@ -17,6 +17,10 @@ import pandas as pd
 import pyfixest as pf
 from scipy.stats import chi2
 
+# LP-DiD is switched off (meeting of 2026-10-26, D-57): the code below is unchanged and kept. Set True to run it again in script4a (A7, R4)
+# and script4d, and to draw it in the figures and tables of script4e and script4f.
+INCLUDE_LPDID = False
+
 
 # =============================================================================
 # LP-DiD

@@ -37,6 +37,7 @@ import pandas as pd
 
 import figstyle
 from matplotlib.ticker import MaxNLocator
+from estimators import INCLUDE_LPDID                       # False: LP-DiD is not drawn (D-57); the rows stay in the older result files
 from functions import latest_file_glob
 from packages import out_file, out_glob, out_latest, tagged
 from script4_treatment import OUTCOMES, figs_dir, tables_dir
@@ -50,10 +51,10 @@ SHORT_OUTCOME = {"Poor MH Days": "Poor MH Days", "Frequent Mental Distress": "Fr
 
 # =============================================================== section triangulation (was script4zb)
 CS, TW = "Callaway-Sant'Anna (benchmark)", "TWFE (static, reference)"
-ROWS = [(CS, "Callaway-Sant'Anna", "black"), (TW, "TWFE (reference)", "grey"),
-        ("LP-DiD", "LP-DiD", "blue"), ("Sun-Abraham", "Sun-Abraham", "vermillion"),
-        ("Imputation (did2s)", "Imputation", "green"), ("de Chaisemartin-D'Haultfoeuille", "dCDH", "orange"),
-        ("Stacked DiD", "Stacked", "purple")]
+ROWS = [r for r in [(CS, "Callaway-Sant'Anna", "black"), (TW, "TWFE (reference)", "grey"),
+                    ("LP-DiD", "LP-DiD", "blue"), ("Sun-Abraham", "Sun-Abraham", "vermillion"),
+                    ("Imputation (did2s)", "Imputation", "green"), ("de Chaisemartin-D'Haultfoeuille", "dCDH", "orange"),
+                    ("Stacked DiD", "Stacked", "purple")] if INCLUDE_LPDID or r[0] != "LP-DiD"]
 ESTIMATOR_COLOUR = {**figstyle.PALETTE, "grey": "#8c8c8c"}
 DESIGNS = {"first expansion": "first_expansion", "first entry (clean controls)": "first_entry"}
 
@@ -85,6 +86,7 @@ def triangulation():
     """One forest-plot figure per design: a panel per outcome, a row per estimator, in within-county SD of the outcome."""
     overall = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_overall_estimates.csv"))
     agree = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_agreement.csv"))
+    agree = agree[agree.estimator.isin([n for n, _, _ in ROWS])]       # the agreement count is over the estimators drawn (3 of 4 rule, D-57)
     samples = pd.read_csv(out_latest(tables_dir, "4d-estimators", "*_samples.csv"))
     within_sd = pd.read_csv(out_latest(tables_dir, "4a-species", "*_outcome_within_sd.csv"),
                             index_col=0)["within_county_sd"]
@@ -111,7 +113,7 @@ def triangulation():
                  transform=key.transAxes)
         fig.text(0.005, 0.005,
                  "Overall post-treatment ATT with 95% interval, one common complete-case sample per outcome; standard errors clustered by state "
-                 "(CS: state bootstrap,\n300 draws); imputation drops counties with a single untreated observation; LP-DiD and dCDH stop at event "
+                 "(CS: state bootstrap,\n300 draws); imputation drops counties with a single untreated observation; dCDH" + (" and LP-DiD stop" if INCLUDE_LPDID else " stops") + " at event "
                  "time 8. Design: " + design + ".\nSource: script4za-estimator-triangulation.py; agreement rule D-45; scale: within-county SD "
                  "(script4x).", fontsize=5, va="bottom", ha="left", color="#333333")
         pdf, png = figstyle.save_figure(fig, figs_dir, tagged("4f-triangulation", f"triangulation_{tag}"))
@@ -119,7 +121,7 @@ def triangulation():
 
 
 # =============================================================== section treatment-by-model (was script4zd)
-MODELS = ["TWFE", "Callaway-Sant'Anna", "LP-DiD", "Sun-Abraham", "Imputation", "dCDH", "Stacked DiD"]
+MODELS = [m for m in ["TWFE", "Callaway-Sant'Anna", "LP-DiD", "Sun-Abraham", "Imputation", "dCDH", "Stacked DiD"] if INCLUDE_LPDID or m != "LP-DiD"]
 TREATMENTS = ["E2", "E3", "T1", "T3", "T4"]
 SHORT_TREATMENT = {"E2": "E2 first expansion", "E3": "E3 first entry", "T1": "T1 presence", "T3": "T3 per 10k", "T4": "T4 log count"}
 TREATMENT_COLOUR = {"E2": "vermillion", "E3": "black", "T1": "blue", "T3": "green", "T4": "purple"}   # five hues that stay distinct

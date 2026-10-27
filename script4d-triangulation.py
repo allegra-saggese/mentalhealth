@@ -4,7 +4,7 @@ Sections (run in this order; `--only` selects one):
   estimators          = old script4za. Callaway-Sant'Anna (CS) benchmark + TWFE, LP-DiD, Sun-Abraham, imputation (did2s), de Chaisemartin-
                         D'Haultfoeuille (dCDH, R package), stacked DiD on ONE complete-case sample per (design, outcome). Rule fixed before the run
                         (D-45): an estimator agrees with CS if its overall post-treatment ATT has the same sign and lies inside CS's 95% interval;
-                        the Poor MH Days first-expansion result is called estimator-robust if at least 4 of the 5 agree. Reported either way.
+                        the Poor MH Days first-expansion result is called estimator-robust if at least 4 of the 5 agree (3 of the 4 with LP-DiD switched off, D-57). Reported either way.
                         Writes Data/output/tables/YYYY-MM-DD_4d-estimators_{overall_estimates,event_paths,agreement,samples,failures}.csv
   treatment-by-model  = old script4zc. Every treatment (T1, T3, T4, E2 first expansion, E3 first entry) against every model (D-46): one tidy table
                         for the forest plots. New estimation: dCDH for T1, T3, T4, NOT normalized. Everything else is read: TWFE T1/T3/T4 from
@@ -48,7 +48,9 @@ TODAY = date.today().strftime("%Y-%m-%d")
 N_BOOT = 20 if QUICK else 300                   # CS state bootstrap, as in script4a/4u
 CS_SEED = 20260928
 CS = "Callaway-Sant'Anna (benchmark)"
-FIVE = ["LP-DiD", "Sun-Abraham", "Imputation (did2s)", "de Chaisemartin-D'Haultfoeuille", "Stacked DiD"]
+# LP-DiD is switched off (estimators.INCLUDE_LPDID, D-57): the other estimators are then 4 and the rule is 3 of 4 (was 4 of 5, D-45)
+FIVE = (["LP-DiD"] if est.INCLUDE_LPDID else []) + ["Sun-Abraham", "Imputation (did2s)", "de Chaisemartin-D'Haultfoeuille", "Stacked DiD"]
+AGREE_MIN = len(FIVE) - 1                        # all but one of the other estimators must agree with CS
 PRESPECIFIED = ("first expansion", "Poor MH Days")      # the one cell D-45 applies to
 
 # ---- section `treatment-by-model` (old script4zc)
@@ -95,7 +97,7 @@ def run_estimators():
 
     overall_rows, event_rows, agree_rows, sample_rows, fail_rows = [], [], [], [], []
     print("=" * 78)
-    print(f"script4za -- estimator triangulation   CS bootstrap draws {N_BOOT}   rule: D-45 (4 of 5, same sign, inside CS 95% CI)")
+    print(f"script4za -- estimator triangulation   CS bootstrap draws {N_BOOT}   rule: D-45 as changed by D-57 ({AGREE_MIN} of {len(FIVE)}, same sign, inside CS 95% CI)")
     print("=" * 78)
     for dname, D in DESIGNS.items():
         for okey, ocol in outcomes.items():
@@ -116,7 +118,7 @@ def run_estimators():
                     "TWFE (static, reference)": lambda: est._tri_rows("TWFE (static, reference)", "overall", np.nan,
                         *[float(v) for v in pf.feols("y ~ D + " + " + ".join(XCOLS) + " | fips + year", data=d, vcov={"CRV1": "state_fips"})
                           .tidy().loc["D"][["Estimate", "Std. Error"]]]),
-                    "LP-DiD": lambda: est.lpdid_estimates(d, **kw),
+                    **({"LP-DiD": lambda: est.lpdid_estimates(d, **kw)} if est.INCLUDE_LPDID else {}),
                     "Sun-Abraham": lambda: est.saturated_estimates(d, **kw),
                     "Imputation (did2s)": lambda: est.did2s_estimates(d_imp, treat="D", **kw),
                     "de Chaisemartin-D'Haultfoeuille": lambda: est.dcdh_estimates(d, y="y", treat="D", unit="fips", time="year",
@@ -146,7 +148,7 @@ def run_estimators():
                                    "cs_ci_lo": cs.ci_lo, "cs_ci_hi": cs.ci_hi, "same_sign": same_sign, "inside_cs_ci": inside,
                                    "agrees": same_sign and inside})
             tw = tables["TWFE (static, reference)"].iloc[0] if "TWFE (static, reference)" in tables else None
-            verdict = ("ESTIMATOR-ROBUST" if n_agree >= 4 else "NOT robust") if (dname, okey) == PRESPECIFIED else "descriptive"
+            verdict = ("ESTIMATOR-ROBUST" if n_agree >= AGREE_MIN else "NOT robust") if (dname, okey) == PRESPECIFIED else "descriptive"
             print(f"   CS {cs.est:+.4g} (95% {cs.ci_lo:+.4g} to {cs.ci_hi:+.4g})" + (f"   TWFE {tw.est:+.4g}" if tw is not None else ""))
             for name in FIVE:
                 r = next((x for x in agree_rows if x["design"] == dname and x["outcome"] == okey and x["estimator"] == name), None)
