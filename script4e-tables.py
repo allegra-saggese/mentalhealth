@@ -1238,6 +1238,24 @@ def slide_fragments():
               "Interaction of the large-dairy treatment with the presence of an FSIS slaughterhouse (2017-2023 only); coefficient (state-clustered standard error); blank = not identified. Source: script4a A4 "
               f"({stem(T4A, '*_A4_fsis_interaction.csv')}). Panel {pdate}.", size=r"\scriptsize")
 
+    # ---- event counts by species and size class (script4b section species-counts)
+    sc = pd.read_csv(out_glob(tables_dir, "4b-species-counts", "*_species_counts.csv")[-1])
+    waves = [2007, 2012, 2017, 2022]
+    rows = []
+    for (sp, scope), g in sc.groupby(["species", "scope"], sort=False):
+        e2, e3 = g[g.design == "E2"].iloc[0], g[g.design == "E3"].iloc[0]
+        rows.append(f"{sp.capitalize()} & {scope} & " + " & ".join(
+            [f"{int(e2[f'wave_{y}']):,}" for y in waves] + [f"{int(e2.treated_counties):,}", f"{int(e2.comparison_counties):,}"]
+            + [f"{int(e3[f'wave_{y}']):,}" for y in waves] + [f"{int(e3.treated_counties):,}", f"{int(e3.comparison_counties):,}"]))
+    head = (r"\multicolumn{2}{@{}l}{} & \multicolumn{6}{c}{E2 first expansion} & \multicolumn{6}{c}{E3 first entry}\\" + "\n"
+            + r"\cmidrule(lr){3-8}\cmidrule(lr){9-14}" + "\n"
+            + "Species & Size class & 2007 & 2012 & 2017 & 2022 & Treated & Comparison & 2007 & 2012 & 2017 & 2022 & Treated & Comparison")
+    _fragment("robust__species_counts", _tab(r"@{}ll" + "r" * 12 + "@{}", head, rows),
+              "Counties whose first event falls at each census wave. E2: first wave with a rise in the count of operations; E3: first wave with a count above zero after a zero. "
+              "Comparison: E2 = no rise at any wave; E3 = zero count at every wave. Size classes: large, small, and all sizes (small + medium + large). "
+              f"Rural counties before any outcome sample restriction; not estimated. Source: script4b species-counts ({stem('4b-species-counts', '*_species_counts.csv')}). Panel {pdate}.",
+              size=r"\scriptsize")
+
 
 def link_slide_assets():
     """Undated symlinks to the newest slide figures and the three cohort maps, so the deck refers to stable file names (LATEX_OUT/slides/assets)."""

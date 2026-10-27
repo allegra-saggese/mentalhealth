@@ -9,6 +9,7 @@ script4b-diagnostics.py -- diagnostics of the control set and the event-study de
     balance      balance and detectable-effect tables, LaTeX bodies and a CSV                (was script4d-balance-panel.py)
     control-set  add-one-in / take-one-out sensitivity of the treatment coefficient         (was script4y-control-set-selection.py)
     honestdid    inputs for the Rambachan-Roth analysis; R/honestdid.R is run afterwards     (was script4w-honestdid-export.py)
+    species-counts  number of E2 and E3 events by species and size class, descriptive, no estimation  (new 2026-10-26)
 
 Reads:   panel via script4_treatment.load_panel() (honestdid: designs.load_designs());
          `leads` and `control-set` read the newest Data/output/tables/*_4b-controls_control_pretrends.csv, which `controls` writes
@@ -20,7 +21,7 @@ Writes:  (all in Data/output/tables/, named <date>_<tag>_<stem>; naming: package
          <date>_4b-balance_balance_panel.csv; LATEX_OUT/{BALANCEpanel.tex, BALANCEpanel.pdf, _BODY_balance.tex}  (balance)
          <date>_4b-control-set[-quick]_{regressions, path_summary, covariate_summary, selection_table}.csv       (control-set)
          4b-honestdid-inputs_{<design>__<outcome>__beta, ..__sigma, manifest}.csv (undated; R/honestdid.R writes <date>_4b-honestdid_*) (honestdid)
-Run:     python3 script4b-diagnostics.py [--only controls leads pretrends balance control-set honestdid] [--quick]
+Run:     python3 script4b-diagnostics.py [--only controls leads pretrends balance control-set species-counts honestdid] [--quick]
          then Rscript R/honestdid.R     (--quick shortens control-set only; a few minutes without it)
 Method:  METHODS.md sections 3, 4 and 7. Roles are judgements, not findings; the control-set sweep documents the pre-committed
          set (D-16) and does not choose it. Output folders keep the names of the old scripts, so readers (script4p reads the
@@ -38,7 +39,7 @@ import numpy as np
 import pandas as pd
 import pyfixest as pf
 
-from designs import load_designs, county_groups
+from designs import load_designs, county_groups, species_treatments
 from estimators import clean, event_study_frame, joint_wald
 from figstyle import save_text_table
 from packages import out_file, out_glob, out_latest, tagged
@@ -812,7 +813,61 @@ def honestdid():
 
 
 # =============================================================================
-SECTIONS = ["controls", "leads", "pretrends", "balance", "control-set", "honestdid"]     # run order: `leads` and `control-set` read `controls`
+def species_counts():
+    """How many events stand behind the species forest plots: counties whose first E2 (first expansion) or E3 (first entry) falls at each
+    census wave, for each species and size class, with the comparison counties. Descriptive; nothing is estimated.
+
+    Events use the same rule as designs.species_treatments and script4_treatment._wave_events on the species' own count: a county's count
+    at a census wave is compared with its previous observed wave. E2 = first wave with a rise (count > previous); E3 = first wave with
+    count > 0 after a previous count of 0. Comparison for E2 = counties that never rise; for E3 = counties with a zero count at every wave.
+    Counties need at least two observed waves; the 2002 wave has no previous wave, so events start in 2007. Size classes: large,
+    small, and all sizes (small + medium + large, the scope of the all-sizes forest plots)."""
+    from script4_treatment import CENSUS_YEARS
+    df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
+    waves = [y for y in CENSUS_YEARS if y > min(CENSUS_YEARS)]
+    scopes = {"large": ["large"], "small": ["small"], "all sizes": ["small", "medium", "large"]}
+    rows = []
+    for species in ["dairy", "beef", "hogs", "chickens"]:
+        for scope, bins in scopes.items():
+            cols = [f"cafo_{species}_{b}" for b in bins]
+            if not all(c in df.columns for c in cols) or df[cols].notna().sum().sum() == 0:
+                rows.append({"species": species, "scope": scope, "design": "E2", "note": "not defined: no count in the panel"})
+                rows.append({"species": species, "scope": scope, "design": "E3", "note": "not defined: no count in the panel"})
+                continue
+            tr = species_treatments(df, species, bins)
+            w = pd.DataFrame({"fips": df["fips"], "year": df["year"], "C": tr["count"]})
+            w = w[w.year.isin(CENSUS_YEARS)].dropna(subset=["C"]).sort_values(["fips", "year"])
+            w["lag"] = w.groupby("fips")["C"].shift(1)
+            eligible = set(w.loc[w["lag"].notna(), "fips"])
+            first = {"E2": w[w["lag"].notna() & (w["C"] > w["lag"])].groupby("fips")["year"].min(),
+                     "E3": w[(w["lag"] == 0) & (w["C"] > 0)].groupby("fips")["year"].min()}
+            ever_present = set(w.loc[w["C"] > 0, "fips"])
+            for design, fy in first.items():
+                comparison = eligible - set(fy.index) if design == "E2" else eligible - ever_present
+                row = {"species": species, "scope": scope, "design": design, "eligible_counties": len(eligible)}
+                row.update({f"wave_{y}": int((fy == y).sum()) for y in waves})
+                row.update({"treated_counties": int(len(fy)), "comparison_counties": len(comparison), "note": ""})
+                rows.append(row)
+    out = pd.DataFrame(rows)
+    out.to_csv(out_file(tables_dir, "4b-species-counts", f"{TODAY}_species_counts.csv"), index=False)
+    # validation: dairy / large must equal the panel's own add_year and entry_year (script4_treatment)
+    d = out[(out.species == "dairy") & (out.scope == "large")].set_index("design")
+    pan = df.groupby("fips")[["add_year", "entry_year"]].first()
+    for design, col in (("E2", "add_year"), ("E3", "entry_year")):
+        ref = pan[col].dropna().astype(int).value_counts()
+        mine = {y: int(d.loc[design, f"wave_{y}"]) for y in waves}
+        print(f"check dairy/large {design}: counties by wave {mine}; panel {col}: { {int(y): int(ref.get(y, 0)) for y in waves} }")
+        assert all(mine[y] == int(ref.get(y, 0)) for y in waves), f"dairy/large {design} differs from the panel's {col}"
+    txt = out.drop(columns=["eligible_counties"]).fillna("")
+    path = save_text_table(txt, os.path.join(tables_dir), tagged("4b-species-counts", "species_counts"),
+                           "Counties with a first expansion (E2) or first entry (E3) by census wave, by species and size class",
+                           "Counties whose first event falls at that census wave (2007 is the first wave with a previous wave). Comparison: E2 = never a rise; "
+                           "E3 = zero count at every wave. Rural counties of the 2026-10-25 panel, before any outcome sample restriction. Not estimated.",
+                           float_format="{:.0f}")
+    print("wrote", path)
+
+
+SECTIONS = ["controls", "leads", "pretrends", "balance", "control-set", "species-counts", "honestdid"]     # run order: `leads` and `control-set` read `controls`
 
 
 def main():
@@ -833,6 +888,8 @@ def main():
             balance()
         elif s == "control-set":
             control_set(quick=args.quick)
+        elif s == "species-counts":
+            species_counts()
         else:
             honestdid()
 
