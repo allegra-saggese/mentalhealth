@@ -16,6 +16,7 @@ Each new script holds the old scripts' code unchanged, one section per old scrip
 | `script4d-triangulation.py` | `estimators` | `script4za-estimator-triangulation.py` |
 | | `treatment-by-model` | `script4zc-treatment-by-model.py` |
 | `script4e-tables.py` | `tables`, `appendix`, `frames`, `slides` (new, no old script) | `script4n-regression-tables.py`, `script4p-full-appendix.py`, `script4q-beamer-frames.py` |
+| `script4g-spillovers.py` | `moran`, `donut`, `conley`, `division-fe`, `durbin` (new 2026-10-29, no old script; D-58) | |
 | `script4f-figures.py` | `triangulation`, `treatment-by-model`, `permutation`, `slides`, `slides-other` (the last two new, no old script) | `script4zb-triangulation-figure.py`, `script4zd-treatment-by-model-figures.py`, `script4zf-permutation-figure.py` |
 Earlier in the consolidation: `did_tools.py` and `did_cs.py` are sections of `estimators.py`; `script4b-covariate-sequence.py` and `script4c-covariate-stability.py` are in `z-archive/`; R helpers are in `R/`.
 **Folder names written by each section:** designs `script4a`; cohorts `script4u`; species `script4x`; fsis `script4r`; controls `script4a` (control_roster, control_pretrends, vif_headline_within); leads `script4t`; balance LaTeX output folder; control-set `script4y`; honestdid `script4w`; wild `script4z`; permutation `script4ze`; estimators `script4za`; treatment-by-model `script4zc`; figures `script4zb`, `script4zd`, `script4zf`.

@@ -1256,6 +1256,99 @@ def slide_fragments():
               f"Rural counties before any outcome sample restriction; not estimated. Source: script4b species-counts ({stem('4b-species-counts', '*_species_counts.csv')}). Panel {pdate}.",
               size=r"\scriptsize")
 
+    # ---- spatial spillover checks (script4g, D-58); each fragment is skipped, and said so, when its result file has not been written
+    spillover_fragments(pdate, base_note)
+
+
+def spillover_fragments(pdate, base_note):
+    """Slide fragments for the script4g spillover checks: Moran's I, Conley standard errors, division x year effects, the Durbin model."""
+    from script4_treatment import OUTCOMES
+    order = list(OUTCOMES)
+    heads = [r"Poor MH\\Days", r"Frequent\\distress", r"Deaths of\\despair", r"Aggravated\\assault", r"Assault,\\all", r"Violence\\index", r"NIBRS\\total"]
+    names = dict(zip(order, heads))
+    treat = [("T1", "T1 presence"), ("T3", "T3 per 10k"), ("T4", "T4 log count"), ("E2", "E2 first expansion")]
+
+    def newest(section, stem):
+        hits = [h for h in out_glob(tables_dir, f"4g-{section}", f"*_{stem}.csv")]
+        return pd.read_csv(hits[-1]) if hits else None, (os.path.basename(hits[-1])[:10] if hits else None)
+
+    # Moran's I
+    m, d = newest("moran", "moran_summary")
+    if m is not None:
+        rows = []
+        for o in order:
+            r, e = (m[(m.outcome == o) & (m.series == k)] for k in ("raw outcome", "A2 residual (E2)"))
+            if len(r) and len(e):
+                r, e = r.iloc[0], e.iloc[0]
+                rows.append(f"{OUT_NAME[o]} & {r.mean_I:.3f} & {e.mean_I:.3f} & {e.min_I:.3f} to {e.max_I:.3f} & {int(round(e.share_p_below_05 * e.years))} of {int(e.years)}")
+        _fragment("robust__spill_moran", _tab(r"@{}lrrcr@{}", "Outcome & I, raw outcome & I, A2 residual & Range of I (residual) & Years with p < 0.05 (residual)", rows),
+                  "Moran's I by year over the rural counties with data that year (mean over years); weights: counties within 100 km, row-standardised; "
+                  "permutation p-value (499 draws). Residual from the A2 regression of the outcome on E2, the control set, county and year fixed effects. "
+                  f"Zero would mean no spatial pattern. Source: script4g moran ({d}). Panel {pdate}.", size=r"\footnotesize")
+    else:
+        print("spillover fragment robust__spill_moran skipped: no 4g-moran result file")
+
+    # Conley standard errors
+    c, d = newest("conley", "conley_results")
+    if c is not None:
+        rows = []
+        for t, lab in treat:
+            g = c[c.treatment_id == t].set_index("outcome")
+            cells = [(g.loc[o, "beta"], g.loc[o, "se_state"], g.loc[o, "p_state"]) if o in g.index else (np.nan, np.nan, np.nan) for o in order]
+            rows += _est_se_rows(lab, cells)
+            rows.append(" & " + " & ".join(f"[{g.loc[o, 'se_conley_250km']:.3f}]" if o in g.index else "" for o in order))
+        rel = (c[["se_conley_100km", "se_conley_500km"]].div(c["se_conley_250km"], axis=0) - 1).abs().max().max()
+        footer = ["Observations & " + " & ".join(f"{int(c[c.outcome == o].N.iloc[0]):,}" if (c.outcome == o).any() else "" for o in order)]
+        _fragment("robust__spill_conley", _reg_tab([names[o] for o in order], rows, footer),
+                  "State-clustered standard error in parentheses (stars from its p-value), Conley standard error in brackets (250 km; 100 and 500 km differ by at most "
+                  f"{rel * 100:.0f}%). The 15 counties without an outline are left out (coefficients within 1% of the reported A2 cells). "
+                  f"* p < 0.10, ** p < 0.05, *** p < 0.01. Source: script4g conley ({d}). Panel {pdate}.", size=r"\tiny")
+    else:
+        print("spillover fragment robust__spill_conley skipped: no 4g-conley result file")
+
+    # division x year
+    v, d = newest("division-fe", "division_year_results")
+    if v is not None:
+        rows = []
+        for t, lab in treat:
+            g = v[v.treatment_id == t].set_index("outcome")
+            cells = [(g.loc[o, "beta_division_year"], g.loc[o, "se_division_year"], g.loc[o, "p_division_year"]) if o in g.index else (np.nan, np.nan, np.nan) for o in order]
+            rows += _est_se_rows(lab, cells)
+            rows.append(" & " + " & ".join(f"[{g.loc[o, 'beta_baseline']:.3f}]" if o in g.index else "" for o in order))
+        footer = ["Observations & " + " & ".join(f"{int(v[v.outcome == o].N.iloc[0]):,}" if (v.outcome == o).any() else "" for o in order),
+                  "County fixed effects & " + " & ".join(["Yes"] * len(order)), "Division x year fixed effects & " + " & ".join(["Yes"] * len(order))]
+        _fragment("robust__spill_division", _reg_tab([names[o] for o in order], rows, footer),
+                  "County and Census division x year fixed effects (nine divisions); state-clustered standard error in parentheses; baseline coefficient with year effects only, "
+                  "same sample, in brackets (15 counties without an outline left out). * p < 0.10, ** p < 0.05, *** p < 0.01. "
+                  f"Source: script4g division-fe ({d}). Panel {pdate}.", size=r"\tiny")
+    else:
+        print("spillover fragment robust__spill_division skipped: no 4g-division-fe result file")
+
+    # Durbin: sample and spatial dependence, then the bootstrap check on the confirmatory family
+    u, d = newest("durbin", "durbin_results")
+    if u is not None:
+        rows = []
+        for o in order:
+            g = u[(u.outcome == o) & (u.treatment_id == "E2")]
+            if len(g):
+                g = g.iloc[0]
+                rows.append(f"{OUT_NAME[o]} & {_esc(g.w)} & {int(g.counties):,} & {g.years} & {g.rho:.3f} ({g.se_rho:.3f})")
+        _fragment("robust__spill_durbin_sample", _tab(r"@{}llrcr@{}", "Outcome & Weights W & Counties & Years & rho (ML s.e.)", rows),
+                  "Spatial Durbin panel model, county and year effects, balanced panel of the counties observed in every year of the outcome's window that have a neighbour within 100 km. "
+                  "rho: dependence of a county's outcome on its neighbours' outcomes (from the E2 fit; the other treatments' fits give nearly the same value). "
+                  f"Source: script4g durbin ({d}). Panel {pdate}.", size=r"\footnotesize")
+        b = u[u.boot_draws > 0]
+        if len(b):
+            rows = []
+            for _, g in b.iterrows():
+                rows.append(f"{OUT_NAME[g.outcome]} & {g.treatment_id} & " + " & ".join(
+                    f"{g[k]:.3f} ({g['se_' + k]:.3f}) [{g['boot_se_' + k]:.3f}]" for k in ("direct", "indirect", "total")))
+            _fragment("robust__spill_durbin_boot", _tab(r"@{}llccc@{}", "Outcome & Treatment & Direct & Indirect (spillover) & Total", rows),
+                      "Effects of the treatment on the outcome in outcome units: estimate (maximum-likelihood standard error) [state-block wild-bootstrap standard error, "
+                      f"{int(b.boot_draws.iloc[0])} draws, Webb weights]. Confirmatory family only (D-42). Source: script4g durbin ({d}). Panel {pdate}.", size=r"\footnotesize")
+    else:
+        print("spillover fragments robust__spill_durbin_* skipped: no 4g-durbin result file")
+
 
 def link_slide_assets():
     """Undated symlinks to the newest slide figures and the three cohort maps, so the deck refers to stable file names (LATEX_OUT/slides/assets)."""

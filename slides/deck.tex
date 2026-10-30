@@ -316,6 +316,58 @@
 \input{generated/robust__control_sets.tex}
 \end{frame}
 
+\begin{frame}{Spillovers: spatial correlation (Moran's I)}
+\input{generated/robust__spill_moran.tex}
+\end{frame}
+
+\begin{frame}{Spillovers: dropping nearby comparison counties, E2}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_donut_first_expansion__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval in within-county SD of the outcome, as never-treated comparison counties within 50 and 100 km of a treated county are dropped; TWFE and covariate-adjusted Callaway-Sant'Anna (not-yet-treated counties stay in its comparison group). Panel 2026-10-25; standard errors clustered by state (Callaway-Sant'Anna: state bootstrap).\par}
+\end{frame}
+
+\begin{frame}{Spillovers: dropping nearby comparison counties, E3}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_donut_first_entry__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval in within-county SD of the outcome, as never-treated comparison counties within 50 and 100 km of a treated county are dropped; TWFE and covariate-adjusted Callaway-Sant'Anna (not-yet-treated counties stay in its comparison group). Panel 2026-10-25; standard errors clustered by state (Callaway-Sant'Anna: state bootstrap).\par}
+\end{frame}
+
+\begin{frame}{Spillovers: dropping nearby comparison counties, T1, T3, T4}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_donut_dose__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval in within-county SD of the outcome, as never-treated comparison counties within 50 and 100 km of a treated county are dropped; TWFE; a comparison county is one that is never positive on the treatment. Panel 2026-10-25; standard errors clustered by state (Callaway-Sant'Anna: state bootstrap).\par}
+\end{frame}
+
+\begin{frame}{Spillovers: standard errors (state-clustered and Conley)}
+\input{generated/robust__spill_conley.tex}
+\end{frame}
+
+\begin{frame}{Spillovers: division-by-year fixed effects}
+\input{generated/robust__spill_division.tex}
+\end{frame}
+
+\begin{frame}{Spillovers: spatial Durbin model, sample and spatial dependence}
+\input{generated/robust__spill_durbin_sample.tex}
+\end{frame}
+
+\begin{frame}{Spillovers: spatial Durbin model, direct and spillover effects}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_durbin__main.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Spatial Durbin panel model, county and year effects, weights: counties within 100 km; balanced panel of the counties observed in every year of the outcome's window. Effects in within-county SD; 95\% intervals from maximum-likelihood simulation standard errors (the bootstrap is in the table on the next page). A TWFE-type model, not robust to staggered timing. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Spillovers: spatial Durbin model, bootstrap check}
+\input{generated/robust__spill_durbin_boot.tex}
+\end{frame}
+
 \begin{frame}{Event counts by species and size class}
 \input{generated/robust__species_counts.tex}
 \end{frame}
@@ -465,6 +517,38 @@
 \end{center}
 \vspace{-4pt}
 {\tiny\baselineskip=6.5pt Overall post-treatment effect, 95\% interval, within-county SD of the outcome; filled marker: interval excludes zero. dCDH for T1, T3, T4: effect of the treatment change counties experienced, not per unit. Cohort-based models exist for E2 and E3 only. Treatment units differ between rows. Panel 2026-10-25.\par}
+\end{frame}
+
+\begin{frame}{Backup: dropping nearby comparison counties, E2 (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_donut_first_expansion__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval in within-county SD of the outcome, as never-treated comparison counties within 50 and 100 km of a treated county are dropped; TWFE and covariate-adjusted Callaway-Sant'Anna (not-yet-treated counties stay in its comparison group). Panel 2026-10-25; standard errors clustered by state (Callaway-Sant'Anna: state bootstrap).\par}
+\end{frame}
+
+\begin{frame}{Backup: dropping nearby comparison counties, E3 (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_donut_first_entry__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval in within-county SD of the outcome, as never-treated comparison counties within 50 and 100 km of a treated county are dropped; TWFE and covariate-adjusted Callaway-Sant'Anna (not-yet-treated counties stay in its comparison group). Panel 2026-10-25; standard errors clustered by state (Callaway-Sant'Anna: state bootstrap).\par}
+\end{frame}
+
+\begin{frame}{Backup: dropping nearby comparison counties, T1, T3, T4 (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_donut_dose__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Estimate with 95\% interval in within-county SD of the outcome, as never-treated comparison counties within 50 and 100 km of a treated county are dropped; TWFE and covariate-adjusted Callaway-Sant'Anna (not-yet-treated counties stay in its comparison group). Panel 2026-10-25; standard errors clustered by state (Callaway-Sant'Anna: state bootstrap).\par}
+\end{frame}
+
+\begin{frame}{Backup: spatial Durbin model (crime outcomes)}
+\begin{center}
+\includegraphics[width=\textwidth,height=0.70\textheight,keepaspectratio]{generated/assets/forest_durbin__backup.pdf}
+\end{center}
+\vspace{-4pt}
+{\tiny\baselineskip=6.5pt Spatial Durbin panel model, county and year effects, weights: counties within 100 km; balanced panel of the counties observed in every year of the outcome's window. Effects in within-county SD; 95\% intervals from maximum-likelihood simulation standard errors (the bootstrap is in the table on the next page). A TWFE-type model, not robust to staggered timing. Panel 2026-10-25.\par}
 \end{frame}
 
 \begin{frame}{Backup: Species: Dairy (crime outcomes)}

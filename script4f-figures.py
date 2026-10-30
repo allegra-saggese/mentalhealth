@@ -634,10 +634,57 @@ def slides_slaughterhouse():
           key=[(lab, _hex(c)) for lab, c in rows.values()], label_rows=False)
 
 
+def _have(section, stem):
+    """True when a script4g result file exists; the spillover forests are skipped (and it is said) before that script has been run."""
+    ok = bool(out_glob(tables_dir, f"4g-{section}", f"*_{stem}.csv"))
+    if not ok:
+        print(f"spillover forest skipped: no 4g-{section} {stem} file")
+    return ok
+
+
+def slides_donut():
+    """Donut check (script4g): the first-expansion and first-entry estimates, and the TWFE estimates of T1, T3, T4, as the never-treated
+    counties within 50 and 100 km of a treated county are dropped. Effects in within-county SD of the outcome."""
+    r = pd.read_csv(out_latest(tables_dir, "4g-donut", "*_donut_results.csv"))
+    sd = _within_sd()
+    k = r.outcome.map(sd)
+    r = r.assign(est=r.estimate / k, lo=(r.estimate - 1.96 * r.se) / k, hi=(r.estimate + 1.96 * r.se) / k)
+    label = {0: "All comparison counties", 50: "Drop within 50 km", 100: "Drop within 100 km"}
+    style = {"TWFE": ("TWFE", _hex("blue"), "o"), "Callaway-Sant'Anna": ("Callaway-Sant'Anna", _hex("black"), "D")}
+    for design, stem in (("E2", "first_expansion"), ("E3", "first_entry")):
+        g = r[r.design == design]
+        _emit(_tidy(g.outcome, g.radius_km, g.est, g.lo, g.hi, g.estimator.map(lambda e: style[e][1]), g.estimator.map(lambda e: style[e][2]), series=g.estimator),
+              f"forest_donut_{stem}", list(label), label, "Effect (within-county SD)", series=list(style), series_style=style)
+    g = r[r.design.isin(["T1", "T3", "T4"])]
+    tstyle = {t: (SHORT_TREATMENT[t], _hex(TREATMENT_COLOUR[t]), "o") for t in ("T1", "T3", "T4")}
+    _emit(_tidy(g.outcome, g.radius_km, g.est, g.lo, g.hi, g.design.map(lambda t: tstyle[t][1]), series=g.design),
+          "forest_donut_dose", list(label), label, "Effect (within-county SD)", series=list(tstyle), series_style=tstyle)
+
+
+def slides_durbin():
+    """Spatial Durbin model (script4g): direct, indirect (spillover) and total effect of each treatment, in within-county SD of the outcome;
+    intervals are the maximum-likelihood simulation standard errors (the state-block bootstrap, confirmatory family only, is in the table)."""
+    r = pd.read_csv(out_latest(tables_dir, "4g-durbin", "*_durbin_results.csv"))
+    r = r[r.w.str.startswith("W_dist")]
+    sd = _within_sd()
+    k = r.outcome.map(sd)
+    style = {"direct": ("Direct", _hex("blue"), "o"), "indirect": ("Indirect (spillover)", _hex("vermillion"), "s"), "total": ("Total", _hex("black"), "D")}
+    rows = []
+    for eff, (_, colour, marker) in style.items():
+        est, se = r[eff] / k, 1.96 * r["se_" + eff] / k
+        rows.append(_tidy(r.outcome, r.treatment_id, est, est - se, est + se, colour, marker, series=eff))
+    _emit(pd.concat(rows, ignore_index=True), "forest_durbin", ["T1", "T3", "T4", "E2"], SHORT_TREATMENT, "Effect (within-county SD)",
+          series=list(style), series_style=style)
+
+
 def slides():
     figstyle.apply_style("slide")
     for fn in (slides_a2_grid, slides_species, slides_triangulation, slides_treatment_by_model, slides_slaughterhouse):
         fn()
+    if _have("donut", "donut_results"):
+        slides_donut()
+    if _have("durbin", "durbin_results"):
+        slides_durbin()
 
 
 # ---------------------------------------------------------------- slides: the non-forest figures of the deck
