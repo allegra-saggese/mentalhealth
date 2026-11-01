@@ -7,6 +7,8 @@ load_designs()      panel + the two designs (first expansion; first entry with c
 add_baseline_polynomial   2002 characteristics x time polynomial columns (used by script4a cohorts)
 county_groups()     enters / expands only / large dairy throughout / never large dairy
 species_treatments()  count and T1, T3, T4, E2 for one species and size scope (script4a species)
+cafo_designs()      panel + both designs for one CAFO type and size scope (script4g spillover checks, script4b leads)
+fsis_designs()      the same five treatment formats for slaughterhouses (FSIS plants), annual 2017-2023 (script4g)
 usable_sample()     estimation sample for one outcome and cohort design (script4d estimators, script4c permutation; script1d sample map)
 OUTCOME_WINDOWS    years each outcome is drawn over in the descriptive figures and maps (script1c, script1d); not estimation
 
@@ -15,10 +17,13 @@ KNOWN DISCREPANCY (QA #28): 17 counties have no row in any census year. load_des
 never-large set (2,103 counties); county_groups() counts them as never-large (2,120). Both are kept as they were so
 that no result changes; decide on one definition separately.
 """
+import os
+
 import numpy as np
 import pandas as pd
 
-from script4_treatment import load_panel, CENSUS_YEARS, OUTCOMES
+from functions import latest_file_glob
+from script4_treatment import load_panel, CENSUS_YEARS, OUTCOMES, db_data
 
 BASE_YEAR = 2002
 # Years over which each outcome is drawn in the descriptive stage (script1c figures, script1d maps), keyed by the labels
@@ -151,3 +156,96 @@ def usable_sample(data, ocol, treat, cohort, controls):
     d.attrs = {}
     d["fips"], d["state_fips"] = d.fips.astype(int), pd.factorize(d.state_fips)[0]
     return d.reset_index(drop=True)
+
+
+CAFO_TYPES = ["dairy", "beef", "cattle", "hogs", "chickens", "aggregate"]
+TREATMENT_COLUMNS = ["tr_e1_lg_bin", "tr_i4_lg_p10k", "tr_c3_log_lg", "add_year", "tr_e2_add_absorb", "entry_year", "tr_e3_entry_absorb"]
+
+
+def _two_designs(d, never_present, label_counts):
+    """The first-expansion design (every county) and the first-entry design (counties never present plus the entering counties), as load_designs."""
+    entry_counties = set(d.loc[d["entry_year"].notna(), "fips"].unique())
+    df_entry = d[d["fips"].isin(set(never_present) | entry_counties)].copy()
+    designs = {"first expansion": dict(data=d.copy(), cohort="add_year", treat="tr_e2_add_absorb"),
+               "first entry (clean controls)": dict(data=df_entry, cohort="entry_year", treat="tr_e3_entry_absorb")}
+    for z in designs.values():
+        z["data"]["t_rel"] = z["data"]["year"] - z["data"][z["cohort"]]
+    print(f"  {label_counts}: {d.loc[d.add_year.notna(), 'fips'].nunique():,} counties with an E2 event, "
+          f"{len(entry_counties):,} with an E3 event, {len(set(never_present)):,} never present")
+    return designs
+
+
+def cafo_designs(df, ctype, scope, verbose=True):
+    """Panel and designs for one CAFO type and size scope. ctype: dairy, beef, cattle, hogs, chickens, or aggregate (the panel's generic
+    small/medium/large_cafo columns: cattle, hogs and chickens only, no double counting, D-51); scope: large, or all (small + medium + large).
+    The dairy treatment columns that the stage-4 code reads (TREATMENT_COLUMNS) are overwritten by the chosen type's: T1, T3, T4, add_year and E2 from
+    species_treatments, and E3 by the same wave rule (first census wave with a count above zero after a zero). The two designs are rebuilt as
+    load_designs does. For dairy / large the rebuilt columns are checked against the panel's own (max abs difference < 1e-12)."""
+    bins = ["large"] if scope == "large" else ["small", "medium", "large"]
+    d = df.copy()
+    if ctype == "aggregate":
+        for b in ("small", "medium", "large"):
+            d[f"cafo_aggregate_{b}"] = d[f"{b}_cafo"]
+    tr = species_treatments(d, ctype, bins)
+    C = tr["count"]
+    w = pd.DataFrame({"fips": d["fips"], "year": d["year"], "C": C})
+    w = w[w.year.isin(CENSUS_YEARS)].dropna(subset=["C"]).sort_values(["fips", "year"])
+    w["lag"] = w.groupby("fips")["C"].shift(1)
+    entry = w[(w["lag"] == 0) & (w["C"] > 0)].groupby("fips")["year"].min()
+    new = pd.DataFrame(index=d.index)
+    new["tr_e1_lg_bin"], new["tr_i4_lg_p10k"], new["tr_c3_log_lg"] = tr["T1"], tr["T3"], tr["T4"]
+    new["add_year"] = tr["add_year"]
+    new["tr_e2_add_absorb"] = tr["E2"]
+    new["entry_year"] = d["fips"].map(entry)
+    new["tr_e3_entry_absorb"] = (new["entry_year"].notna() & (d["year"] >= new["entry_year"])).astype(float).where(C.notna())
+    if ctype == "dairy" and scope == "large":
+        for c in TREATMENT_COLUMNS:
+            a, b = new[c].to_numpy(float), d[c].to_numpy(float)
+            assert np.array_equal(np.isnan(a), np.isnan(b)) and np.nanmax(np.abs(a - b)) < 1e-12, f"dairy/large rebuild differs from the panel in {c}"
+        if verbose:
+            print("  check: dairy / large treatment columns rebuilt by cafo_designs equal the panel's (7 columns, max abs diff < 1e-12)")
+    for c in TREATMENT_COLUMNS:
+        d[c] = new[c]
+    d["_cafo_count"] = C                                  # the type's operation count (large or all sizes), for the baseline-intensity interaction
+    waves = d[d.year.isin(CENSUS_YEARS)].assign(_c=C).pivot(index="fips", columns="year", values="_c")
+    never_present = waves.index[~(waves.fillna(0) > 0).any(axis=1)]
+    return d, _two_designs(d, never_present, f"cafo frame {ctype} / {scope}")
+
+
+FSIS_COLUMN = "n_slaughterhouse_present_establishments_fsis"
+FSIS_WINDOW = (2017, 2023)
+
+
+def fsis_designs(df, check=True):
+    """Slaughterhouses (FSIS plants) in the five CAFO treatment formats, annual 2017-2023 (the FSIS years; NaN outside them).
+    Count = plants with slaughter present (the script4a fsis measure), 0 for a county absent from the FSIS panel inside the window.
+    T1 presence (count > 0); T3 plants per 10,000 residents; T4 log(1 + count); E2 absorbing from the first year the count rises over the previous
+    year (2018 on; the script4a F_cohort); E3 absorbing from the first year with a count above zero after a year at zero. The same columns as
+    cafo_designs are overwritten, so every stage-4 section that reads them runs unchanged. Entries before 2017 are invisible."""
+    fp = latest_file_glob(os.path.join(db_data, "merged"), "*_panel_fsis.csv")
+    f = pd.read_csv(fp, low_memory=False, usecols=["fips", "year", FSIS_COLUMN])
+    f["fips"] = f["fips"].astype(str).str.zfill(5)
+    d = df.drop(columns=[FSIS_COLUMN], errors="ignore").merge(f, on=["fips", "year"], how="left").sort_values(["fips", "year"]).reset_index(drop=True)
+    inwin = d.year.between(*FSIS_WINDOW)
+    count = pd.Series(np.where(inwin, d[FSIS_COLUMN].fillna(0), np.nan), index=d.index)
+    prev = count.groupby(d["fips"]).shift(1)
+    up = d[(count - prev) > 0].groupby("fips")["year"].min()
+    ent = d[(prev == 0) & (count > 0)].groupby("fips")["year"].min()
+    new = pd.DataFrame(index=d.index)
+    new["tr_e1_lg_bin"] = (count > 0).astype(float).where(count.notna())
+    new["tr_i4_lg_p10k"] = count / d["population"].replace(0, np.nan) * 10_000
+    new["tr_c3_log_lg"] = np.log1p(count)
+    new["add_year"] = d["fips"].map(up)
+    new["tr_e2_add_absorb"] = (new["add_year"].notna() & (d["year"] >= new["add_year"])).astype(float).where(count.notna())
+    new["entry_year"] = d["fips"].map(ent)
+    new["tr_e3_entry_absorb"] = (new["entry_year"].notna() & (d["year"] >= new["entry_year"])).astype(float).where(count.notna())
+    if check:                                    # the script4a section_fsis definitions of the count and the first rise, recomputed independently
+        w = d[inwin].assign(c=d.loc[inwin, FSIS_COLUMN].fillna(0))
+        first_up = w.assign(dd=w.groupby("fips")["c"].diff()).query("dd > 0").groupby("fips")["year"].min()
+        assert first_up.reindex(up.index).equals(up) and len(first_up) == len(up), "FSIS add_year differs from the script4a F_cohort definition"
+        assert np.array_equal(count[inwin].to_numpy(), w["c"].to_numpy()), "FSIS count differs from F1_count"
+        print(f"  check: FSIS first-rise cohorts equal script4a's F_cohort ({len(up):,} counties) and the count equals F1_count")
+    for c in TREATMENT_COLUMNS:
+        d[c] = new[c]
+    never_present = d[inwin].groupby("fips")["tr_e1_lg_bin"].max().pipe(lambda m: m.index[m == 0])
+    return d, _two_designs(d, never_present, f"fsis frame ({FSIS_COLUMN})")

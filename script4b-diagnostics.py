@@ -10,6 +10,7 @@ script4b-diagnostics.py -- diagnostics of the control set and the event-study de
     control-set  add-one-in / take-one-out sensitivity of the treatment coefficient         (was script4y-control-set-selection.py)
     honestdid    inputs for the Rambachan-Roth analysis; R/honestdid.R is run afterwards     (was script4w-honestdid-export.py)
     species-counts  number of E2 and E3 events by species and size class, descriptive, no estimation  (new 2026-10-26)
+    outcome-smoothing  is the CHR mental-health series model output? spatial reach, dependence on model inputs, shrinkage, breaks  (new 2026-10-30)
 
 Reads:   panel via script4_treatment.load_panel() (honestdid: designs.load_designs());
          `leads` and `control-set` read the newest Data/output/tables/*_4b-controls_control_pretrends.csv, which `controls` writes
@@ -21,7 +22,7 @@ Writes:  (all in Data/output/tables/, named <date>_<tag>_<stem>; naming: package
          <date>_4b-balance_balance_panel.csv; LATEX_OUT/{BALANCEpanel.tex, BALANCEpanel.pdf, _BODY_balance.tex}  (balance)
          <date>_4b-control-set[-quick]_{regressions, path_summary, covariate_summary, selection_table}.csv       (control-set)
          4b-honestdid-inputs_{<design>__<outcome>__beta, ..__sigma, manifest}.csv (undated; R/honestdid.R writes <date>_4b-honestdid_*) (honestdid)
-Run:     python3 script4b-diagnostics.py [--only controls leads pretrends balance control-set species-counts honestdid] [--quick]
+Run:     python3 script4b-diagnostics.py [--only controls leads pretrends balance control-set species-counts outcome-smoothing honestdid] [--quick] [--cafo TYPE --scope large|all (leads)]
          then Rscript R/honestdid.R     (--quick shortens control-set only; a few minutes without it)
 Method:  METHODS.md sections 3, 4 and 7. Roles are judgements, not findings; the control-set sweep documents the pre-committed
          set (D-16) and does not choose it. Output folders keep the names of the old scripts, so readers (script4p reads the
@@ -229,11 +230,20 @@ N_LEADS = 4          # years of treatment leads for the continuous treatments
 REPORTED = ["T1", "T3", "T4", "E2", "E3"]
 
 
-def leads():
+def leads(cafo=None, scope="large"):
+    """Outcome pre-trends (leads) for T1, T3, T4 (lead tests) and E2, E3 (event studies). cafo: None for the large-dairy treatments of the panel (the
+    original run); a CAFO type of designs.CAFO_TYPES to use that type's treatments (designs.cafo_designs) with `scope`, writing files with
+    __<cafo>_<scope> in the name."""
     OUT = tables_dir    # output-name tag "4b-leads"; was folder script4t
 
     df = load_panel()
     df = df.sort_values(["fips", "year"]).reset_index(drop=True)
+    suffix = ""
+    if cafo:
+        from designs import cafo_designs
+        df, _designs = cafo_designs(df, cafo, scope)
+        df = df.sort_values(["fips", "year"]).reset_index(drop=True)
+        suffix = f"__{cafo}_{scope}"
     print(f"panel {len(df):,} rows | controls: {len(CONTROLS)} | outcomes: {len(OUTCOMES)}")
 
     # ---------- treatment definitions ------------------------------------------------------------
@@ -306,8 +316,8 @@ def leads():
 
     coefs = pd.DataFrame(coef_rows)
     joint = pd.DataFrame(joint_rows)
-    coefs.to_csv(out_file(tables_dir, "4b-leads", f"{TODAY}_leads_coefficients.csv"), index=False)
-    joint.to_csv(out_file(tables_dir, "4b-leads", f"{TODAY}_leads_joint_tests.csv"), index=False)
+    coefs.to_csv(out_file(tables_dir, "4b-leads", f"{TODAY}_leads_coefficients{suffix}.csv"), index=False)
+    joint.to_csv(out_file(tables_dir, "4b-leads", f"{TODAY}_leads_joint_tests{suffix}.csv"), index=False)
 
 
     print("\n" + "=" * 100)
@@ -867,13 +877,139 @@ def species_counts():
     print("wrote", path)
 
 
-SECTIONS = ["controls", "leads", "pretrends", "balance", "control-set", "species-counts", "honestdid"]     # run order: `leads` and `control-set` read `controls`
+def outcome_smoothing():
+    """Is a county's value of the CHR mental-health series survey information or model output? Descriptive; nothing is estimated except the
+    mechanical-channel regressions of test 5.
+
+    Background (County Health Rankings pages, read 2026-10-30): since the 2016 release the county estimates of Poor MH Days and Frequent Mental
+    Distress are single-year CDC multilevel-model estimates (from the 2021 release PLACES: multilevel regression and poststratification linking BRFSS
+    to the American Community Survey); the smaller a county, the more its value comes from the model; before 2016 Poor MH Days pooled up to seven years of
+    landline-only responses; CHR warns the estimates may not be comparable across years or states. A model-based series should (1) stay spatially
+    correlated over long distances, (2) be explained by the model's inputs (income, poverty, age and race shares) and more so after a method change,
+    (3) be no noisier in small counties, (4) show breaks at the method changes. Deaths of despair (counts) and unemployment (BLS) are the direct comparators.
+    Test 5 asks whether the dairy treatments move the model's own inputs, which would move the modelled outcome with no change in mental health."""
+    import json
+    import spatial as sp
+    from packages import db_data
+    from figstyle import save_text_table
+    df = load_panel().sort_values(["fips", "year"]).reset_index(drop=True)
+    df.attrs = {}                                            # load_panel keeps DataFrames in attrs, which pd.concat cannot compare
+    ctrl = COVARIATE_ORDER[:8]
+    series = {"Poor MH Days": ("poor_mental_health_days", (2010, 2023)), "Frequent Mental Distress": ("frequent_mental_distress_per100k", (2016, 2023)),
+              "Deaths of Despair": (OUTCOMES["Deaths of Despair"], (2002, 2020)), "Unemployment (BLS, direct)": ("unemployment_per100k", (2010, 2023))}
+    tag = "4b-outcome-smoothing"
+    files = sorted(glob.glob(os.path.join(db_data, "clean", "geo", "*_us_counties.geojson")))
+    if not files:
+        raise FileNotFoundError("no Data/clean/geo/*_us_counties.geojson (see script4g-spillovers.py)")
+    cent = sp.county_centroids(json.load(open(files[-1])))
+    df = df[df.fips.isin(cent)].copy()
+    fips_all = sorted(df.fips.unique())
+    D = sp.haversine_km([cent[f][0] for f in fips_all], [cent[f][1] for f in fips_all])
+    pos = {f: i for i, f in enumerate(fips_all)}
+
+    # 1. spatial reach: Moran's I of the cross-section in distance bands, mean over years
+    bands = [(0, 50), (50, 100), (100, 200), (200, 300), (300, 500)]
+    rows = []
+    for name, (col, (lo, hi)) in series.items():
+        for y in range(lo, hi + 1):
+            g = df[(df.year == y)][["fips", col]].dropna()
+            if len(g) < 200:
+                continue
+            ii = np.array([pos[f] for f in g.fips])
+            for b0, b1 in bands:
+                A = ((D[np.ix_(ii, ii)] > b0) & (D[np.ix_(ii, ii)] <= b1)).astype(float)
+                keep = A.sum(axis=1) > 0
+                if keep.sum() < 100:
+                    continue
+                W = sp.row_standardise(A[np.ix_(keep, keep)])
+                rows.append({"series": name, "year": y, "band_km": f"{b0}-{b1}", "I": sp.morans_i(g[col].values[keep], W, n_perm=0)["I"], "counties": int(keep.sum())})
+    cg = pd.DataFrame(rows)
+    cg.to_csv(out_file(tables_dir, tag, f"{TODAY}_correlogram_by_year.csv"), index=False)
+    cgs = cg.pivot_table(index="series", columns="band_km", values="I", aggfunc="mean").reindex(columns=[f"{a}-{b}" for a, b in bands]).reset_index()
+    cgs.to_csv(out_file(tables_dir, tag, f"{TODAY}_correlogram.csv"), index=False)
+    save_text_table(cgs, tables_dir, tagged(tag, "correlogram"), "Moran's I of the county cross-section by distance band (mean over years)",
+                    "Counties with data that year; weights: counties in the band, row-standardised. A series smoothed by a model stays correlated at long distances.")
+
+    # 2. dependence on the model's inputs: cross-section R-squared on the control set, by year; keep residuals for test 3
+    rows, resid = [], []
+    for name, (col, (lo, hi)) in series.items():
+        X_names = [c for c in ctrl if c != col]
+        for y in range(lo, hi + 1):
+            g = df[df.year == y][["fips", "year", "population", col] + X_names].dropna()
+            if len(g) < 200:
+                continue
+            X = np.column_stack([np.ones(len(g))] + [g[c].values for c in X_names])
+            b, *_ = np.linalg.lstsq(X, g[col].values, rcond=None)
+            e = g[col].values - X @ b
+            rows.append({"series": name, "year": y, "counties": len(g), "r2": 1 - float(e @ e) / float(((g[col] - g[col].mean()) ** 2).sum())})
+            resid.append(g.assign(series=name, resid=e, dev=g[col] - g[col].mean())[["series", "fips", "year", "population", "resid", "dev"]])
+    r2 = pd.DataFrame(rows)
+    r2.to_csv(out_file(tables_dir, tag, f"{TODAY}_r2_by_year.csv"), index=False)
+    r2w = r2.pivot_table(index="year", columns="series", values="r2").reset_index()
+    save_text_table(r2w, tables_dir, tagged(tag, "r2_by_year"), "Share of the cross-county variance explained by the control set, by year",
+                    "OLS of the series on the eight controls within each year (the series itself left out when it is a control). A jump at 2016 or 2021 marks a method change.")
+
+    # 3. shrinkage by county size: dispersion by population quartile
+    R = pd.concat(resid)
+    R["pop_q"] = R.groupby("series")["population"].transform(lambda p: pd.qcut(p, 4, labels=["Q1 smallest", "Q2", "Q3", "Q4 largest"]))
+    sh = (R.groupby(["series", "pop_q"], observed=True).agg(county_years=("fips", "size"), mean_population=("population", "mean"), sd_dev=("dev", "std"), sd_resid=("resid", "std")).reset_index())
+    sh.to_csv(out_file(tables_dir, tag, f"{TODAY}_dispersion_by_population.csv"), index=False)
+    save_text_table(sh, tables_dir, tagged(tag, "dispersion_by_population"), "Dispersion across counties by population quartile",
+                    "sd_dev: standard deviation of the series within year; sd_resid: after the control set. Direct survey estimates are noisier in small counties; model-based ones are not.",
+                    float_format="{:.3f}")
+
+    # 4. year-to-year behaviour: dispersion of one-year changes by year; autocorrelation of within-county deviations by period
+    rows, ar = [], []
+    for name, (col, (lo, hi)) in series.items():
+        w = df[["fips", "year", col]].dropna().pivot(index="fips", columns="year", values=col)
+        for y in range(lo + 1, hi + 1):
+            if y in w.columns and y - 1 in w.columns:
+                d_ = (w[y] - w[y - 1]).dropna()
+                rows.append({"series": name, "year": y, "counties": len(d_), "mean_change": float(d_.mean()), "sd_change": float(d_.std()), "share_unchanged": float((d_ == 0).mean())})
+        periods = {"Poor MH Days": [(2010, 2015), (2016, 2020), (2021, 2023)], "Frequent Mental Distress": [(2016, 2020), (2021, 2023)]}.get(name, [(lo, hi)])
+        dev_all = w.loc[:, [c for c in w.columns if lo <= c <= hi]]
+        dev_all = dev_all.sub(dev_all.mean(axis=1), axis=0)          # deviation from the county's mean over the whole window, so short periods carry no demeaning bias
+        for p0, p1 in periods:
+            dev = dev_all.loc[:, [c for c in dev_all.columns if p0 <= c <= p1]]
+            x_, y_ = dev.iloc[:, :-1].values.ravel(), dev.iloc[:, 1:].values.ravel()
+            ok = np.isfinite(x_) & np.isfinite(y_)
+            ar.append({"series": name, "period": f"{p0}-{p1}", "pairs": int(ok.sum()), "ar1_within_deviation": float((x_[ok] @ y_[ok]) / (x_[ok] @ x_[ok])) if ok.sum() > 50 else np.nan})
+    ch = pd.DataFrame(rows)
+    ch.to_csv(out_file(tables_dir, tag, f"{TODAY}_year_changes.csv"), index=False)
+    ar = pd.DataFrame(ar)
+    ar.to_csv(out_file(tables_dir, tag, f"{TODAY}_ar1_by_period.csv"), index=False)
+    save_text_table(ch, tables_dir, tagged(tag, "year_changes"), "One-year change of each series across counties, by year",
+                    "sd_change: standard deviation across counties of the change since the previous year (a spike marks a method change); share_unchanged: counties whose value equals last year's exactly (a carried-forward value).", float_format="{:.3f}")
+    save_text_table(ar, tables_dir, tagged(tag, "ar1_by_period"), "First-order autocorrelation of within-county deviations, by period",
+                    "Pooled slope of a county's deviation from its own mean over the whole window on last year's, pairs inside the period; close to 1 means a very smooth series.", float_format="{:.3f}")
+
+    # 5. mechanical channel: do the dairy treatments move the inputs the model uses? (TWFE, county and year effects, state-clustered)
+    rows = []
+    for tid, tcol, extra in (("T1", "tr_e1_lg_bin", []), ("T3", "tr_i4_lg_p10k", []), ("T4", "tr_c3_log_lg", ["log_pop"]), ("E2", "tr_e2_add_absorb", [])):
+        for out_ in ("children_in_poverty_per100k", "median_household_income", "unemployment_per100k"):
+            rhs_ctrl = [c for c in ctrl if c != out_]
+            need = list(dict.fromkeys(["fips", "year", "state_fips", out_, tcol] + extra + rhs_ctrl))
+            sub = df[need].dropna().rename(columns={c: clean(c) for c in need if c not in ("fips", "year", "state_fips")})
+            fml = f"{clean(out_)} ~ " + " + ".join([clean(tcol)] + [clean(x) for x in extra] + [clean(c) for c in rhs_ctrl]) + " | fips + year"
+            t = pf.feols(fml, data=sub, vcov={"CRV1": "state_fips"}).tidy().loc[clean(tcol)]
+            rows.append({"treatment_id": tid, "outcome": out_, "beta": float(t["Estimate"]), "se_state": float(t["Std. Error"]), "p_state": float(t["Pr(>|t|)"]), "N": len(sub)})
+    mc = pd.DataFrame(rows)
+    mc.to_csv(out_file(tables_dir, tag, f"{TODAY}_mechanical_channel.csv"), index=False)
+    save_text_table(mc, tables_dir, tagged(tag, "mechanical_channel"), "Do the dairy treatments move the inputs of the mental-health model? (TWFE)",
+                    "Outcome = an input; county and year fixed effects, the other controls, state-clustered standard errors. Large dairy only (the panel's treatment columns).", float_format="{:.4f}")
+    print(cgs.round(3).to_string(index=False)); print(sh.round(3).to_string(index=False)); print(ar.round(3).to_string(index=False)); print(mc.round(4).to_string(index=False))
+
+
+SECTIONS = ["controls", "leads", "pretrends", "balance", "control-set", "species-counts", "outcome-smoothing", "honestdid"]     # run order: `leads` and `control-set` read `controls`
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--only", nargs="+", choices=SECTIONS, help="run only these sections (default: all, in order)")
     ap.add_argument("--quick", action="store_true", help="control-set only: one treatment, two outcomes (test run)")
+    ap.add_argument("--cafo", choices=["dairy", "beef", "cattle", "hogs", "chickens", "aggregate"], default=None,
+                    help="leads only: use this CAFO type's treatments (default: the panel's large-dairy treatments)")
+    ap.add_argument("--scope", choices=["large", "all"], default="large", help="leads only, with --cafo: large operations or all sizes")
     args = ap.parse_args()
     todo = [s for s in SECTIONS if args.only is None or s in args.only]
     for s in todo:
@@ -881,7 +1017,7 @@ def main():
         if s == "controls":
             controls()
         elif s == "leads":
-            leads()
+            leads(args.cafo, args.scope)
         elif s == "pretrends":
             pretrends()
         elif s == "balance":
@@ -890,6 +1026,8 @@ def main():
             control_set(quick=args.quick)
         elif s == "species-counts":
             species_counts()
+        elif s == "outcome-smoothing":
+            outcome_smoothing()
         else:
             honestdid()
 
