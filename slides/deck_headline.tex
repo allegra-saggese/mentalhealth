@@ -1,0 +1,276 @@
+% deck_headline.tex -- the causal question, the evidence and what we can claim (advisor meeting). Built 2026-11-23.
+% Exhibits: generated/headline__*.tex and generated/assets/* (script4o-headline-deck.py, script4e-tables.py, script4f-figures.py); no number is typed here
+% except in the frame text that quotes a table beside it. Compile: xelatex deck_headline.tex (Gotham theme).
+\documentclass[aspectratio=169]{beamer}
+\usetheme{gotham}
+\gothamset{colorset=anthracite}
+\gothamset{background=transparent}
+\gothamset{progressbar position=foot, progressbar style=rounded box,
+           progressbar advancement=brlt, numbering=totalframenumber}
+\boolfalse{sectionContent}
+\setbeamerfont{itemize/enumerate body}{size=\small}
+\setbeamerfont{itemize/enumerate subbody}{size=\footnotesize}
+
+\usepackage{booktabs,array,adjustbox,multirow,graphicx,amsmath,amssymb}
+
+\newcommand{\fig}[2][0.42]{\begin{center}\includegraphics[width=\textwidth,height=#1\textheight,keepaspectratio]{#2}\end{center}}
+\newcommand{\figcols}[2]{\begin{columns}[T]\begin{column}{0.64\textwidth}\includegraphics[width=\textwidth]{#1}\end{column}\begin{column}{0.33\textwidth}\setbeamerfont{itemize/enumerate body}{size=\scriptsize}#2\end{column}\end{columns}}
+\newcommand{\src}[1]{{\tiny #1\par}}
+
+\defbeamertemplate{title page}{}{\centering{\huge \inserttitle}\\[0.6em]{\large \insertsubtitle}\\[1em]{\large \insertauthor}\\[1em]{\insertdate}}
+\title{Do large dairies raise poor mental health days?}
+\subtitle{The causal claim, the evidence, and what we can say}
+\author{Allegra Saggese for Professors Galina Hale, Hanna Kim}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}\titlepage\end{frame}
+
+\begin{frame}{Agenda}
+\tableofcontents
+\end{frame}
+
+% =====================================================================
+\section{The causal claim}
+
+\begin{frame}{The claim we want to test}
+\begin{itemize}\small\setlength\itemsep{4pt}
+  \item[] \textbf{Claim.} When a rural U.S.\ county gets its first large dairy operation, or its first expansion of large dairies, residents report \emph{more poor mental health days}.
+  \item[] \textbf{Estimand.} The average effect on counties that were treated, in days per month, against counties that were not yet treated (or never treated).
+  \item[] \textbf{Identifying assumption.} Without the dairy, treated and comparison counties would have moved together (parallel trends), once we hold fixed eight pre-committed county characteristics.
+  \item[] \textbf{Possible channels, not tested.} Environmental stress, dependence on one industry, farm consolidation.
+  \item[] \textbf{Second claim, tested separately.} Slaughterhouse plants raise distress via workers.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{What would make us believe it, and what would refute it}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{We would believe it if}
+\begin{itemize}\footnotesize\setlength\itemsep{2pt}
+  \item the effect shows up under estimators built for staggered timing, not only in two-way fixed effects
+  \item treated and comparison counties were moving together \emph{before} the dairy arrived
+  \item it survives the number of tests we ran
+  \item it is specific to large dairies, not beef, hogs or chickens
+  \item it survives spatial checks and the 2016 change in how the outcome is measured
+\end{itemize}
+\end{column}
+\begin{column}{0.48\textwidth}
+\textbf{We would reject it if}
+\begin{itemize}\footnotesize\setlength\itemsep{2pt}
+  \item the estimate depends on one estimator
+  \item pre-period estimates are already different from zero
+  \item the result does not survive correction across the outcomes and treatments tested
+  \item other animals show the same pattern
+  \item it exists on only one side of the 2016 data break
+\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+% =====================================================================
+\section{What data we have}
+
+\begin{frame}{County-year panel: outcomes and samples}
+\input{generated/headline__data_outcomes.tex}
+\end{frame}
+
+\begin{frame}{Treatment events: dairies and plants}
+\input{generated/headline__data_events.tex}
+\end{frame}
+
+\begin{frame}{Where the first expansions happen}
+\fig[0.55]{generated/assets/expansion_cohort_year.png}
+\src{First year a county's count of large dairies rises at a census wave (2012, 2017 or 2022 inside the Poor MH Days window). Source: panel 2026-10-25; script1d-maps.py.}
+\end{frame}
+
+\begin{frame}{What the data cannot see}
+\begin{itemize}\small\setlength\itemsep{4pt}
+  \item \textbf{Dairy timing is coarse.} Operation counts come from the Census of Agriculture, every five years. A county ``first expands'' in a census year even if the expansion happened in the five years before it.
+  \item \textbf{The outcome changes method.} The county mental-health series is survey-based before 2016 and CDC model-based after; there is a second change in 2021.
+  \item \textbf{Slaughterhouses are observed only 2017--2023,} so most plant-entry cohorts have one to three pre-years.
+  \item \textbf{Crime is arrests, not offences,} and its pre-trends fail; it is not part of the headline.
+  \item \textbf{Rural counties only,} so a plant in an urban county of a commuting zone is invisible.
+\end{itemize}
+\end{frame}
+
+% =====================================================================
+\section{How we test the claim}
+
+\begin{frame}{Research design: staggered difference-in-differences}
+\footnotesize
+\textbf{Two-way fixed effects (TWFE):} $y_{it}=\alpha_i+\delta_t+\beta D_{it}+X_{it}'\gamma+\varepsilon_{it}$, county ($\alpha_i$) and year ($\delta_t$) effects, standard errors clustered by state.\par
+\vspace{4pt}
+\textbf{Why not stop there:} counties are treated at different times, so TWFE also compares newly treated counties with counties treated earlier.\par
+\vspace{4pt}
+\textbf{Callaway--Sant'Anna (CS):} for each first-treated cohort $g$ and year $t$,
+\[ ATT(g,t)=E[\,Y_t-Y_{g-1}\mid G=g\,]-E[\,Y_t-Y_{g-1}\mid \text{not yet treated}\,], \]
+adjusted for the eight controls, averaged over cohorts and years; standard errors by bootstrap over states.\par
+\vspace{4pt}
+\textbf{Treatments:} E2 first expansion (first census wave with a rise in large dairies; every county) and E3 first entry (first large dairy in a county with none; clean controls).
+\end{frame}
+
+\begin{frame}{The test plan: six tests, each answered on a later frame}
+\begin{center}\adjustbox{max width=\textwidth}{\footnotesize
+\begin{tabular}{@{}lll@{}}
+\toprule
+Test & What it checks & Reported on\\
+\midrule
+Estimator & Does the effect survive estimators built for staggered timing? & ``Estimators disagree''\\
+Pre-trends & Were treated and comparison counties moving together before? & Two pre-trend frames\\
+Many tests & Does it survive the family of outcomes and treatments tested? & ``Multiple testing''\\
+Adjustments & Controls, region-by-year effects, spatial errors, dropping nearby counties & ``What holds up''\\
+Specificity & Is it large dairies only? & ``What holds up''\\
+Measurement & Same on both sides of the 2016 data break? & ``2016 data break''\\
+Slaughterhouses & Large-plant entry, zone exposure, closures & Last results frames\\
+\bottomrule
+\end{tabular}}
+\end{center}
+\end{frame}
+
+\begin{frame}{Slaughterhouse designs, with the rules fixed before results}
+\begin{itemize}\footnotesize\setlength\itemsep{4pt}
+  \item \textbf{Large plant:} an FSIS establishment of size code 4 or 5 (large, very large), 2017--2023.
+  \item \textbf{County entry and exit:} counties without (with) a large plant in 2017; treated from the first year one appears (disappears). \emph{D-63}
+  \item \textbf{Commuting-zone exposure:} treat the zone, so workers living next door count; version A all counties in the zone, version B only counties that never host a plant. \emph{D-64}
+  \item \textbf{Closures:} consolidation means some areas lost plants and jobs. We either drop closure areas from the comparison or control for a closure indicator. \emph{D-65, D-66}
+  \item \textbf{Many plants versus none:} counties with two or more large plants against counties with none; read only if the pre-period test is flat. \emph{D-65}
+\end{itemize}
+\end{frame}
+
+% =====================================================================
+\section{Interpreting the results}
+
+\begin{frame}{Estimators disagree: first expansion}
+\figcols{generated/assets/forest_triangulation_first_expansion__main.pdf}{
+\begin{itemize}\setlength\itemsep{4pt}
+  \item Poor MH Days (left panel): TWFE 0.104 days (0.096 in this sample); Callaway--Sant'Anna 0.037, about a third of it, not significant.
+  \item Sun--Abraham and de Chaisemartin--D'Haultfoeuille agree with Callaway--Sant'Anna; imputation and stacked DiD sit near TWFE.
+\end{itemize}}
+\end{frame}
+
+\begin{frame}{Pre-trends (1): TWFE event study}
+\figcols{generated/assets/event_study_twfe__main.pdf}{
+\begin{itemize}\setlength\itemsep{4pt}
+  \item Poor MH Days: the joint test of the seven leads does not reject (p = 0.43 for E2, 0.61 for E3).
+  \item Pre-period points drift upward toward the event; the joint test does not call it a trend.
+\end{itemize}}
+\end{frame}
+
+\begin{frame}{Pre-trends (2): Callaway--Sant'Anna event study}
+\figcols{generated/assets/event_study_cs__main.pdf}{
+\begin{itemize}\setlength\itemsep{4pt}
+  \item Poor MH Days: 6 of 11 pre-period estimates are individually significant (1 of 11 without covariates).
+  \item Possible reason, not tested: a census-wave ``first expansion'' may be up to five years old, so some pre-periods are post-expansion years.
+\end{itemize}}
+\end{frame}
+
+\begin{frame}{Multiple testing: one result survives, and it fails its lead test}
+\input{generated/headline__multiple.tex}
+\begin{itemize}\footnotesize\setlength\itemsep{1pt}
+  \item The log-count treatment (T4) is the only Poor MH Days result with a Holm $p$ below 0.05.
+  \item Its lead test fails ($p$ = 0.027), so the one test that survives correction is the one with a visible pre-trend.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{What holds up (1): region-by-year effects, spatial errors, nearby counties}
+\input{generated/headline__robust_adj.tex}
+\begin{itemize}\footnotesize\setlength\itemsep{1pt}
+  \item TWFE is stable across all of these; Callaway--Sant'Anna stays near 0.03 and is never significant.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{What holds up (2): only large dairies show it in TWFE}
+\input{generated/headline__robust_spec.tex}
+\end{frame}
+
+\begin{frame}{The 2016 data break}
+\input{generated/headline__split.tex}
+\begin{itemize}\footnotesize\setlength\itemsep{1pt}
+  \item CS has the same sign and similar size on both sides (0.023, 0.028); neither is significant.
+  \item Pooled TWFE (0.104) exceeds either side's (0.034, 0.062), which fits cross-cohort comparisons; not tested directly. The windows also hold different cohorts.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Spatial dependence in the residuals}
+\input{generated/headline__gp.tex}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item Poor MH Days and crime: short-range, mostly noise; Conley errors to 500 km match the clustered ones.
+  \item Frequent Mental Distress: long-range, probably from how the CDC series is built.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Slaughterhouses: every design}
+\input{generated/headline__fsis.tex}
+\end{frame}
+
+\begin{frame}{Slaughterhouses: pre-trends and the closure control}
+\figcols{generated/assets/headline_fsis_event.pdf}{
+\begin{itemize}\setlength\itemsep{4pt}
+  \item Entering counties start \emph{higher} and converge down; the negative post estimates track that.
+  \item Closure control: the entry estimate stays near $-0.05$; counties after a closure do not have more poor mental health days.
+  \item Dropping closure counties flips the sign (+0.124) but fails pre-trends; many-vs-none fails its lead test.
+\end{itemize}}
+\end{frame}
+
+% =====================================================================
+\section{Main takeaway}
+
+\begin{frame}{Scorecard: the claim against its own tests}
+\input{generated/headline__scorecard.tex}
+\end{frame}
+
+\begin{frame}{What we can claim}
+\begin{itemize}\setlength\itemsep{7pt}
+  \item \textbf{Association.} Under TWFE, a first expansion of large dairies goes with about 0.10 more poor mental health days per month; that is robust to controls, region-by-year effects, spatial errors, and specific to large dairies.
+  \item \textbf{Not yet causal.} The estimators built for staggered timing give about a third of that and are not significant; half of the Callaway--Sant'Anna pre-periods are not zero; the estimate does not survive correction across tests.
+  \item \textbf{Slaughterhouses.} No causal pattern: entry is wrong-signed and follows a pre-trend, exit is not estimable, closures are not the explanation.
+  \item \textbf{What would change this.} Finer timing of dairy expansions than the five-year census; an outcome measured the same way across years; worker-level exposure data.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Decisions for the advisor}
+\begin{enumerate}\setlength\itemsep{8pt}
+  \item Is ``suggestive association'' an acceptable framing for the headline, or should the paper be descriptive?
+  \item Is it worth getting finer dairy timing (for example state permit data) to test the coarse-timing explanation of the pre-period estimates?
+  \item Do we pursue a worker-exposure design? It needs employment-share data we do not have.
+  \item Do we drop or reframe the slaughterhouse arm, given no design passes its pre-trend rule?
+\end{enumerate}
+\end{frame}
+
+% =====================================================================
+\section{Appendix}
+
+\begin{frame}{Appendix: estimators, first entry}
+\fig[0.55]{generated/assets/forest_triangulation_first_entry__main.pdf}
+\src{Same layout as the first-expansion frame; Callaway--Sant'Anna 0.026 for Poor MH Days. Source: script4d, 2026-10-24.}
+\end{frame}
+
+\begin{frame}{Appendix: lead tests for the continuous treatments}
+\fig[0.55]{generated/assets/pretrends_leads__main.pdf}
+\end{frame}
+
+\begin{frame}{Appendix: TWFE across the four treatments}
+\fig[0.55]{generated/assets/forest_a2_treatment_grid__main.pdf}
+\end{frame}
+
+\begin{frame}{Appendix: dropping nearby comparison counties, first expansion}
+\fig[0.55]{generated/assets/forest_donut_first_expansion__main.pdf}
+\end{frame}
+
+\begin{frame}{Appendix: large dairies against other animals}
+\fig[0.55]{generated/assets/forest_species_dairy__main.pdf}
+\src{Beef, hogs and chickens are in the species results (script4a, 2026-10-25); the robustness table shows them next to dairy.}
+\end{frame}
+
+\begin{frame}{Appendix: crime outcomes, TWFE event studies}
+\fig[0.55]{generated/assets/event_study_twfe__backup.pdf}
+\src{Arrests, not offences. Pre-trend tests fail for the assault family and the NIBRS total (script4b leads); not part of the headline.}
+\end{frame}
+
+\begin{frame}{Appendix: slaughterhouses on their own, five treatment formats}
+\fig[0.55]{generated/assets/forest_slaughterhouse__main.pdf}
+\end{frame}
+
+\end{document}

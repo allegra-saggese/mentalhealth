@@ -7,6 +7,8 @@ Created Wed Aug 13 2025 (Part 1); Part 2 folded in from script0g-annual-controls
 Inputs : Data/raw/mental (CHR), Data/raw/cdc (CDC WONDER), Data/raw/annual_controls (SAIPE, LAUS, SAHIE, PEP)
 Outputs: Data/clean/{today}_mentalhealthrank_full.csv
          Data/clean/{today}_cdc_county_year_deathsofdespair.csv
+         Data/clean/{today}_cdc_behavioral_mortality_county_year.csv (when new CDC exports are present)
+         Data/clean/{today}_acs_farm_occupation_county_year.csv (when ACS exports are present)
          Data/clean/{today}_annual_controls_county_year.csv      (plus QA files in diagnostic_dir)
 Run    : python3 script0c-health-controls.py [--skip-download] [--only health|controls]
          --skip-download  use only files already cached in raw/annual_controls; no network calls
@@ -30,6 +32,11 @@ PART 1  Health pipeline (run_health):
    by year, and save merged health+mortality output (legacy filename retained).
 8) Optional extension (off by default): parse disaggregated CDC tranche files
    and write local extension outputs for future fips-year-race-sex panel work.
+9) Optional new sources: clean grouped CDC mortality exports from
+   raw/cdc/behavioral_mortality/ and ACS 5-year C24010 farming-fishing-forestry
+   occupation counts (fetched from the Census API, needs CENSUS_API_KEY, or
+   cached under raw/acs/farm_occ_workers/); each source is saved as its own
+   county-year clean file and is merged by script0f when present.
 
 Notes:
 - Optional extension is controlled by env var RUN_CDC_DISAGG_EXTENSION
@@ -70,6 +77,7 @@ script0f drops the CHR columns these series replace (CHR_REPLACED_COLS) before m
 
 import argparse
 import io
+import json
 import re
 import time
 import urllib.request
@@ -204,6 +212,271 @@ def _normalize_fips(series):
         .str.zfill(5)
     )
     return s
+
+
+def _read_grouped_cdc_exports(raw_cdc):
+    """Clean CDC WONDER query exports for the grouped mortality outcomes (D-68).
+
+    Expected raw files live in raw/cdc/behavioral_mortality/, one multi-year
+    WONDER export per measure, named cdc_<measure>.csv or cdc_<measure>.txt
+    (measure = union, suicide, drug_overdose, alcohol_induced). Each query is
+    grouped by County and Year and exports County, County Code, Year (Code),
+    Deaths, Population, and Crude Rate. WONDER's default export is tab
+    delimited with a notes footer; both delimiters are read and footer lines
+    are dropped because their County Code is not a 5-digit FIPS.
+
+    The union is its own WONDER query, so WONDER applies its suppression rule
+    (1-9 deaths) to the combined count; component series are never summed here.
+    Suppressed counts stay missing (not zero) and are flagged; with "Show Zero
+    Values" ticked in the query, county-years with no deaths appear as 0.
+    """
+    folder = os.path.join(raw_cdc, "behavioral_mortality")
+    measures = ("union", "suicide", "drug_overdose", "alcohol_induced")
+    files = {}
+    for path in sorted(glob.glob(os.path.join(folder, "cdc_*.*"))):
+        m = re.fullmatch(r"cdc_(union|suicide|drug_overdose|alcohol_induced)\.(csv|txt)", os.path.basename(path))
+        if not m:
+            continue
+        if m.group(1) in files:
+            raise ValueError(f"More than one export for measure {m.group(1)} under {folder}")
+        files[m.group(1)] = path
+    if not files:
+        print(f"Grouped CDC mortality inputs not present; expected exports under {folder}")
+        return None
+
+    parts = []
+    for measure in measures:
+        if measure not in files:
+            continue
+        path = files[measure]
+        base = os.path.basename(path)
+        with open(path, encoding="latin1") as fh:
+            sep = "\t" if "\t" in fh.readline() else ","
+        d = read_csv_with_fallback(path, sep=sep, low_memory=False, dtype=str)
+        d = clean_cols(d.copy())
+        d.columns = d.columns.str.replace(r"\s+", "_", regex=True).str.strip("_")
+        year_col = "year_code" if "year_code" in d.columns else "year"
+        required = {"county_code", "deaths", "population", "crude_rate", year_col}
+        missing = sorted(required - set(d.columns))
+        if missing:
+            raise KeyError(f"{base} missing required CDC WONDER fields: {missing}; "
+                           "group the query by County and Year")
+
+        n_raw = len(d)
+        d["fips"] = _normalize_fips(d["county_code"].astype("string").str.strip().str.replace(r"\.0$", "", regex=True))
+        d = d[d["fips"].str.fullmatch(r"\d{5}", na=False)].copy()
+        d["year"] = to_numeric_series(d[year_col]).astype("Int64")
+        deaths_raw = d["deaths"].astype("string").str.strip()
+        d[f"deaths_{measure}"] = to_numeric_series(deaths_raw).astype("Int64")
+        d[f"deaths_suppressed_{measure}"] = deaths_raw.str.contains("suppress", case=False, na=False).astype("Int64")
+        d[f"population_{measure}"] = to_numeric_series(d["population"]).astype("Int64")
+        rate_raw = d["crude_rate"].astype("string").str.strip()
+        d[f"crude_rate_{measure}_raw"] = rate_raw
+        d[f"crude_rate_{measure}"] = to_numeric_series(rate_raw.str.replace(r"\(.*?\)", "", regex=True))
+        d[f"rate_unreliable_{measure}"] = rate_raw.str.contains("unreliable", case=False, na=False).astype("Int64")
+        d = d[["fips", "year", f"deaths_{measure}", f"deaths_suppressed_{measure}", f"population_{measure}",
+               f"crude_rate_{measure}", f"crude_rate_{measure}_raw", f"rate_unreliable_{measure}"]]
+        if d["year"].isna().any():
+            raise ValueError(f"{base} has county rows without a year; group the query by County and Year")
+        if d.duplicated(["fips", "year"]).any():
+            raise ValueError(f"{base} has duplicate county-year rows; inspect the WONDER export before cleaning")
+        print(f"  {measure}: {n_raw:,} raw lines -> {len(d):,} county-years, years "
+              f"{int(d['year'].min())}-{int(d['year'].max())}, "
+              f"suppressed {int(d[f'deaths_suppressed_{measure}'].sum()):,}, "
+              f"unreliable rates {int(d[f'rate_unreliable_{measure}'].sum()):,}")
+        parts.append(d)
+
+    out = parts[0]
+    for part in parts[1:]:
+        n_before = len(out)
+        out = out.merge(part, on=["fips", "year"], how="outer", validate="one_to_one")
+        print(f"  outer merge: {n_before:,} + {len(part):,} -> {len(out):,} county-years")
+    out = out.sort_values(["fips", "year"]).reset_index(drop=True)
+    count_cols = [f"deaths_{m}" for m in measures if f"deaths_{m}" in out.columns]
+    print(f"Grouped CDC mortality cleaned: {len(out):,} county-year rows; measures={', '.join(count_cols)}")
+    return out
+
+
+ACS_YEARS = range(2009, 2024)   # release years tried; 2009 = 2005-2009, the first county-level 5-year file
+
+
+def _acs_get_json(url, tries=3):
+    """GET a Census API URL and parse the JSON; None if unavailable. Generic client name, no contact details."""
+    req = urllib.request.Request(url, headers={"User-Agent": "academic-research-client"})
+    for k in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            if k == tries - 1:
+                print(f"    ACS request failed ({type(e).__name__}): {url.split('?')[0]}")
+                return None
+            time.sleep(2)
+
+
+def _acs_pick_rows(variables):
+    """Find the C24010 total, male and female 'Farming, fishing, and forestry occupations' estimate rows by LABEL.
+
+    C24010 (sex by occupation, civilian employed population 16+) is the
+    county-level table that carries this occupation group; the detailed
+    'agricultural workers' tables are not published at county level (D-70).
+    Row numbers differ across vintages (2009 release: 029/066; 2010 onward:
+    031/067), so rows are located from each vintage's own labels. Labels are
+    split on '!!' and stripped of ':'; total = ['Estimate', 'Total']; farm row =
+    last segment equals the occupation group and the third segment is Male or
+    Female. Anything but exactly one match per role raises, listing candidates.
+    """
+    target = "farming, fishing, and forestry occupations"
+    picked, labels = {}, {}
+    cand = {"total": [], "farm_male": [], "farm_female": []}
+    for var, meta in variables.items():
+        if not (var.startswith("C24010_") and var.endswith("E")):
+            continue
+        segs = [s.strip().rstrip(":").strip() for s in meta.get("label", "").split("!!") if s.strip()]
+        if len(segs) == 2 and segs[1].lower() == "total":
+            cand["total"].append((var, meta["label"]))
+        elif len(segs) >= 3 and segs[-1].lower() == target:
+            if segs[2].lower() == "male":
+                cand["farm_male"].append((var, meta["label"]))
+            elif segs[2].lower() == "female":
+                cand["farm_female"].append((var, meta["label"]))
+    for role, found in cand.items():
+        if len(found) != 1:
+            raise KeyError(f"C24010 row for '{role}': expected exactly one label match, found {found}")
+        picked[role], labels[role] = found[0]
+    return picked, labels
+
+
+def _download_acs_c24010(raw_root):
+    """Fetch ACS 5-year C24010 county estimates and margins of error from the Census API.
+
+    Writes raw/acs/farm_occ_workers/acs5_c24010_<release_year>.csv (GEO_ID plus the
+    total, male-farm-occupation and female-farm-occupation estimate and margin
+    columns) and upserts the sidecar acs5_c24010_rows.csv recording which
+    variable and label was used for each role in each year. Cached years are
+    not re-fetched. An optional CENSUS_API_KEY in the environment is sent
+    if set. With --skip-download nothing is fetched.
+    """
+    folder = os.path.join(raw_root, "acs", "farm_occ_workers")
+    rows_path = os.path.join(folder, "acs5_c24010_rows.csv")
+    if SKIP_DOWNLOAD:
+        print("ACS C24010: --skip-download, using cached files only")
+        return
+    os.makedirs(folder, exist_ok=True)
+    rows = pd.read_csv(rows_path, dtype={"year": int}) if os.path.exists(rows_path) else \
+        pd.DataFrame(columns=["year", "role", "variable", "label"])
+    key = os.environ.get("CENSUS_API_KEY")
+    key_q = f"&key={key}" if key else ""
+    for y in ACS_YEARS:
+        dest = os.path.join(folder, f"acs5_c24010_{y}.csv")
+        if os.path.exists(dest) and (rows["year"] == y).sum() == 3:
+            continue
+        meta = _acs_get_json(f"https://api.census.gov/data/{y}/acs/acs5/groups/C24010.json")
+        if meta is None:
+            print(f"    ACS {y}: C24010 variable list unavailable; skipped")
+            continue
+        picked, labels = _acs_pick_rows(meta["variables"])
+        base_vars = [picked[k][:-1] for k in ("total", "farm_male", "farm_female")]   # C24010_xxx without E/M
+        get = ",".join(f"{v}{s}" for v in base_vars for s in ("E", "M"))
+        data = _acs_get_json(f"https://api.census.gov/data/{y}/acs/acs5?get=NAME,{get}&for=county:*{key_q}")
+        if not data:
+            print(f"    ACS {y}: county data unavailable; skipped")
+            continue
+        d = pd.DataFrame(data[1:], columns=data[0])
+        d["GEO_ID"] = "0500000US" + d["state"].str.zfill(2) + d["county"].str.zfill(3)
+        d = d[["GEO_ID", "NAME"] + [f"{v}{s}" for v in base_vars for s in ("E", "M")]]
+        d.to_csv(dest, index=False)
+        rows = rows[rows["year"] != y]
+        rows = pd.concat([rows, pd.DataFrame(
+            {"year": y, "role": list(picked), "variable": [picked[k][:-1] for k in picked],
+             "label": [labels[k] for k in picked]})], ignore_index=True)
+        print(f"    ACS {y}: {len(d):,} counties; rows {', '.join(f'{k}={picked[k][:-1]}' for k in picked)}")
+    rows.sort_values(["year", "role"]).to_csv(rows_path, index=False)
+
+
+def _read_acs_farm_occupation(raw_root):
+    """Clean ACS 5-year C24010 county files into a farm-occupation share panel (D-67, D-70).
+
+    Raw files (written by _download_acs_c24010 or saved by hand) are
+    acs5_c24010_<release_year>.csv, one row per county with GEO_ID and the
+    variables named in the sidecar acs5_c24010_rows.csv, which records for
+    every release year which Census variable is the total, male farming-
+    fishing-forestry and female farming-fishing-forestry row (found by label,
+    because C24010 row numbers change across vintages). Numerator: male plus
+    female workers in Farming, fishing, and forestry occupations; denominator:
+    employed civilians aged 16 and over. Release year = last year of the
+    five-year window, so adjacent years overlap by four years.
+    """
+    folder = os.path.join(raw_root, "acs", "farm_occ_workers")
+    rows_path = os.path.join(folder, "acs5_c24010_rows.csv")
+    files = sorted(glob.glob(os.path.join(folder, "acs5_c24010_20??.csv")))
+    if not files or not os.path.exists(rows_path):
+        print(f"ACS farm-occupation inputs not present; expected files and acs5_c24010_rows.csv under {folder}")
+        return None
+    rows = pd.read_csv(rows_path, dtype={"year": int})
+
+    parts = []
+    seen_years = set()
+    for path in files:
+        base = os.path.basename(path)
+        m = re.fullmatch(r"acs5_c24010_(20\d{2})\.csv", base)
+        if not m:
+            continue
+        release_year = int(m.group(1))
+        if release_year in seen_years:
+            raise ValueError(f"Duplicate ACS C24010 export for {release_year}: {base}")
+        seen_years.add(release_year)
+
+        # Variable codes for this vintage, from the sidecar (never hard-coded).
+        r = rows[rows["year"] == release_year].set_index("role")["variable"].to_dict()
+        for role in ("total", "farm_male", "farm_female"):
+            if role not in r:
+                raise KeyError(f"acs5_c24010_rows.csv has no '{role}' row for {release_year}")
+        d = read_csv_with_fallback(path, dtype=str, low_memory=False)
+        needed = {"GEO_ID"} | {f"{r[k]}{s}" for k in r for s in ("E", "M")}
+        missing = sorted(needed - set(d.columns))
+        if missing:
+            raise KeyError(f"{base} missing ACS C24010 fields: {missing}")
+
+        # GEO_ID looks like 0500000US01001; the county FIPS is the last five digits.
+        fips = d["GEO_ID"].astype("string").str.extract(r"US(\d{5})$", expand=False)
+
+        d["fips"] = _normalize_fips(fips)
+        d = d[d["fips"].str.fullmatch(r"\d{5}", na=False)].copy()
+        d["year"] = release_year
+        d["period_start"] = release_year - 4
+        d["period_end"] = release_year
+        # The Census API codes "not available" as large negative sentinels (e.g. -666666666); a count or
+        # margin of error is never negative, so negatives become missing rather than entering the share.
+        def num(col):
+            x = to_numeric_series(d[col])
+            return x.where(x >= 0)
+        d["employed_civilian_16plus"] = num(f"{r['total']}E")
+        d["employed_civilian_16plus_moe"] = num(f"{r['total']}M")
+        d["farm_occ_male"] = num(f"{r['farm_male']}E")
+        d["farm_occ_female"] = num(f"{r['farm_female']}E")
+        d["farm_occ_workers"] = d[["farm_occ_male", "farm_occ_female"]].sum(axis=1, min_count=2)
+        male_moe = num(f"{r['farm_male']}M")
+        female_moe = num(f"{r['farm_female']}M")
+        d["farm_occ_moe"] = np.sqrt(male_moe.pow(2) + female_moe.pow(2))
+        d["farm_occ_share"] = (
+            d["farm_occ_workers"] / d["employed_civilian_16plus"]
+        ).where(d["employed_civilian_16plus"] > 0)
+        keep = ["fips", "year", "period_start", "period_end", "farm_occ_workers",
+                "farm_occ_male", "farm_occ_female", "farm_occ_moe",
+                "employed_civilian_16plus", "employed_civilian_16plus_moe", "farm_occ_share"]
+        d = d[keep]
+        if d.duplicated(["fips", "year"]).any():
+            raise ValueError(f"{base} has duplicate county rows")
+        parts.append(d)
+
+    if not parts:
+        print(f"No recognized ACS C24010 exports found under {folder}")
+        return None
+    out = pd.concat(parts, ignore_index=True).sort_values(["fips", "year"]).reset_index(drop=True)
+    print(f"ACS farm-occupation workers cleaned: {len(out):,} county-period rows; "
+          f"release years={out['year'].min()}–{out['year'].max()}")
+    return out
 
 
 # =============================================================================
@@ -492,6 +765,27 @@ def run_health():
     cdc_key_check.to_csv(cdc_key_out, index=False)
     print("Saved QA:", cdc_key_out)
 
+    # ---------- PART 2B: GROUPED CDC MORTALITY + ACS FARM OCCUPATION ----------
+    # These are separate outcomes/inputs from the legacy deaths-of-despair series.
+    # The CDC union file must be a WONDER query with all selected causes combined;
+    # do not sum code-level files after their individual counts have been suppressed.
+    grouped_mortality = _read_grouped_cdc_exports(raw_cdc)
+    if grouped_mortality is not None:
+        grouped_out = os.path.join(outf, f"{today_str}_cdc_behavioral_mortality_county_year.csv")
+        grouped_mortality.to_csv(grouped_out, index=False)
+        print("Saved:", grouped_out)
+        _add_fill("cdc_behavioral_mortality_final", grouped_mortality)
+        _add_key_qa("cdc_behavioral_mortality_final", grouped_mortality, ["fips", "year"])
+
+    _download_acs_c24010(inf)
+    acs_farm_occupation = _read_acs_farm_occupation(inf)
+    if acs_farm_occupation is not None:
+        acs_out = os.path.join(outf, f"{today_str}_acs_farm_occupation_county_year.csv")
+        acs_farm_occupation.to_csv(acs_out, index=False)
+        print("Saved:", acs_out)
+        _add_fill("acs_farm_occupation_final", acs_farm_occupation)
+        _add_key_qa("acs_farm_occupation_final", acs_farm_occupation, ["fips", "year"])
+
 
     # ---------- PART 3: Merge health + county CDC ----------
     for d in [mh_combined, cdc_panel]:
@@ -667,7 +961,7 @@ def run_health():
 # =============================================================================
 RAW   = os.path.join(db_data, "raw", "annual_controls")
 YEARS = range(2000, 2024)
-UA    = "Mozilla/5.0 (academic research; absagges@ucsc.edu)"
+UA    = "Mozilla/5.0 (academic research client)"
 SKIP_DOWNLOAD = False   # set by --skip-download in main(): fetch() then serves cached files only
 
 def fetch(url, dest, tries=3):

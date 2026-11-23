@@ -34,6 +34,12 @@ MERGE_DESCRIPTORS = {
     "mentalhealthrank_full",
     "population_full",
 }
+OPTIONAL_MERGE_DESCRIPTORS = {
+    # Added sources are merged when script0c has produced their clean files;
+    # keeping them optional preserves the established build before raw exports arrive.
+    "cdc_behavioral_mortality_county_year",
+    "acs_farm_occupation_county_year",
+}
 RURAL_DESCRIPTOR_HINT = "rural-key"
 
 # --- CHR columns replaced by correctly-dated annual sources (script0c) --------
@@ -316,6 +322,11 @@ target_descriptors = {BASE_DESCRIPTOR, *MERGE_DESCRIPTORS}
 missing = sorted([d for d in target_descriptors if d not in latest])
 if missing:
     raise RuntimeError(f"Missing required clean descriptors: {missing}")
+active_optional_descriptors = OPTIONAL_MERGE_DESCRIPTORS.intersection(latest)
+target_descriptors.update(active_optional_descriptors)
+skipped_optional_descriptors = OPTIONAL_MERGE_DESCRIPTORS - active_optional_descriptors
+for d in sorted(skipped_optional_descriptors):
+    print(f"Optional source not present; panel will omit it: {d}")
 
 print("Descriptors included in merge:")
 for d in sorted(target_descriptors):
@@ -434,7 +445,7 @@ print(f"  check (D-53): census-year species counts equal the compact file or 0 (
 
 
 # Merge remaining selected datasets on top of base keys
-for descriptor in sorted(MERGE_DESCRIPTORS):
+for descriptor in sorted(MERGE_DESCRIPTORS | active_optional_descriptors):
     path = latest[descriptor]
     part = _read_filter_reduce(path, descriptor, allowed_keys)
     if part is None:
@@ -799,13 +810,18 @@ _drop.update(
     if c in merged_all.columns
 )
 
-# 7. CDC metadata — keep: deaths_cdc_, crude_rate_cdc_, pct_of_total_deaths_raw_cdc_,
-#    cdc_in_query, deaths_is_zero, crude_rate_from_census_pop, deaths_per_10k_census_pop
+# 7. CDC metadata — keep reported mortality counts/rates and missingness indicators.
 _CDC_SFX = "_cdc_county_year_deathsofdespair"
 _CDC_KEEP_PFX = ("deaths_cdc", "crude_rate_cdc", "pct_of_total_deaths_raw_cdc")
 _drop.update(
     c for c in merged_all.columns
     if c.endswith(_CDC_SFX) and not any(c.startswith(p) for p in _CDC_KEEP_PFX)
+)
+_CDC_GROUPED_SFX = "_cdc_behavioral_mortality_county_year"
+_CDC_GROUPED_KEEP_PFX = ("deaths_", "population_", "crude_rate_", "rate_unreliable_")
+_drop.update(
+    c for c in merged_all.columns
+    if c.endswith(_CDC_GROUPED_SFX) and not any(c.startswith(p) for p in _CDC_GROUPED_KEEP_PFX)
 )
 
 # 8. CHR raw_value columns for variables now expressed as _per100k
@@ -869,6 +885,8 @@ def _strip_source_suffixes(name: str) -> str:
     # CHR versions of these ten are dropped above (CHR_REPLACED_COLS), so there
     # is no collision -- these simply take over the names downstream code uses.
     n = n.replace("_annual_controls_county_year", "")
+    n = n.replace("_acs_farm_occupation_county_year", "")
+    n = n.replace("_cdc_behavioral_mortality_county_year", "")
     n = n.replace("_cafo_ops_by_size_compact", "_cafo")
     # Fix double-cafo: any_large_cafo_cafo → any_large_cafo
     n = n.replace("_cafo_cafo", "_cafo")
