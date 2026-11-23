@@ -18,6 +18,8 @@ Run order:
     python3 script4h-gp.py --only summary
 R needs the NNRCM package built from a scratch copy (no Imports beyond spNNGP, RcppParallel, fields; see the plan). Set NNRCM_LIB to its library folder.
 
+Reading the numbers (Grenier 2021, Ch. 3): covariance sigma^2 (Matern(d; nu) + xi^2 I); phi = nu is a length scale, exp(-d/nu) at smoothness 0.5, so `range_km` is the
+e-folding distance (3x it is the practical range); xi is the nugget as a multiple of sigma^2, spatial share of variance = 1/(1+xi).
 Limits: Alaska and Hawaii are left out (the Albers projection is for the contiguous states). County residuals are areal and the CDC series are model
 estimates (OUTCOME-SMOOTHING note), so a long fitted range partly reflects the smoothing in the data, not only real spatial dependence.
 """
