@@ -1,0 +1,140 @@
+% deck_narrative.tex -- the short narrative deck (11 frames): question, motivation, approach, results, interpretation, limitations, extensions.
+% Built 2026-11-23 from deck_headline.tex (kept unchanged). Exhibits: generated/headline__*.tex and generated/assets/* (script4o-headline-deck.py,
+% script4f-figures.py); the spillover numbers quote generated/robust__spill_durbin_boot.tex (script4g durbin, 2026-10-29).
+% Compile: xelatex deck_narrative.tex (Gotham theme).
+\documentclass[aspectratio=169]{beamer}
+\usetheme{gotham}
+\gothamset{colorset=anthracite}
+\gothamset{background=transparent}
+\gothamset{progressbar position=foot, progressbar style=rounded box,
+           progressbar advancement=brlt, numbering=totalframenumber}
+\boolfalse{sectionContent}
+\setbeamerfont{itemize/enumerate body}{size=\small}
+\setbeamerfont{itemize/enumerate subbody}{size=\footnotesize}
+
+\usepackage{booktabs,array,adjustbox,multirow,graphicx,amsmath,amssymb}
+
+\newcommand{\fig}[2][0.42]{\begin{center}\includegraphics[width=\textwidth,height=#1\textheight,keepaspectratio]{#2}\end{center}}
+\newcommand{\figcols}[2]{\begin{columns}[T]\begin{column}{0.64\textwidth}\includegraphics[width=\textwidth]{#1}\end{column}\begin{column}{0.33\textwidth}\setbeamerfont{itemize/enumerate body}{size=\scriptsize}#2\end{column}\end{columns}}
+\newcommand{\src}[1]{{\tiny #1\par}}
+
+\defbeamertemplate{title page}{}{\centering{\huge \inserttitle}\\[0.6em]{\large \insertsubtitle}\\[1em]{\large \insertauthor}\\[1em]{\insertdate}}
+\title{Do large dairies raise poor mental health days?}
+\subtitle{Question, evidence, and what comes next}
+\author{Allegra Saggese for Professors Galina Hale, Hanna Kim}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}\titlepage\end{frame}
+
+% --------------------------------------------------------------------- 1
+\begin{frame}{Research question: do large dairies worsen mental health in rural counties?}
+\begin{itemize}\setlength\itemsep{7pt}
+  \item[] \textbf{Question.} When a rural U.S.\ county gets its first large dairy operation, or its first expansion of large dairies, do residents report more poor mental health days?
+  \item[] \textbf{Estimand.} The average effect on treated counties, in days per month, against counties not yet treated or never treated.
+  \item[] \textbf{Identifying assumption.} Without the dairy, treated and comparison counties would have moved together (parallel trends), holding fixed eight pre-committed county characteristics.
+  \item[] \textbf{Second question, tested separately.} Do slaughterhouse plants raise distress in the counties that host them?
+\end{itemize}
+\end{frame}
+
+% --------------------------------------------------------------------- 2
+\begin{frame}{Motivation: rural distress is rising and industrial livestock is concentrating}
+\begin{itemize}\setlength\itemsep{7pt}
+  \item \textbf{Deaths of despair.} Mortality from suicide, drugs and alcohol has risen among working-age Americans (Case and Deaton 2015).
+  \item \textbf{Industrial animal agriculture.} Slaughterhouse employment has been linked to higher local crime (Fitzgerald, Kalof and Dietz 2009).
+  \item \textbf{The gap.} The evidence is small-scale or cross-sectional. There is no county-level causal estimate for large livestock operations and mental health.
+  \item \textbf{Possible channels, not tested here.} Environmental stress, dependence on one industry, farm consolidation.
+\end{itemize}
+\end{frame}
+
+% --------------------------------------------------------------------- 3
+\begin{frame}{Data: a rural county-year panel with dairy events at three census waves}
+\input{generated/headline__data_events.tex}
+\begin{itemize}\footnotesize\setlength\itemsep{1pt}
+  \item Outcome: poor mental health days per month, 2010--2023, 2,745 rural counties.
+  \item Dairy counts come from the Census of Agriculture every five years; slaughter plants from FSIS, 2017--2023 only.
+\end{itemize}
+\end{frame}
+
+% --------------------------------------------------------------------- 4
+\begin{frame}{Empirical approach: staggered difference-in-differences, two estimators}
+\footnotesize
+\textbf{Two-way fixed effects (TWFE):} $y_{it}=\alpha_i+\delta_t+\beta D_{it}+X_{it}'\gamma+\varepsilon_{it}$, county ($\alpha_i$) and year ($\delta_t$) effects, standard errors clustered by state.\par
+\vspace{4pt}
+\textbf{Why not stop there:} counties are treated at different times, so TWFE also compares newly treated counties with counties treated earlier.\par
+\vspace{4pt}
+\textbf{Callaway--Sant'Anna (CS):} for each first-treated cohort $g$ and year $t$,
+\[ ATT(g,t)=E[\,Y_t-Y_{g-1}\mid G=g\,]-E[\,Y_t-Y_{g-1}\mid \text{not yet treated}\,], \]
+adjusted for the eight controls, averaged over cohorts and years; standard errors by bootstrap over states.\par
+\vspace{4pt}
+\textbf{Treatment:} first expansion, the first census wave at which a county's count of large dairies rises.
+\end{frame}
+
+% --------------------------------------------------------------------- 5
+\begin{frame}{Result 1: TWFE finds 0.10 more poor days; staggered-timing estimators find a third of that}
+\figcols{generated/assets/forest_triangulation_first_expansion__main.pdf}{
+\begin{itemize}\setlength\itemsep{4pt}
+  \item Poor MH Days (left panel): TWFE 0.104 days (SE 0.043).
+  \item Callaway--Sant'Anna 0.037 (SE 0.026), not significant.
+  \item Sun--Abraham and de Chaisemartin--D'Haultfoeuille agree with Callaway--Sant'Anna; imputation and stacked DiD sit near TWFE.
+\end{itemize}}
+\end{frame}
+
+% --------------------------------------------------------------------- 6
+\begin{frame}{Result 2: the association is specific to large dairies and stable to adjustments}
+\input{generated/headline__robust_spec.tex}
+\begin{itemize}\footnotesize\setlength\itemsep{1pt}
+  \item TWFE is unchanged by region-by-year effects (0.102, $p$ = 0.013) and by Conley spatial standard errors to 500 km ($p$ = 0.002).
+\end{itemize}
+\end{frame}
+
+% --------------------------------------------------------------------- 7
+\begin{frame}{Result 3: pre-trends are not flat and the estimate does not survive multiple testing}
+\figcols{generated/assets/event_study_cs__main.pdf}{
+\begin{itemize}\setlength\itemsep{4pt}
+  \item Callaway--Sant'Anna: 6 of 11 pre-period estimates are individually significant.
+  \item TWFE leads: the joint test does not reject ($p$ = 0.43).
+  \item Holm correction over the 8 confirmatory tests: $p$ = 0.16.
+  \item Possible reason, not tested: a census-wave ``first expansion'' may be up to five years old.
+\end{itemize}}
+\end{frame}
+
+% --------------------------------------------------------------------- 8
+\begin{frame}{Result 4: no slaughterhouse design shows the hypothesised effect}
+\input{generated/headline__fsis.tex}
+\end{frame}
+
+% --------------------------------------------------------------------- 9
+\begin{frame}{Interpretation: a dairy-specific association, not yet a causal effect}
+\input{generated/headline__scorecard.tex}
+\end{frame}
+
+% --------------------------------------------------------------------- 10
+\begin{frame}{Limitations: coarse timing, a changing outcome measure, and unidentified spillovers}
+\begin{itemize}\setlength\itemsep{6pt}
+  \item \textbf{Dairy timing is coarse.} A county ``first expands'' in a census year even if the expansion happened in the five years before it.
+  \item \textbf{The outcome changes method.} Survey-based before 2016, CDC model-based after, with a second change in 2021.
+  \item \textbf{Slaughterhouses are observed only 2017--2023,} so most plant-entry cohorts have one to three pre-years.
+  \item \textbf{Spillovers to neighbouring counties are not identified.} The spatial Durbin model lacks the power to detect them: for first expansion the spillover estimate is 0.058 days with a bootstrap standard error of 0.151. It is also a TWFE-type model, not robust to staggered timing.
+\end{itemize}
+\src{Spatial Durbin: script4g durbin, 2026-10-29, panel 2026-10-25, state-block wild bootstrap, 499 draws.}
+\end{frame}
+
+% --------------------------------------------------------------------- 11
+\begin{frame}{Extensions: measure spillovers with distance bands; get finer dairy timing}
+\footnotesize
+\textbf{Spillovers by distance band (planned, not yet run).} Replace the spatial model with a regression that asks directly whether counties near an event change:
+\[ y_{it}=\alpha_i+\delta_t+\beta D_{it}+\sum_{b=1}^{3}\theta_b\,N^{b}_{it}+X_{it}'\gamma+\varepsilon_{it}, \]
+$N^{b}_{it}=1$ if another county within distance band $b$ of county $i$ has had its first expansion by year $t$.\par
+\vspace{3pt}
+\begin{itemize}\footnotesize\setlength\itemsep{2pt}
+  \item $\theta_1,\theta_2,\theta_3$: change in poor mental health days in counties in the nearest, middle and farthest band. A spillover should decay with distance.
+  \item Counties beyond the farthest band are the comparison group and are assumed unaffected.
+  \item The three band cut-offs are fixed before any result is read.
+\end{itemize}
+\vspace{3pt}
+\textbf{Other extensions.} Finer timing of dairy expansions (for example state permit data); an outcome measured the same way across years; worker-exposure data for the slaughterhouse question.
+\end{frame}
+
+\end{document}
